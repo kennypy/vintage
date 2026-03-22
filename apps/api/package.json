@@ -8,7 +8,7 @@
     "start": "node dist/main",
     "start:prod": "node dist/main",
     "lint": "eslint .",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "prisma:generate": "prisma generate",

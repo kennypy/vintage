@@ -30,46 +30,69 @@ packages/shared/ — Shared types, utils, validation
 
 ## Development Workflow
 
-### Before Pushing Code to GitHub
-You MUST run the following checks before every `git push`. Do not push code that fails any of these steps.
+### MANDATORY: Pre-Push Checklist
 
-1. **Run lint across all packages:**
-   ```bash
-   npx turbo lint
-   ```
-   All packages must pass with zero errors. Fix any errors before proceeding.
+**Every single `git push` MUST pass all of the following checks. No exceptions. Run them in order and fix any failures before pushing.**
 
-2. **Build shared packages first (if shared types/validation changed):**
-   ```bash
-   npx turbo build --filter=@vintage/shared
-   ```
+```bash
+# 1. Build shared packages (types, constants, validation)
+npx turbo build --filter=@vintage/shared
 
-3. **Type-check the API (if backend code changed):**
-   ```bash
-   npx tsc -p apps/api/tsconfig.json --noEmit
-   ```
+# 2. Generate Prisma client (if schema changed)
+cd apps/api && npx prisma generate && cd ../..
 
-4. **Run tests (if any exist):**
-   ```bash
-   npx turbo test
-   ```
+# 3. Lint ALL packages — must exit 0 with no errors
+npx turbo lint
 
-5. **Only then push:**
-   ```bash
-   git push -u origin <branch-name>
-   ```
+# 4. Type-check API — must exit 0
+npx tsc -p apps/api/tsconfig.json --noEmit
+
+# 5. Run ALL tests — must exit 0
+npx turbo test
+
+# 6. Build API — must exit 0
+npx turbo build --filter=@vintage/api
+
+# 7. Build Web — must exit 0
+npx turbo build --filter=@vintage/web
+
+# 8. Only after ALL above pass, push
+git push -u origin <branch-name>
+```
+
+If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use `--no-verify`. Do not force push over failures.
+
+### Common Failure Causes and Fixes
+
+| Failure | Cause | Fix |
+|---------|-------|-----|
+| `ESLint couldn't find an eslint.config` | Missing config | Every package needs `eslint.config.mjs` |
+| `--ext` flag error | ESLint v9 removed `--ext` | Lint scripts must use `eslint .` not `eslint . --ext .ts` |
+| `No tests found, exiting with code 1` | Jest has no test files | Use `jest --passWithNoTests` in package.json test script |
+| `Cannot find module '@vintage/shared'` | Shared not built | Run `npx turbo build --filter=@vintage/shared` first |
+| `Cannot find module '@prisma/client'` | Prisma not generated | Run `npx prisma generate` in `apps/api/` |
+| Unused variable error | ESLint strict mode | Prefix with `_` (e.g., `_id`, `_body`, `_req`) |
+| Import error for `.css` or assets | TypeScript strict | Ensure `next-env.d.ts` exists for web, proper tsconfig for each app |
 
 ### ESLint Configuration
-- All packages use ESLint v9 flat config format (`eslint.config.mjs`)
-- TypeScript files are linted with `@typescript-eslint/eslint-plugin`
-- Unused variables must be prefixed with `_` (e.g., `_id`, `_body`)
-- Lint scripts in all package.json files use `eslint .` (no `--ext` flag in v9)
+- All packages use ESLint v9 **flat config** format (`eslint.config.mjs`)
+- TypeScript linted with `@typescript-eslint/eslint-plugin` + `@typescript-eslint/parser`
+- Unused variables/params must be prefixed with `_` (e.g., `_id`, `_body`)
+- All lint scripts in package.json use `eslint .` — never use deprecated `--ext` flag
+- JS config files (postcss.config.js, etc.) are ignored in web eslint config
+
+### Test Configuration
+- All test scripts use `jest --passWithNoTests` to avoid failing when no test files exist yet
+- API tests use `ts-jest` with `testRegex: .*\.spec\.ts$`
+- Mobile tests use `jest-expo` preset
+- Web and shared use echo placeholders until tests are added
 
 ### Commit Hygiene
-- Run `npx turbo lint` before committing
+- Run the full pre-push checklist above before every commit that will be pushed
 - Do not commit code with lint errors
-- Warnings should be addressed but do not block commits
-- Never commit `.env` files, secrets, or credentials
+- Fix warnings — they should not accumulate
+- Never commit `.env` files, secrets, API keys, or credentials
+- Never commit `node_modules/`, `.next/`, `dist/`, or `.expo/`
 
 ---
 

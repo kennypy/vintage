@@ -9,7 +9,7 @@
     "ios": "expo start --ios",
     "build": "echo 'Use EAS Build for production builds'",
     "lint": "eslint .",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.0.0",
