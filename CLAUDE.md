@@ -28,6 +28,51 @@ packages/shared/ — Shared types, utils, validation
 
 ---
 
+## Development Workflow
+
+### Before Pushing Code to GitHub
+You MUST run the following checks before every `git push`. Do not push code that fails any of these steps.
+
+1. **Run lint across all packages:**
+   ```bash
+   npx turbo lint
+   ```
+   All packages must pass with zero errors. Fix any errors before proceeding.
+
+2. **Build shared packages first (if shared types/validation changed):**
+   ```bash
+   npx turbo build --filter=@vintage/shared
+   ```
+
+3. **Type-check the API (if backend code changed):**
+   ```bash
+   npx tsc -p apps/api/tsconfig.json --noEmit
+   ```
+
+4. **Run tests (if any exist):**
+   ```bash
+   npx turbo test
+   ```
+
+5. **Only then push:**
+   ```bash
+   git push -u origin <branch-name>
+   ```
+
+### ESLint Configuration
+- All packages use ESLint v9 flat config format (`eslint.config.mjs`)
+- TypeScript files are linted with `@typescript-eslint/eslint-plugin`
+- Unused variables must be prefixed with `_` (e.g., `_id`, `_body`)
+- Lint scripts in all package.json files use `eslint .` (no `--ext` flag in v9)
+
+### Commit Hygiene
+- Run `npx turbo lint` before committing
+- Do not commit code with lint errors
+- Warnings should be addressed but do not block commits
+- Never commit `.env` files, secrets, or credentials
+
+---
+
 ## Security Standards
 
 All code changes MUST comply with the following security standards. These are mandatory, not optional.

@@ -10,7 +10,7 @@ export class UsersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get user profile' })
-  getProfile(@Param('id') id: string) {
+  getProfile(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 
@@ -18,13 +18,13 @@ export class UsersController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update user profile (avatar, bio, phone)' })
-  updateProfile(@Param('id') id: string, @Body() body: any) {
+  updateProfile(@Param('id') _id: string, @Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Get(':id/listings')
   @ApiOperation({ summary: "Get user's listings" })
-  getUserListings(@Param('id') id: string) {
+  getUserListings(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }

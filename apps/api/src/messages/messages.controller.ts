@@ -18,13 +18,13 @@ export class MessagesController {
 
   @Get('conversations/:id/messages')
   @ApiOperation({ summary: 'Get messages in conversation' })
-  getMessages(@Param('id') id: string) {
+  getMessages(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 
   @Post('conversations/:id/messages')
   @ApiOperation({ summary: 'Send message in conversation' })
-  sendMessage(@Param('id') id: string, @Body() body: any) {
+  sendMessage(@Param('id') _id: string, @Body() _body: any) {
     return { message: 'TODO' };
   }
 }

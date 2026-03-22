@@ -12,19 +12,19 @@ export class ListingsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Create a new listing' })
-  create(@Body() body: any) {
+  create(@Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Get()
   @ApiOperation({ summary: 'Search/browse listings with filters' })
-  findAll(@Query() query: any) {
+  findAll(@Query() _query: any) {
     return { message: 'TODO' };
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get listing detail' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 
@@ -32,7 +32,7 @@ export class ListingsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update listing' })
-  update(@Param('id') id: string, @Body() body: any) {
+  update(@Param('id') _id: string, @Body() _body: any) {
     return { message: 'TODO' };
   }
 
@@ -40,7 +40,7 @@ export class ListingsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Soft delete listing' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }

@@ -18,7 +18,7 @@ export class NotificationsController {
 
   @Patch(':id/read')
   @ApiOperation({ summary: 'Mark notification as read' })
-  markAsRead(@Param('id') id: string) {
+  markAsRead(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }

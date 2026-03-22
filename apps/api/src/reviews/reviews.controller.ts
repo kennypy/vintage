@@ -12,13 +12,13 @@ export class ReviewsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Create review for order' })
-  create(@Body() body: any) {
+  create(@Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Get('users/:id/reviews')
   @ApiOperation({ summary: "Get user's reviews" })
-  getUserReviews(@Param('id') id: string) {
+  getUserReviews(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }

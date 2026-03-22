@@ -24,7 +24,7 @@ export class WalletController {
 
   @Post('payout')
   @ApiOperation({ summary: 'Request payout' })
-  requestPayout(@Body() body: any) {
+  requestPayout(@Body() _body: any) {
     return { message: 'TODO' };
   }
 }

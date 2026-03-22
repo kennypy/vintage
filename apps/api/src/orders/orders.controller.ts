@@ -12,31 +12,31 @@ export class OrdersController {
 
   @Post()
   @ApiOperation({ summary: 'Create order from listing' })
-  create(@Body() body: any) {
+  create(@Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Get()
   @ApiOperation({ summary: "List user's orders as buyer/seller" })
-  findAll(@Query() query: any) {
+  findAll(@Query() _query: any) {
     return { message: 'TODO' };
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get order detail' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 
   @Patch(':id/ship')
   @ApiOperation({ summary: 'Mark order as shipped' })
-  ship(@Param('id') id: string, @Body() body: any) {
+  ship(@Param('id') _id: string, @Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Patch(':id/confirm')
   @ApiOperation({ summary: 'Buyer confirms receipt' })
-  confirm(@Param('id') id: string) {
+  confirm(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }

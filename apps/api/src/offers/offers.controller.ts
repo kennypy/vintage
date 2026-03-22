@@ -12,19 +12,19 @@ export class OffersController {
 
   @Post()
   @ApiOperation({ summary: 'Make offer on listing' })
-  create(@Body() body: any) {
+  create(@Body() _body: any) {
     return { message: 'TODO' };
   }
 
   @Patch(':id/accept')
   @ApiOperation({ summary: 'Accept offer' })
-  accept(@Param('id') id: string) {
+  accept(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 
   @Patch(':id/reject')
   @ApiOperation({ summary: 'Reject offer' })
-  reject(@Param('id') id: string) {
+  reject(@Param('id') _id: string) {
     return { message: 'TODO' };
   }
 }
