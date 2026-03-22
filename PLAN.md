@@ -207,8 +207,8 @@
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| **Frontend Web** | Next.js 14+ (App Router, TypeScript) | SSR for SEO, React ecosystem, mobile-first |
-| **Mobile Apps** | React Native (Expo) | Code sharing with web, large community |
+| **Mobile Apps (P1)** | React Native (Expo) + EAS Build | PRIMARY platform — iOS + Android, OTA updates |
+| **Frontend Web (P2)** | Next.js 14+ (App Router, TypeScript) | SSR for SEO, secondary to mobile |
 | **Backend API** | Node.js + NestJS (TypeScript) | Type-safe, modular, scalable |
 | **Database** | PostgreSQL + Prisma ORM | Relational for marketplace data, great migrations |
 | **Cache** | Redis | Sessions, rate limiting, real-time features |
@@ -217,7 +217,7 @@
 | **Image Storage** | AWS S3 (or Cloudflare R2) | Scalable image hosting |
 | **Image Processing** | Sharp (Node.js) | Resize, optimize listing photos |
 | **Auth** | NextAuth.js + JWT | Social login, email/password, CPF-based |
-| **Payments** | Mercado Pago SDK (or PagSeguro) | PIX, cards, boleto, installments |
+| **Payments** | Mercado Pago SDK (or PagSeguro) | **PIX (primary)**, cards w/ installments, boleto |
 | **Shipping** | Correios API + Jadlog API | Label generation, tracking, rates |
 | **Email** | SendGrid or Amazon SES | Transactional emails |
 | **Push Notifications** | Firebase Cloud Messaging | Mobile push |
@@ -277,16 +277,22 @@ PriceDropAlert { id, listing_id→Listing, user_id→User, original_price_brl, n
 
 ## Part E: Implementation Phases
 
-### Phase 1 — MVP (Weeks 1-8)
+### Phase 1 — MVP (Weeks 1-10) — MOBILE-FIRST
+
+> **Priority**: Mobile apps (iOS + Android) are the PRIMARY platform. Web is secondary.
+> Brazilian users are overwhelmingly mobile-first (87% of internet access via mobile).
+> The app store listing is the main acquisition channel.
 
 **1.1 Project Setup (Week 1)**
-- [ ] Initialize monorepo (Turborepo: `apps/web`, `apps/api`, `packages/shared`)
-- [ ] Set up Next.js frontend with Tailwind CSS
-- [ ] Set up NestJS backend with Prisma + PostgreSQL
+- [ ] Initialize monorepo (Turborepo: `apps/mobile`, `apps/web`, `apps/api`, `packages/shared`)
+- [ ] Set up **React Native (Expo)** for iOS + Android apps (`apps/mobile`)
+- [ ] Set up Next.js frontend with Tailwind CSS (`apps/web` — secondary)
+- [ ] Set up NestJS backend with Prisma + PostgreSQL (`apps/api`)
 - [ ] Set up Docker Compose for local dev (Postgres, Redis, Meilisearch)
 - [ ] Configure ESLint, Prettier, TypeScript strict mode
-- [ ] Set up CI/CD pipeline (GitHub Actions: lint, test, build)
+- [ ] Set up CI/CD pipeline (GitHub Actions: lint, test, build + EAS Build for mobile)
 - [ ] Configure environment variables and secrets management
+- [ ] Set up Expo EAS for mobile builds and OTA updates
 
 **1.2 Auth & User Profiles (Week 2)**
 - [ ] Email/password registration with CPF validation
@@ -314,15 +320,22 @@ PriceDropAlert { id, listing_id→Listing, user_id→User, original_price_brl, n
 - [ ] Infinite scroll / pagination
 - [ ] Homepage feed (personalized later)
 
-**1.5 Buying Flow (Weeks 4-5)**
+**1.5 Buying Flow & PIX Pay (Weeks 4-5)**
 - [ ] "Comprar agora" (Buy now) button
 - [ ] Checkout page with address selection
 - [ ] Shipping rate calculation (Correios API by CEP + weight)
 - [ ] Buyer Protection fee calculation and display
-- [ ] Payment integration (Mercado Pago: PIX, credit card, boleto)
-- [ ] Credit card installments (parcelamento up to 12x)
+- [ ] **PIX payment integration (PRIMARY — instant, zero-fee, 153M+ users)**
+  - [ ] PIX QR code generation at checkout
+  - [ ] PIX copy-and-paste code (Pix Copia e Cola)
+  - [ ] Real-time payment confirmation via webhook
+  - [ ] PIX refund flow for disputes/cancellations
+- [ ] Credit card with installments (parcelamento up to 12x)
+- [ ] Boleto bancário (for unbanked users)
+- [ ] Payment gateway: Mercado Pago SDK (supports all above)
 - [ ] Order creation and confirmation
 - [ ] Escrow: hold funds until buyer confirms
+- [ ] **PIX Payout to sellers** (instant withdrawal from wallet via PIX key)
 
 **1.6 Shipping (Weeks 5-6)**
 - [ ] Correios API integration (rate calculation + label generation)
@@ -358,11 +371,28 @@ PriceDropAlert { id, listing_id→Listing, user_id→User, original_price_brl, n
 - [ ] Display on seller profile
 - [ ] Average rating calculation
 
-**1.11 MVP Polish (Week 8)**
-- [ ] Responsive mobile-first design
+**1.11 Mobile App Core (Weeks 8-9)**
+- [ ] React Native (Expo) app with all core screens:
+  - [ ] Home feed / discovery
+  - [ ] Search with filters
+  - [ ] Listing detail page
+  - [ ] Create listing (camera integration for photos)
+  - [ ] Checkout with PIX QR code, credit card, boleto
+  - [ ] Order tracking
+  - [ ] Messaging (real-time)
+  - [ ] User profile & seller storefront
+  - [ ] Wallet & payout management
+- [ ] Push notifications via Firebase Cloud Messaging
+- [ ] Deep linking (WhatsApp shares open in app)
+- [ ] Biometric auth (fingerprint/face ID)
+- [ ] App Store & Google Play submission prep
+
+**1.12 MVP Polish (Weeks 9-10)**
+- [ ] Responsive web design (secondary to mobile)
 - [ ] Loading states, error handling, empty states
-- [ ] SEO meta tags for listings
+- [ ] SEO meta tags for listings (web)
 - [ ] Basic email notifications (order updates, messages)
+- [ ] Push notification preferences (mobile)
 - [ ] 404/error pages
 - [ ] Legal pages: Terms, Privacy Policy, Buyer Protection policy
 
@@ -449,12 +479,12 @@ PriceDropAlert { id, listing_id→Listing, user_id→User, original_price_brl, n
 
 ### Phase 3 — Scale (Weeks 17-24+)
 
-**3.1 React Native Mobile App**
-- [ ] iOS and Android apps via Expo
-- [ ] Camera integration for listing photos
-- [ ] Barcode scanning at drop-off points
-- [ ] Push notifications
-- [ ] All core features from web
+**3.1 Mobile App Enhancements**
+- [ ] Barcode/QR scanning at carrier drop-off points
+- [ ] Offline mode (view favorites, draft listings)
+- [ ] Widget for Android/iOS (deal of the day, new from followed sellers)
+- [ ] Apple Pay / Google Pay integration
+- [ ] App Clips (iOS) / Instant Apps (Android) for quick listing views
 
 **3.2 Personalization & AI**
 - [ ] Personalized homepage feed based on browsing/purchase history
@@ -562,3 +592,232 @@ PriceDropAlert { id, listing_id→Listing, user_id→User, original_price_brl, n
 6. **Load testing**: k6 for API performance under load
 7. **Manual QA**: Full user journey on mobile and desktop browsers
 8. **Security audit**: OWASP top 10 checklist, penetration testing before launch
+
+---
+
+## Part G: How to Set Up a Company in Brazil (Brazilian Citizen Living Abroad)
+
+### G1. Recommended Company Structure
+
+**LTDA (Sociedade Limitada)** — the clear choice for a marketplace/tech business:
+- Limited liability protection for the owner
+- No revenue ceiling (unlike MEI at R$81K or ME at R$360K)
+- Flexible partner structure, can scale and take investment
+- Compatible with all tax regimes
+
+| Structure | Max Revenue | Good for Marketplace? | Why/Why Not |
+|-----------|-----------|----------------------|-------------|
+| MEI | R$81,000/yr | No | Too small, can't hire, single owner |
+| ME | R$360,000/yr | No | Revenue cap too low |
+| EIRELI | Unlimited | Maybe | Requires 100x minimum wage capital (~R$133K) |
+| **LTDA** | **Unlimited** | **Yes** | **Flexible, scalable, standard for tech** |
+| SAS | Unlimited | Maybe | Newer, less established |
+
+---
+
+### G2. Can You Set Up Remotely? Yes — Here's How
+
+As a Brazilian citizen abroad, you **can** form a company remotely but you **must**:
+1. Appoint a **legal representative (procurador) residing in Brazil** with a valid CPF
+2. Grant them **Procuração (Power of Attorney)** via your nearest Brazilian consulate
+3. The representative signs documents, visits Junta Comercial, opens bank accounts on your behalf
+
+**Who can be your representative?**
+- A trusted family member or friend in Brazil
+- A hired legal/business agent (despachante)
+- Your accountant's firm (some offer this service)
+
+---
+
+### G3. Step-by-Step Process & Timeline
+
+#### Phase 1: Preparation (Weeks 1-2)
+
+- [ ] **Hire a Brazilian accountant (contador)** — mandatory, must have active CRC registration
+  - Online options: Contabilizei, Meu Contador Online, JP Contábeis (R$249-800/mo)
+  - Must have e-commerce experience
+- [ ] **Identify your legal representative in Brazil** (must have CPF + Brazilian address)
+- [ ] **Schedule consulate appointment** via e-Consular system (ec-[city].itamaraty.gov.br)
+  - Request: "Procuração pública / Public power of attorney"
+  - Appear in person, sign before consular officer
+- [ ] **Decide tax regime** with your accountant:
+  - **Simples Nacional**: Possible if you are sole Brazilian owner (R$4.8M cap, unified taxes)
+  - **Lucro Presumido**: Required if any foreign ownership or if Simples not eligible
+  - **Lucro Real**: For larger operations with complex deductions
+- [ ] **Choose a virtual office (endereço fiscal)** in Brazil for company address
+  - Providers: Regus, Spaces, WeWork, or local options
+  - Cost: R$100-200/month — must be a "fiscal address" (endereço fiscal), not just mail forwarding
+  - The address goes on your Contrato Social and all official documents
+
+#### Phase 2: Documentation (Weeks 2-4)
+
+- [ ] **Get Procuração (Power of Attorney) at consulate**
+  - Must include powers to: receive judicial service (citação), register with Junta Comercial, register CNPJ with Receita Federal, open bank accounts, sign documents
+  - Cost: ~R$50-100 consular fee
+  - Issued same day in most consulates
+- [ ] **Prepare Contrato Social (Articles of Association)**
+  - Your accountant or lawyer drafts this
+  - Includes: company name, CNAE activity code, address, partners, capital, management rules
+  - Must be notarized; if signed abroad, must be apostilled (Hague Convention)
+  - Cost: R$1,000-3,000 for preparation + notarization
+- [ ] **Apostille + sworn translation** of any foreign documents
+  - Timeline: 2-4 weeks (start early!)
+  - Cost: R$1,000-3,000
+
+#### Phase 3: Registration (Weeks 4-8)
+
+- [ ] **Register with Junta Comercial (Board of Trade)** — 3-5 business days
+  - Your representative submits Contrato Social + POA
+  - Receives NIRE (state registry number)
+- [ ] **Register CNPJ with Receita Federal** — 5-10 business days
+  - Submit NIRE to Federal Revenue Service
+  - CNPJ issued (your company tax ID)
+  - Cost: Free
+- [ ] **Obtain Alvará de Funcionamento (municipal business license)** — 15-30 days
+  - Apply at the municipality where your virtual office is registered
+  - Cost: R$100-500
+- [ ] **Register for ICMS with state tax authority** — 5-10 business days
+  - Mandatory for selling physical goods (marketplace transactions)
+  - Your accountant handles this
+
+#### Phase 4: Financial Setup (Weeks 8-10)
+
+- [ ] **Open business bank account (Conta PJ)**
+  - Digital banks (fastest, 2-7 days): **Cora** (free, great for startups), **Nubank**, **Banco Inter**, **BTG Pactual**
+  - Traditional banks (3-6 weeks): Itaú, Santander, Banco do Brasil
+  - Your representative may need to visit in person for traditional banks
+- [ ] **Obtain e-CNPJ digital certificate** — 2-5 business days
+  - Required for issuing Nota Fiscal Eletrônica (NF-e)
+  - Can be done via video conference from abroad
+  - Providers: Certisign, SafeWeb, QualiSign, EasySign Brasil, Interconti Certificates
+  - Cost: R$300-600/year
+  - **Note**: e-CNPJ certificates are being replaced by electronic seals in late 2025
+
+---
+
+### G4. Total Costs
+
+#### One-Time Setup Costs
+
+| Item | Cost (BRL) | Cost (USD est.) |
+|------|-----------|-----------------|
+| Procuração at consulate | 50-100 | ~10-20 |
+| Contrato Social (prep + notarization) | 1,000-3,000 | 185-555 |
+| Apostille + sworn translation | 1,000-3,000 | 185-555 |
+| Municipal Alvará | 100-500 | 20-95 |
+| Virtual office fiscal address (annual) | 1,200-2,400 | 220-445 |
+| e-CNPJ digital certificate (annual) | 300-600 | 55-110 |
+| Accountant setup fee | 2,000-5,000 | 370-930 |
+| **TOTAL ONE-TIME** | **R$5,650-14,600** | **~$1,050-2,710** |
+
+#### Monthly Recurring Costs
+
+| Item | Cost (BRL/mo) |
+|------|--------------|
+| Accountant (Simples Nacional) | 300-800 |
+| Accountant (Lucro Presumido) | 500-1,200 |
+| Virtual office | 100-200 |
+| **TOTAL MONTHLY** | **R$400-1,400** |
+
+#### First Year Total: R$10,450-31,400 (~$1,940-5,820 USD)
+
+---
+
+### G5. Tax Regime Comparison
+
+| Regime | Who Qualifies | Tax Rate | Complexity | Best For |
+|--------|-------------|----------|-----------|----------|
+| **Simples Nacional** | Brazilian sole owner, revenue <R$4.8M | 6-33% (progressive) | Low — single monthly payment (DAS) | Early stage, solo founder |
+| **Lucro Presumido** | Any ownership structure | ~15% on presumed profit | Medium — quarterly filings | Most marketplace startups |
+| **Lucro Real** | Any structure, mandatory >R$78M/yr | Based on actual profit | High — monthly filings, full bookkeeping | Large-scale operations |
+
+**Important**: If you have **any** foreign partners/investors, you **cannot** use Simples Nacional.
+
+---
+
+### G6. Ongoing Compliance (What Your Accountant Handles)
+
+**Monthly**
+- [ ] DAS payment (if Simples) — due 20th of each month
+- [ ] DCTF filing (if Lucro Presumido/Real) — last business day of month
+- [ ] NF-e issuance for all marketplace transactions
+- [ ] ICMS remittance to state tax authority
+- [ ] Provide all receipts/invoices to accountant by 10th of month
+
+**Annual**
+- [ ] ECF digital tax return — due July 31
+- [ ] ECD digital bookkeeping — due May 31
+- [ ] Alvará renewal — per municipality rules
+- [ ] e-CNPJ certificate renewal — 30 days before expiration
+- [ ] DIRF withholding statement — due March 31
+
+**Penalties for Missing Deadlines**
+- Late DCTF: 2% per month (max 20%) + interest
+- Late NF-e: R$100-5,000 per invoice
+- Missing ECF/ECD: R$2,000-5,000 per month
+
+---
+
+### G7. Marketplace-Specific Regulatory Notes
+
+- **Platform tax responsibility (2026+)**: Marketplaces have **solidarity responsibility** for collecting ICMS/ISS from sellers. Your platform may need to withhold and remit taxes on seller transactions.
+- **NF-e for every transaction**: All sales must generate electronic invoices (XML format, signed with e-CNPJ, submitted to SEFAZ)
+- **LGPD compliance**: Mandatory data protection law — privacy policy, consent management, right to deletion. Fines up to R$50 million.
+- **CDC compliance**: 7-day withdrawal right for all online purchases, clear pricing with shipping, accessible return policy
+- **CBS/IBS tax reform (2026-2033)**: New unified tax system being phased in — your accountant must track this
+
+---
+
+### G8. Common Pitfalls to Avoid
+
+1. **Vague Power of Attorney** — Must explicitly include power to receive judicial service, register with Junta Comercial, open bank accounts, and represent with Receita Federal
+2. **Starting with MEI** — Revenue cap (R$81K) is too low; start with LTDA from day one
+3. **Not appointing representative early** — This is step 1, not an afterthought
+4. **Skipping apostille time** — Foreign documents need 2-4 weeks for apostille + sworn translation
+5. **Wrong tax regime** — Any foreign ownership = no Simples Nacional. Decide before forming.
+6. **No accountant from day 1** — It's legally mandatory, not optional. Budget R$300-1,200/month.
+7. **Assuming consulate does everything** — They issue POA only. Registration happens through your local representative + accountant.
+8. **Ignoring ICMS registration** — Without it you can't issue invoices or legally sell goods
+9. **Not budgeting for ongoing compliance** — Monthly accountant cost is permanent
+10. **Ignoring the 2026 tax reform** — CBS/IBS changes are coming; your accountant must prepare
+
+---
+
+### G9. Key Contacts & Services
+
+| Need | Service/Provider | How to Access |
+|------|-----------------|---------------|
+| Power of Attorney | Brazilian Consulate | e-Consular: ec-[city].itamaraty.gov.br |
+| Accountant | Contabilizei, JP Contábeis, local CRC-registered firm | contabilizei.com.br |
+| Virtual Office | Regus, Spaces, local providers | regus.com.br |
+| Digital Certificate | Certisign, SafeWeb, EasySign Brasil | Via video conference |
+| Business Bank | Cora, Nubank, Banco Inter | App download |
+| Payment Gateway | Mercado Pago, PagSeguro | mercadopago.com.br |
+| NF-e Integration | Enotas, NFe.io | API integration |
+| Legal Consultation | Brazilian law firm with e-commerce experience | Referral from accountant |
+
+---
+
+### G10. Checklist Summary: Company Formation for Brazilian Citizen Abroad
+
+**Before you start:**
+- [ ] Valid CPF (if expired/cancelled, reactivate via consulate or Receita Federal online)
+- [ ] Valid passport
+- [ ] Identified legal representative in Brazil
+- [ ] Budget approved: ~R$10K-30K for first year
+
+**Formation steps (in order):**
+1. [ ] Hire accountant (with CRC registration + e-commerce experience)
+2. [ ] Get Procuração at Brazilian consulate
+3. [ ] Prepare + notarize Contrato Social
+4. [ ] Apostille any foreign documents (start 4 weeks early)
+5. [ ] Register with Junta Comercial → receive NIRE
+6. [ ] Register CNPJ with Receita Federal
+7. [ ] Obtain municipal Alvará de Funcionamento
+8. [ ] Register for state ICMS
+9. [ ] Open Conta PJ (business bank account)
+10. [ ] Obtain e-CNPJ digital certificate
+11. [ ] Set up NF-e invoicing integration
+12. [ ] Begin operations
+
+**Total timeline: 60-90 days** (best case 30-45 days with all-digital processes)
