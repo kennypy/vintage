@@ -1,0 +1,111 @@
+import * as SecureStore from 'expo-secure-store';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+
+const TOKEN_KEY = 'vintage_access_token';
+const REFRESH_KEY = 'vintage_refresh_token';
+
+export async function getToken(): Promise<string | null> {
+  return SecureStore.getItemAsync(TOKEN_KEY);
+}
+
+export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
+  await SecureStore.setItemAsync(TOKEN_KEY, accessToken);
+  await SecureStore.setItemAsync(REFRESH_KEY, refreshToken);
+}
+
+export async function clearTokens(): Promise<void> {
+  await SecureStore.deleteItemAsync(TOKEN_KEY);
+  await SecureStore.deleteItemAsync(REFRESH_KEY);
+}
+
+interface RequestOptions extends RequestInit {
+  authenticated?: boolean;
+}
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { authenticated = true, headers: customHeaders, ...rest } = options;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(customHeaders as Record<string, string>),
+  };
+
+  if (authenticated) {
+    const token = await getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers,
+    ...rest,
+  });
+
+  if (response.status === 401 && authenticated) {
+    // Attempt token refresh
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      const newToken = await getToken();
+      headers['Authorization'] = `Bearer ${newToken}`;
+      const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
+        headers,
+        ...rest,
+      });
+      if (!retryResponse.ok) {
+        throw new ApiError(retryResponse.status, await safeParseError(retryResponse));
+      }
+      return retryResponse.json();
+    }
+    throw new ApiError(401, 'Session expired');
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await safeParseError(response));
+  }
+
+  return response.json();
+}
+
+async function attemptRefresh(): Promise<boolean> {
+  try {
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+    if (!refreshToken) return false;
+
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${refreshToken}`,
+      },
+    });
+
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    await setTokens(data.accessToken, data.refreshToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function safeParseError(response: Response): Promise<string> {
+  try {
+    const data = await response.json();
+    return data.message ?? 'Erro desconhecido';
+  } catch {
+    return 'Erro de conexão';
+  }
+}
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
