@@ -1,0 +1,526 @@
+// ============================================================
+// Vintage.br — Database Schema
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Users ---
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  cpf            String    @unique
+  name           String
+  phone          String?
+  avatarUrl      String?
+  bio            String?
+  verified       Boolean   @default(false)
+  vacationMode   Boolean   @default(false)
+  vacationUntil  DateTime?
+  ratingAvg      Float     @default(0)
+  ratingCount    Int       @default(0)
+  followerCount  Int       @default(0)
+  followingCount Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  listings          Listing[]
+  ordersBuyer       Order[]             @relation("OrderBuyer")
+  ordersSeller      Order[]             @relation("OrderSeller")
+  offers            Offer[]
+  wallet            Wallet?
+  favorites         Favorite[]
+  followersRel      Follow[]            @relation("Following")
+  followingRel      Follow[]            @relation("Follower")
+  conversationsAs1  Conversation[]      @relation("ConversationParticipant1")
+  conversationsAs2  Conversation[]      @relation("ConversationParticipant2")
+  messagesSent      Message[]
+  reviewsWritten    Review[]            @relation("ReviewWriter")
+  reviewsReceived   Review[]            @relation("ReviewReceiver")
+  disputesOpened    Dispute[]
+  notifications     Notification[]
+  addresses         Address[]
+  promotions        Promotion[]
+  savedSearches     SavedSearch[]
+  priceDropAlerts   PriceDropAlert[]
+
+  @@index([email])
+  @@index([cpf])
+}
+
+// --- Listings ---
+
+model Listing {
+  id              String        @id @default(cuid())
+  sellerId        String
+  title           String
+  description     String
+  categoryId      String
+  brandId         String?
+  condition       ItemCondition
+  size            String?
+  color           String?
+  priceBrl        Decimal       @db.Decimal(10, 2)
+  shippingWeightG Int
+  status          ListingStatus @default(ACTIVE)
+  promotedUntil   DateTime?
+  favoriteCount   Int           @default(0)
+  viewCount       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  seller          User            @relation(fields: [sellerId], references: [id])
+  category        Category        @relation(fields: [categoryId], references: [id])
+  brand           Brand?          @relation(fields: [brandId], references: [id])
+  images          ListingImage[]
+  orders          Order[]
+  offers          Offer[]
+  favorites       Favorite[]
+  bundleItems     BundleItem[]
+  promotions      Promotion[]
+  priceSuggestion PriceSuggestion?
+  priceDropAlerts PriceDropAlert[]
+
+  @@index([sellerId])
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([priceBrl])
+}
+
+model ListingImage {
+  id        String @id @default(cuid())
+  listingId String
+  url       String
+  position  Int
+  width     Int
+  height    Int
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+}
+
+// --- Categories & Brands ---
+
+model Category {
+  id       String  @id @default(cuid())
+  parentId String?
+  namePt   String
+  slug     String  @unique
+  icon     String?
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  listings Listing[]
+
+  @@index([parentId])
+  @@index([slug])
+}
+
+model Brand {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  verified Boolean @default(false)
+
+  listings Listing[]
+
+  @@index([slug])
+}
+
+// --- Orders ---
+
+model Order {
+  id                    String        @id @default(cuid())
+  buyerId               String
+  sellerId              String
+  listingId             String
+  status                OrderStatus   @default(PENDING)
+  totalBrl              Decimal       @db.Decimal(10, 2)
+  itemPriceBrl          Decimal       @db.Decimal(10, 2)
+  shippingCostBrl       Decimal       @db.Decimal(10, 2)
+  buyerProtectionFeeBrl Decimal       @db.Decimal(10, 2)
+  paymentMethod         PaymentMethod
+  paymentId             String?
+  shippingLabelUrl      String?
+  trackingCode          String?
+  carrier               Carrier?
+  installments          Int           @default(1)
+  shippedAt             DateTime?
+  deliveredAt           DateTime?
+  confirmedAt           DateTime?
+  disputeDeadline       DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  buyer        User           @relation("OrderBuyer", fields: [buyerId], references: [id])
+  seller       User           @relation("OrderSeller", fields: [sellerId], references: [id])
+  listing      Listing        @relation(fields: [listingId], references: [id])
+  conversation Conversation?
+  reviews      Review[]
+  dispute      Dispute?
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// --- Offers ---
+
+model Offer {
+  id        String      @id @default(cuid())
+  listingId String
+  buyerId   String
+  amountBrl Decimal     @db.Decimal(10, 2)
+  status    OfferStatus @default(PENDING)
+  expiresAt DateTime
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id])
+  buyer   User    @relation(fields: [buyerId], references: [id])
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([status])
+}
+
+// --- Bundles ---
+
+model Bundle {
+  id       String       @id @default(cuid())
+  buyerId  String
+  sellerId String
+  status   BundleStatus @default(OPEN)
+  createdAt DateTime    @default(now())
+
+  items BundleItem[]
+}
+
+model BundleItem {
+  id        String @id @default(cuid())
+  bundleId  String
+  listingId String
+
+  bundle  Bundle  @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id])
+
+  @@unique([bundleId, listingId])
+}
+
+// --- Wallet ---
+
+model Wallet {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  balanceBrl Decimal  @default(0) @db.Decimal(10, 2)
+  pendingBrl Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+}
+
+model WalletTransaction {
+  id          String                @id @default(cuid())
+  walletId    String
+  type        WalletTransactionType
+  amountBrl   Decimal               @db.Decimal(10, 2)
+  referenceId String?
+  description String
+  createdAt   DateTime              @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId])
+  @@index([createdAt])
+}
+
+// --- Social ---
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id])
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("Follower", fields: [followerId], references: [id])
+  following User @relation("Following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
+
+// --- Messaging ---
+
+model Conversation {
+  id             String   @id @default(cuid())
+  participant1Id String
+  participant2Id String
+  orderId        String?  @unique
+  lastMessageAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  participant1 User      @relation("ConversationParticipant1", fields: [participant1Id], references: [id])
+  participant2 User      @relation("ConversationParticipant2", fields: [participant2Id], references: [id])
+  order        Order?    @relation(fields: [orderId], references: [id])
+  messages     Message[]
+
+  @@unique([participant1Id, participant2Id])
+  @@index([participant1Id])
+  @@index([participant2Id])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderId       String
+  body           String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  sender       User         @relation(fields: [senderId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+// --- Reviews ---
+
+model Review {
+  id         String   @id @default(cuid())
+  orderId    String
+  reviewerId String
+  reviewedId String
+  rating     Int // 1 or 5
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  order    Order @relation(fields: [orderId], references: [id])
+  reviewer User  @relation("ReviewWriter", fields: [reviewerId], references: [id])
+  reviewed User  @relation("ReviewReceiver", fields: [reviewedId], references: [id])
+
+  @@unique([orderId, reviewerId])
+}
+
+// --- Disputes ---
+
+model Dispute {
+  id          String        @id @default(cuid())
+  orderId     String        @unique
+  openedById  String
+  reason      DisputeReason
+  description String
+  status      DisputeStatus @default(OPEN)
+  resolution  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  order    Order @relation(fields: [orderId], references: [id])
+  openedBy User  @relation(fields: [openedById], references: [id])
+}
+
+// --- Notifications ---
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  data      Json     @default("{}")
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+// --- Addresses ---
+
+model Address {
+  id           String  @id @default(cuid())
+  userId       String
+  label        String
+  street       String
+  number       String
+  complement   String?
+  neighborhood String
+  city         String
+  state        String  @db.VarChar(2)
+  cep          String  @db.VarChar(9)
+  isDefault    Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// --- Promotions ---
+
+model Promotion {
+  id             String        @id @default(cuid())
+  listingId      String?
+  userId         String
+  type           PromotionType
+  startsAt       DateTime      @default(now())
+  endsAt         DateTime
+  pricePaidBrl   Decimal       @db.Decimal(10, 2)
+  requiresDiscount Boolean     @default(false)
+  createdAt      DateTime      @default(now())
+
+  listing Listing? @relation(fields: [listingId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([endsAt])
+}
+
+// --- Saved Searches ---
+
+model SavedSearch {
+  id          String  @id @default(cuid())
+  userId      String
+  query       String
+  filtersJson Json    @default("{}")
+  notify      Boolean @default(true)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+// --- Price Intelligence ---
+
+model PriceSuggestion {
+  id              String   @id @default(cuid())
+  listingId       String   @unique
+  suggestedBrl    Decimal  @db.Decimal(10, 2)
+  basedOnCount    Int
+  confidence      Float
+  createdAt       DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id])
+}
+
+model PriceDropAlert {
+  id              String    @id @default(cuid())
+  listingId       String
+  userId          String
+  originalPriceBrl Decimal  @db.Decimal(10, 2)
+  notifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([listingId, userId])
+}
+
+// --- Enums ---
+
+enum ItemCondition {
+  NEW_WITH_TAGS
+  NEW_WITHOUT_TAGS
+  VERY_GOOD
+  GOOD
+  SATISFACTORY
+}
+
+enum ListingStatus {
+  ACTIVE
+  PAUSED
+  SOLD
+  DELETED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  DISPUTED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  BOLETO
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COUNTERED
+  EXPIRED
+}
+
+enum BundleStatus {
+  OPEN
+  CHECKED_OUT
+  CANCELLED
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  PAYOUT
+  REFUND
+}
+
+enum PromotionType {
+  BUMP
+  SPOTLIGHT
+  MEGAFONE
+}
+
+enum DisputeReason {
+  NOT_AS_DESCRIBED
+  DAMAGED
+  COUNTERFEIT
+  NOT_RECEIVED
+  WRONG_ITEM
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+  ESCALATED
+}
+
+enum Carrier {
+  CORREIOS
+  JADLOG
+}
