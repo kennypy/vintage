@@ -73,6 +73,9 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 | `Cannot find module '@prisma/client'` | Prisma not generated | Run `npx prisma generate` in `apps/api/` |
 | Unused variable error | ESLint strict mode | Prefix with `_` (e.g., `_id`, `_body`, `_req`) |
 | Import error for `.css` or assets | TypeScript strict | Ensure `next-env.d.ts` exists for web, proper tsconfig for each app |
+| `useContext` null error in Next.js build | React 19 + Next.js pages router conflict | Web app MUST use React 18.3.x + Next.js 14.x. Never upgrade to React 19. |
+| `peer dep` conflict on install | Mismatched ESLint / Next versions | Web uses standalone `eslint.config.mjs`, does NOT need `eslint-config-next` |
+| Stale `node_modules` after version change | npm didn't update hoisted deps | Delete `node_modules`, `package-lock.json`, and run `npm install` fresh |
 
 ### ESLint Configuration
 - All packages use ESLint v9 **flat config** format (`eslint.config.mjs`)
@@ -86,6 +89,11 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - API tests use `ts-jest` with `testRegex: .*\.spec\.ts$`
 - Mobile tests use `jest-expo` preset
 - Web and shared use echo placeholders until tests are added
+
+### Pinned Versions (DO NOT CHANGE)
+- **Web app**: `next@14.2.x` + `react@18.3.1` + `react-dom@18.3.1` — React 19 breaks the Next.js pages router error pages
+- **Mobile app**: `react@18.3.1` (pinned by Expo)
+- **ESLint**: v9 flat config — do NOT add `eslint-config-next` (requires ESLint 8)
 
 ### Commit Hygiene
 - Run the full pre-push checklist above before every commit that will be pushed
