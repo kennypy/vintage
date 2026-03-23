@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 
 jest.mock('bcrypt');
 jest.mock('@vintage/shared', () => ({
@@ -29,6 +30,10 @@ const mockConfigService = {
   get: jest.fn().mockReturnValue('7d'),
 };
 
+const mockEmailService = {
+  sendWelcomeEmail: jest.fn(),
+};
+
 describe('AuthService', () => {
   let service: AuthService;
 
@@ -41,6 +46,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: EmailService, useValue: mockEmailService },
       ],
     }).compile();
 
@@ -60,7 +66,7 @@ describe('AuthService', () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
       mockPrisma.user.findFirst.mockResolvedValue(null);
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
-      mockPrisma.user.create.mockResolvedValue({ id: 'user-1' });
+      mockPrisma.user.create.mockResolvedValue({ id: 'user-1', email: 'test@example.com', name: 'Maria Silva' });
       mockJwtService.sign
         .mockReturnValueOnce('access-token')
         .mockReturnValueOnce('refresh-token');

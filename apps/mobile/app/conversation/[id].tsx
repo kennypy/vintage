@@ -12,9 +12,13 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { io, Socket } from 'socket.io-client';
 import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { getToken } from '../../src/services/api';
 import { getMessages, sendMessage, Message } from '../../src/services/messages';
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export default function ConversationScreen() {
   const { id, participantName } = useLocalSearchParams<{
@@ -28,7 +32,102 @@ export default function ConversationScreen() {
   const [text, setText] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [isTyping, setIsTyping] = useState(false);
+  const [otherUserOnline, setOtherUserOnline] = useState(false);
+  const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
   const flatListRef = useRef<FlatList>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Socket.io connection
+  useEffect(() => {
+    let socket: Socket | null = null;
+
+    const connectSocket = async () => {
+      const token = await getToken();
+      if (!token || !id) return;
+
+      socket = io(`${API_BASE_URL}/chat`, {
+        auth: { token },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+      });
+
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        socket?.emit('joinConversation', { conversationId: id });
+      });
+
+      socket.on('newMessage', (message: Message) => {
+        setMessages((prev) => {
+          // Avoid duplicates
+          if (prev.some((m) => m.id === message.id)) return prev;
+          return [message, ...prev];
+        });
+        // Auto-mark as read if message is from other user
+        if (message.senderId !== user?.id) {
+          socket?.emit('markRead', { conversationId: id });
+        }
+      });
+
+      socket.on('typing', (data: { conversationId: string; userId: string }) => {
+        if (data.conversationId === id && data.userId !== user?.id) {
+          setIsTyping(true);
+        }
+      });
+
+      socket.on('stopTyping', (data: { conversationId: string; userId: string }) => {
+        if (data.conversationId === id && data.userId !== user?.id) {
+          setIsTyping(false);
+        }
+      });
+
+      socket.on('messagesRead', (data: { conversationId: string; readBy: string }) => {
+        if (data.conversationId === id && data.readBy !== user?.id) {
+          // Mark all sent messages as read
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.senderId === user?.id && !m.readAt
+                ? { ...m, readAt: new Date().toISOString() }
+                : m,
+            ),
+          );
+          setReadMessageIds((prev) => {
+            const next = new Set(prev);
+            messages.forEach((m) => {
+              if (m.senderId === user?.id) next.add(m.id);
+            });
+            return next;
+          });
+        }
+      });
+
+      socket.on('userOnline', (data: { userId: string }) => {
+        if (data.userId !== user?.id) {
+          setOtherUserOnline(true);
+        }
+      });
+
+      socket.on('userOffline', (data: { userId: string }) => {
+        if (data.userId !== user?.id) {
+          setOtherUserOnline(false);
+        }
+      });
+    };
+
+    connectSocket();
+
+    return () => {
+      if (socket) {
+        socket.emit('leaveConversation', { conversationId: id });
+        socket.disconnect();
+      }
+      socketRef.current = null;
+    };
+  }, [id, user?.id]);
 
   const fetchMessages = useCallback(async (pageNum: number) => {
     if (!id) return;
@@ -51,11 +150,42 @@ export default function ConversationScreen() {
     fetchMessages(1);
   }, [fetchMessages]);
 
+  // Mark messages as read on initial load
+  useEffect(() => {
+    if (!loading && messages.length > 0 && socketRef.current) {
+      socketRef.current.emit('markRead', { conversationId: id });
+    }
+  }, [loading, id, messages.length]);
+
+  const handleTextChange = useCallback((value: string) => {
+    setText(value);
+
+    // Emit typing indicator
+    if (socketRef.current && id) {
+      socketRef.current.emit('typing', { conversationId: id });
+
+      // Clear previous timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      // Stop typing after 2 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        socketRef.current?.emit('stopTyping', { conversationId: id });
+      }, 2000);
+    }
+  }, [id]);
+
   const handleSend = useCallback(async () => {
     if (!text.trim() || !id || sending) return;
     const body = text.trim();
     setText('');
     setSending(true);
+
+    // Stop typing indicator
+    if (socketRef.current) {
+      socketRef.current.emit('stopTyping', { conversationId: id });
+    }
 
     const optimisticMessage: Message = {
       id: `temp-${Date.now()}`,
@@ -109,6 +239,21 @@ export default function ConversationScreen() {
     return current !== next;
   };
 
+  const renderReadReceipt = (item: Message) => {
+    if (item.senderId !== user?.id) return null;
+
+    const isRead = item.readAt !== null || readMessageIds.has(item.id);
+
+    return (
+      <Ionicons
+        name={isRead ? 'checkmark-done' : 'checkmark'}
+        size={14}
+        color={isRead ? '#34D399' : 'rgba(255,255,255,0.5)'}
+        style={styles.readReceipt}
+      />
+    );
+  };
+
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const isMine = item.senderId === user?.id;
     return (
@@ -140,14 +285,17 @@ export default function ConversationScreen() {
             >
               {item.body}
             </Text>
-            <Text
-              style={[
-                styles.timeText,
-                isMine ? styles.timeTextMine : styles.timeTextTheirs,
-              ]}
-            >
-              {formatTime(item.createdAt)}
-            </Text>
+            <View style={styles.messageFooter}>
+              <Text
+                style={[
+                  styles.timeText,
+                  isMine ? styles.timeTextMine : styles.timeTextTheirs,
+                ]}
+              >
+                {formatTime(item.createdAt)}
+              </Text>
+              {renderReadReceipt(item)}
+            </View>
           </View>
         </View>
       </View>
@@ -169,7 +317,24 @@ export default function ConversationScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      <Stack.Screen options={{ title: participantName ?? 'Conversa' }} />
+      <Stack.Screen
+        options={{
+          title: participantName ?? 'Conversa',
+          headerRight: () => (
+            <View style={styles.headerRight}>
+              <View
+                style={[
+                  styles.onlineIndicator,
+                  otherUserOnline ? styles.online : styles.offline,
+                ]}
+              />
+              <Text style={styles.statusText}>
+                {otherUserOnline ? 'Online' : 'Offline'}
+              </Text>
+            </View>
+          ),
+        }}
+      />
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -180,11 +345,16 @@ export default function ConversationScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.3}
       />
+      {isTyping && (
+        <View style={styles.typingContainer}>
+          <Text style={styles.typingText}>Digitando...</Text>
+        </View>
+      )}
       <View style={styles.inputBar}>
         <TextInput
           style={styles.textInput}
           value={text}
-          onChangeText={setText}
+          onChangeText={handleTextChange}
           placeholder="Escreva uma mensagem..."
           placeholderTextColor={colors.neutral[400]}
           multiline
@@ -219,6 +389,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.neutral[50],
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  onlineIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 4,
+  },
+  online: {
+    backgroundColor: '#34D399',
+  },
+  offline: {
+    backgroundColor: colors.neutral[400],
+  },
+  statusText: {
+    fontSize: 12,
+    color: colors.neutral[600],
   },
   messagesList: {
     paddingHorizontal: 16,
@@ -270,16 +461,32 @@ const styles = StyleSheet.create({
   bubbleTextTheirs: {
     color: colors.neutral[900],
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+  },
   timeText: {
     fontSize: 11,
-    marginTop: 4,
-    alignSelf: 'flex-end',
   },
   timeTextMine: {
     color: 'rgba(255,255,255,0.7)',
   },
   timeTextTheirs: {
     color: colors.neutral[500],
+  },
+  readReceipt: {
+    marginLeft: 4,
+  },
+  typingContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  typingText: {
+    fontSize: 12,
+    color: colors.neutral[500],
+    fontStyle: 'italic',
   },
   inputBar: {
     flexDirection: 'row',

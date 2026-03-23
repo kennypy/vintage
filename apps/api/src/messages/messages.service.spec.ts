@@ -194,4 +194,74 @@ describe('MessagesService', () => {
       expect(mockPrisma.conversation.create).toHaveBeenCalled();
     });
   });
+
+  describe('getUnreadCount', () => {
+    it('should return total unread message count', async () => {
+      mockPrisma.conversation.findMany.mockResolvedValue([
+        { id: 'conv-1' },
+        { id: 'conv-2' },
+      ]);
+      mockPrisma.message.count.mockResolvedValue(5);
+
+      const result = await service.getUnreadCount('user-1');
+
+      expect(result).toBe(5);
+      expect(mockPrisma.message.count).toHaveBeenCalledWith({
+        where: {
+          conversationId: { in: ['conv-1', 'conv-2'] },
+          senderId: { not: 'user-1' },
+          readAt: null,
+        },
+      });
+    });
+
+    it('should return 0 when user has no conversations', async () => {
+      mockPrisma.conversation.findMany.mockResolvedValue([]);
+
+      const result = await service.getUnreadCount('user-1');
+
+      expect(result).toBe(0);
+    });
+  });
+
+  describe('markConversationRead', () => {
+    const mockConversation = {
+      id: 'conv-1',
+      participant1Id: 'user-1',
+      participant2Id: 'user-2',
+    };
+
+    it('should mark unread messages as read and return count', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue(mockConversation);
+      mockPrisma.message.updateMany.mockResolvedValue({ count: 3 });
+
+      const result = await service.markConversationRead('conv-1', 'user-1');
+
+      expect(result).toBe(3);
+      expect(mockPrisma.message.updateMany).toHaveBeenCalledWith({
+        where: {
+          conversationId: 'conv-1',
+          senderId: { not: 'user-1' },
+          readAt: null,
+        },
+        data: { readAt: expect.any(Date) },
+      });
+    });
+
+    it('should throw NotFoundException if conversation not found', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue(null);
+
+      await expect(service.markConversationRead('nonexistent', 'user-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw ForbiddenException if user is not a participant', async () => {
+      mockPrisma.conversation.findUnique.mockResolvedValue(mockConversation);
+
+      await expect(service.markConversationRead('conv-1', 'other-user')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
 });

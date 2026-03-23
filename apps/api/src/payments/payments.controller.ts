@@ -13,6 +13,7 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { PaymentsService } from './payments.service';
@@ -28,7 +29,7 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via PIX' })
   @ApiResponse({ status: 201, description: 'Pagamento PIX criado' })
   createPix(
-    @CurrentUser() user: AuthUser,
+    @CurrentUser() _user: AuthUser,
     @Body() body: { orderId: string; amountBrl: number },
   ) {
     return this.paymentsService.createPixPayment(body.orderId, body.amountBrl);
@@ -40,7 +41,7 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via cartão de crédito' })
   @ApiResponse({ status: 201, description: 'Pagamento com cartão criado' })
   createCard(
-    @CurrentUser() user: AuthUser,
+    @CurrentUser() _user: AuthUser,
     @Body() body: { orderId: string; amountBrl: number; installments: number },
   ) {
     return this.paymentsService.createCardPayment(
@@ -56,7 +57,7 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via boleto bancário' })
   @ApiResponse({ status: 201, description: 'Boleto gerado' })
   createBoleto(
-    @CurrentUser() user: AuthUser,
+    @CurrentUser() _user: AuthUser,
     @Body() body: { orderId: string; amountBrl: number },
   ) {
     return this.paymentsService.createBoletoPayment(
@@ -66,8 +67,12 @@ export class PaymentsController {
   }
 
   @Post('webhook')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
   @ApiOperation({ summary: 'Receber webhook de pagamento (Mercado Pago)' })
   @ApiResponse({ status: 200, description: 'Webhook processado' })
+  @ApiResponse({ status: 401, description: 'Assinatura inválida' })
+  @ApiResponse({ status: 400, description: 'Payload inválido' })
   handleWebhook(
     @Body() payload: Record<string, unknown>,
     @Headers('x-signature') signature?: string,
@@ -80,7 +85,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Consultar status do pagamento' })
   @ApiResponse({ status: 200, description: 'Status do pagamento' })
-  getStatus(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+  getStatus(@CurrentUser() _user: AuthUser, @Param('id') id: string) {
     return this.paymentsService.getPaymentStatus(id);
   }
 }

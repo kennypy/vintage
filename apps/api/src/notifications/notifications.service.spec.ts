@@ -2,6 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService } from '../push/push.service';
+
+const mockPushService = {
+  sendPushNotification: jest.fn(),
+};
 
 const mockPrisma = {
   notification: {
@@ -24,6 +29,7 @@ describe('NotificationsService', () => {
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PushService, useValue: mockPushService },
       ],
     }).compile();
 

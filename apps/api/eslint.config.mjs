@@ -24,6 +24,7 @@ export default [
         fetch: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
+        Express: 'readonly',
       },
     },
     plugins: {

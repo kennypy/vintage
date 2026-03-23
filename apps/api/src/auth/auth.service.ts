@@ -2,10 +2,19 @@ import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/co
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { isValidCPF } from '@vintage/shared';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+
+export interface SocialProfile {
+  email: string;
+  name: string;
+  avatarUrl?: string;
+  providerId: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -13,6 +22,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private emailService: EmailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -41,11 +51,17 @@ export class AuthService {
         cpf: cleanCpf,
         name: dto.name,
         phone: dto.phone ?? null,
+        cpfVerified: true,
         wallet: { create: {} },
       },
     });
 
-    return this.generateTokens(user.id);
+    const tokens = this.generateTokens(user.id);
+
+    // Send welcome email (non-blocking, non-critical)
+    this.emailService.sendWelcomeEmail(user.email, user.name);
+
+    return tokens;
   }
 
   async login(dto: LoginDto) {
@@ -63,6 +79,57 @@ export class AuthService {
     }
 
     return this.generateTokens(user.id);
+  }
+
+  async socialLogin(provider: 'google' | 'apple', profile: SocialProfile) {
+    // Check if user exists with this email
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: profile.email },
+    });
+
+    if (existingUser) {
+      // Update social provider info if not already set
+      if (!existingUser.socialProvider) {
+        await this.prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            socialProvider: provider,
+            socialProviderId: profile.providerId,
+            avatarUrl: existingUser.avatarUrl ?? profile.avatarUrl ?? null,
+          },
+        });
+      }
+
+      return {
+        ...this.generateTokens(existingUser.id),
+        cpfVerified: existingUser.cpfVerified,
+      };
+    }
+
+    // Create new user without CPF (required on first purchase)
+    const randomPassword = crypto.randomBytes(32).toString('hex');
+    const passwordHash = await bcrypt.hash(randomPassword, 12);
+
+    const newUser = await this.prisma.user.create({
+      data: {
+        email: profile.email,
+        passwordHash,
+        name: profile.name,
+        avatarUrl: profile.avatarUrl ?? null,
+        socialProvider: provider,
+        socialProviderId: profile.providerId,
+        cpfVerified: false,
+        wallet: { create: {} },
+      },
+    });
+
+    // Send welcome email (non-blocking, non-critical)
+    this.emailService.sendWelcomeEmail(newUser.email, newUser.name);
+
+    return {
+      ...this.generateTokens(newUser.id),
+      cpfVerified: false,
+    };
   }
 
   async refreshToken(userId: string) {

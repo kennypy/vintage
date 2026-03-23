@@ -5,6 +5,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
+import { GoogleStrategy } from './google.strategy';
+import { AppleStrategy } from './apple.strategy';
 import { UsersModule } from '../users/users.module';
 
 @Module({
@@ -20,7 +22,7 @@ import { UsersModule } from '../users/users.module';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, AppleStrategy],
   controllers: [AuthController],
   exports: [AuthService],
 })
