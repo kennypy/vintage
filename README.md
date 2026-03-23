@@ -13,7 +13,7 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 |--------|-----------|-----------|
 | Mobile (P1) | React Native (Expo) | App iOS + Android — plataforma principal |
 | Web (P2) | Next.js 14 + Tailwind CSS | Site secundário |
-| API | NestJS + Prisma + PostgreSQL | Backend com 9 módulos |
+| API | NestJS + Prisma + PostgreSQL | Backend com 17 módulos |
 | Shared | TypeScript package | Tipos, constantes, validação CPF/CEP |
 | Infra | Docker Compose | Postgres 16, Redis 7, Meilisearch |
 | CI | GitHub Actions | Lint, type-check, test, build |
@@ -24,13 +24,13 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 vintage/
 ├── apps/
 │   ├── mobile/           # React Native (Expo) — iOS + Android
-│   │   ├── app/          # Expo Router screens (tabs: Home, Search, Sell, Inbox, Profile)
-│   │   └── src/          # Services, theme, hooks
+│   │   ├── app/          # Expo Router (16 telas: tabs, auth, orders, offers, wallet, etc.)
+│   │   └── src/          # 8 services API, theme, hooks, components
 │   ├── web/              # Next.js 14 + Tailwind CSS
-│   │   └── src/app/      # App Router pages
+│   │   └── src/          # 8 páginas (home, listings, sell, auth, profile) + componentes
 │   └── api/              # NestJS backend
-│       ├── prisma/       # Schema (20 models) + seed
-│       └── src/          # 9 modules + auth + health
+│       ├── prisma/       # Schema (20+ models) + seed
+│       └── src/          # 17 módulos + 81 testes unitários
 ├── packages/
 │   └── shared/           # Types, constants, CPF/CEP validation
 ├── docker-compose.yml    # Postgres, Redis, Meilisearch

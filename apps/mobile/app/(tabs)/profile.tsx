@@ -1,27 +1,71 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { getProfile } from '../../src/services/users';
+import { logout } from '../../src/services/auth';
+import { getToken } from '../../src/services/api';
+import type { UserProfile } from '../../src/services/users';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [vacationMode, setVacationMode] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
-  // TODO: Check auth state, redirect to login if not authenticated
-  const isAuthenticated = true;
-  const user = {
-    name: 'Maria Silva',
-    verified: true,
-    ratingAvg: 4.8,
-    ratingCount: 23,
-    followerCount: 156,
-    followingCount: 42,
-    listingCount: 18,
-    walletBalance: 347.5,
+  const checkAuthAndFetch = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        setIsAuthenticated(false);
+        setLoading(false);
+        return;
+      }
+      setIsAuthenticated(true);
+      const profile = await getProfile();
+      setUser(profile);
+    } catch (_error) {
+      setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAuthAndFetch();
+  }, [checkAuthAndFetch]);
+
+  const handleLogout = async () => {
+    Alert.alert('Sair da conta', 'Tem certeza que deseja sair?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Sair',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          setIsAuthenticated(false);
+          setUser(null);
+          router.replace('/(auth)/login');
+        },
+      },
+    ]);
   };
 
-  if (!isAuthenticated) {
+  const handleWithdraw = () => {
+    router.push('/wallet');
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={colors.primary[500]} />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
     return (
       <View style={styles.authContainer}>
         <Text style={styles.authTitle}>Entre para continuar</Text>
@@ -34,6 +78,9 @@ export default function ProfileScreen() {
       </View>
     );
   }
+
+  const formatBalance = (value: number) =>
+    value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -78,17 +125,17 @@ export default function ProfileScreen() {
       </View>
 
       {/* Wallet Card */}
-      <TouchableOpacity style={styles.walletCard}>
+      <TouchableOpacity style={styles.walletCard} onPress={() => router.push('/wallet')}>
         <View style={styles.walletLeft}>
           <Ionicons name="wallet-outline" size={24} color={colors.primary[600]} />
           <View>
             <Text style={styles.walletLabel}>Carteira</Text>
             <Text style={styles.walletBalance}>
-              R$ {user.walletBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              R$ {formatBalance(user.walletBalance)}
             </Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.withdrawButton}>
+        <TouchableOpacity style={styles.withdrawButton} onPress={handleWithdraw}>
           <Text style={styles.withdrawText}>Sacar via PIX</Text>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -96,10 +143,10 @@ export default function ProfileScreen() {
       {/* Menu Sections */}
       <View style={styles.menuSection}>
         <Text style={styles.menuSectionTitle}>Compras e Vendas</Text>
-        <MenuItem icon="bag-outline" label="Minhas compras" />
+        <MenuItem icon="bag-outline" label="Minhas compras" onPress={() => router.push('/orders')} />
         <MenuItem icon="pricetag-outline" label="Meus anúncios" />
         <MenuItem icon="heart-outline" label="Favoritos" />
-        <MenuItem icon="chatbubble-outline" label="Ofertas recebidas" />
+        <MenuItem icon="chatbubble-outline" label="Ofertas recebidas" onPress={() => router.push('/offers')} />
         <MenuItem icon="star-outline" label="Avaliações" />
       </View>
 
@@ -121,13 +168,14 @@ export default function ProfileScreen() {
             trackColor={{ true: colors.primary[500] }}
           />
         </View>
+        <MenuItem icon="notifications-outline" label="Notificações" onPress={() => router.push('/notifications')} />
         <MenuItem icon="location-outline" label="Endereços" />
         <MenuItem icon="shield-checkmark-outline" label="Verificação" />
         <MenuItem icon="settings-outline" label="Configurações" />
         <MenuItem icon="help-circle-outline" label="Ajuda" />
       </View>
 
-      <TouchableOpacity style={styles.logoutButton}>
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Text style={styles.logoutText}>Sair da conta</Text>
       </TouchableOpacity>
 
@@ -136,9 +184,9 @@ export default function ProfileScreen() {
   );
 }
 
-function MenuItem({ icon, label, badge }: { icon: string; label: string; badge?: string }) {
+function MenuItem({ icon, label, badge, onPress }: { icon: string; label: string; badge?: string; onPress?: () => void }) {
   return (
-    <TouchableOpacity style={styles.menuItem}>
+    <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <Ionicons name={icon as any} size={22} color={colors.neutral[600]} />
       <Text style={styles.menuLabel}>{label}</Text>
       {badge && (
@@ -153,6 +201,7 @@ function MenuItem({ icon, label, badge }: { icon: string; label: string; badge?:
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral[50] },
+  loadingContainer: { justifyContent: 'center', alignItems: 'center' },
   authContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   authTitle: { fontSize: 20, fontWeight: '600', color: colors.neutral[900], marginBottom: 16 },
   authButton: { backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 },

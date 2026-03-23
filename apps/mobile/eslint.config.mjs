@@ -25,6 +25,9 @@ export default [
         process: 'readonly',
         require: 'readonly',
         module: 'readonly',
+        URLSearchParams: 'readonly',
+        alert: 'readonly',
+        FormData: 'readonly',
       },
     },
     plugins: {

@@ -1,0 +1,186 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcrypt';
+import { AuthService } from './auth.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+jest.mock('bcrypt');
+jest.mock('@vintage/shared', () => ({
+  isValidCPF: jest.fn(),
+}));
+
+import { isValidCPF } from '@vintage/shared';
+
+const mockPrisma = {
+  user: {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+  },
+};
+
+const mockJwtService = {
+  sign: jest.fn(),
+};
+
+const mockConfigService = {
+  get: jest.fn().mockReturnValue('7d'),
+};
+
+describe('AuthService', () => {
+  let service: AuthService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: JwtService, useValue: mockJwtService },
+        { provide: ConfigService, useValue: mockConfigService },
+      ],
+    }).compile();
+
+    service = module.get<AuthService>(AuthService);
+  });
+
+  describe('register', () => {
+    const registerDto = {
+      email: 'test@example.com',
+      password: 'StrongPass123!',
+      cpf: '529.982.247-25',
+      name: 'Maria Silva',
+      phone: '+5511999999999',
+    };
+
+    it('should create user with hashed password, create wallet, and return tokens', async () => {
+      (isValidCPF as jest.Mock).mockReturnValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
+      mockPrisma.user.create.mockResolvedValue({ id: 'user-1' });
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
+      const result = await service.register(registerDto);
+
+      expect(isValidCPF).toHaveBeenCalledWith('52998224725');
+      expect(bcrypt.hash).toHaveBeenCalledWith('StrongPass123!', 12);
+      expect(mockPrisma.user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          email: 'test@example.com',
+          passwordHash: 'hashed_password',
+          cpf: '52998224725',
+          name: 'Maria Silva',
+          phone: '+5511999999999',
+          wallet: { create: {} },
+        }),
+      });
+      expect(result).toEqual({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      });
+    });
+
+    it('should reject duplicate email or CPF', async () => {
+      (isValidCPF as jest.Mock).mockReturnValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'existing-user' });
+
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.register(registerDto)).rejects.toThrow(
+        'Email ou CPF já cadastrado',
+      );
+    });
+
+    it('should reject invalid CPF', async () => {
+      (isValidCPF as jest.Mock).mockReturnValue(false);
+
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.register(registerDto)).rejects.toThrow(
+        'CPF inválido',
+      );
+    });
+  });
+
+  describe('login', () => {
+    const loginDto = {
+      email: 'test@example.com',
+      password: 'StrongPass123!',
+    };
+
+    it('should return tokens for valid credentials', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: 'hashed_password',
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
+      const result = await service.login(loginDto);
+
+      expect(result).toEqual({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+      });
+    });
+
+    it('should reject invalid password', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: 'hashed_password',
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      await expect(service.login(loginDto)).rejects.toThrow(
+        'Email ou senha inválidos',
+      );
+    });
+
+    it('should reject non-existent email', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.login(loginDto)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      await expect(service.login(loginDto)).rejects.toThrow(
+        'Email ou senha inválidos',
+      );
+    });
+  });
+
+  describe('refreshToken', () => {
+    it('should return new tokens for valid user', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+      mockJwtService.sign
+        .mockReturnValueOnce('new-access-token')
+        .mockReturnValueOnce('new-refresh-token');
+
+      const result = await service.refreshToken('user-1');
+
+      expect(result).toEqual({
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+      });
+    });
+
+    it('should reject if user not found', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.refreshToken('nonexistent')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+});

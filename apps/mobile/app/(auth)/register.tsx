@@ -1,10 +1,11 @@
 import {
   View, Text, TextInput, StyleSheet, TouchableOpacity, KeyboardAvoidingView,
-  Platform, ScrollView,
+  Platform, ScrollView, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { colors } from '../../src/theme/colors';
+import { register } from '../../src/services/auth';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -23,12 +24,25 @@ export default function RegisterScreen() {
   };
 
   const handleRegister = async () => {
+    if (!name || !email || !cpf || !password) {
+      Alert.alert('Campos obrigatórios', 'Preencha todos os campos.');
+      return;
+    }
+    if (password.length < 8) {
+      Alert.alert('Senha fraca', 'A senha deve ter no mínimo 8 caracteres.');
+      return;
+    }
+
     setLoading(true);
-    // TODO: Call auth API
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const rawCpf = cpf.replace(/\D/g, '');
+      await register(name, email, rawCpf, password);
       router.replace('/(tabs)');
-    }, 1000);
+    } catch (_error) {
+      Alert.alert('Erro ao criar conta', 'Não foi possível criar sua conta. Verifique os dados e tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

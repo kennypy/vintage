@@ -1,9 +1,14 @@
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert,
+  Image, ActivityIndicator,
 } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { createListing, getCategories } from '../../src/services/listings';
+import type { Category } from '../../src/services/listings';
 
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
@@ -16,7 +21,8 @@ const CONDITIONS = [
 const SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
 
 export default function SellScreen() {
-  const [photos, _setPhotos] = useState<string[]>([]);
+  const router = useRouter();
+  const [photos, setPhotos] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
@@ -24,19 +30,100 @@ export default function SellScreen() {
   const [size, setSize] = useState('');
   const [brand, setBrand] = useState('');
   const [weight, setWeight] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [publishing, setPublishing] = useState(false);
 
-  const handleAddPhoto = () => {
-    // TODO: Use expo-image-picker or expo-camera
-    Alert.alert('Adicionar foto', 'Câmera e galeria serão integradas em breve.');
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const cats = await getCategories();
+        setCategories(cats);
+      } catch (_error) {
+        // Fallback - categories will be empty
+      }
+    }
+    loadCategories();
+  }, []);
+
+  const handleAddPhoto = async () => {
+    if (photos.length >= 20) {
+      Alert.alert('Limite atingido', 'Você pode adicionar no máximo 20 fotos.');
+      return;
+    }
+
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar fotos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: 20 - photos.length,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets) {
+      const newUris = result.assets.map((asset) => asset.uri);
+      setPhotos((prev) => [...prev, ...newUris].slice(0, 20));
+    }
   };
 
-  const handlePublish = () => {
+  const removePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePublish = async () => {
     if (!title || !description || !price || !condition) {
       Alert.alert('Campos obrigatórios', 'Preencha título, descrição, preço e condição.');
       return;
     }
-    // TODO: Call listings API
-    Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.');
+
+    setPublishing(true);
+    try {
+      const priceParsed = parseFloat(price.replace(',', '.'));
+      if (isNaN(priceParsed) || priceParsed <= 0) {
+        Alert.alert('Preço inválido', 'Informe um preço válido.');
+        setPublishing(false);
+        return;
+      }
+
+      const listing = await createListing({
+        title,
+        description,
+        priceBrl: priceParsed,
+        condition,
+        size,
+        brand: brand || undefined,
+        category: selectedCategory,
+        imageIds: [], // Images would be uploaded separately in production
+      });
+
+      Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.', [
+        {
+          text: 'Ver anúncio',
+          onPress: () => router.push(`/listing/${listing.id}`),
+        },
+        { text: 'OK' },
+      ]);
+
+      // Reset form
+      setPhotos([]);
+      setTitle('');
+      setDescription('');
+      setPrice('');
+      setCondition('');
+      setSize('');
+      setBrand('');
+      setWeight('');
+      setSelectedCategory('');
+    } catch (_error) {
+      Alert.alert('Erro', 'Não foi possível criar o anúncio. Tente novamente.');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   return (
@@ -49,9 +136,12 @@ export default function SellScreen() {
             <Ionicons name="camera" size={32} color={colors.primary[500]} />
             <Text style={styles.addPhotoText}>Adicionar</Text>
           </TouchableOpacity>
-          {photos.map((_, i) => (
+          {photos.map((uri, i) => (
             <View key={i} style={styles.photoThumb}>
-              <Ionicons name="image" size={32} color={colors.neutral[400]} />
+              <Image source={{ uri }} style={styles.photoImage} />
+              <TouchableOpacity style={styles.removePhoto} onPress={() => removePhoto(i)}>
+                <Ionicons name="close-circle" size={22} color={colors.error[500]} />
+              </TouchableOpacity>
             </View>
           ))}
         </ScrollView>
@@ -84,6 +174,26 @@ export default function SellScreen() {
           maxLength={2000}
         />
       </View>
+
+      {/* Category */}
+      {categories.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.label}>Categoria</Text>
+          <View style={styles.chipGroup}>
+            {categories.map((cat) => (
+              <TouchableOpacity
+                key={cat.id}
+                style={[styles.chip, selectedCategory === cat.id && styles.chipSelected]}
+                onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
+              >
+                <Text style={[styles.chipText, selectedCategory === cat.id && styles.chipTextSelected]}>
+                  {cat.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Condition */}
       <View style={styles.section}>
@@ -163,8 +273,16 @@ export default function SellScreen() {
       </View>
 
       {/* Publish */}
-      <TouchableOpacity style={styles.publishButton} onPress={handlePublish}>
-        <Text style={styles.publishText}>Publicar anúncio</Text>
+      <TouchableOpacity
+        style={[styles.publishButton, publishing && styles.publishDisabled]}
+        onPress={handlePublish}
+        disabled={publishing}
+      >
+        {publishing ? (
+          <ActivityIndicator color={colors.neutral[0]} />
+        ) : (
+          <Text style={styles.publishText}>Publicar anúncio</Text>
+        )}
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
@@ -191,7 +309,13 @@ const styles = StyleSheet.create({
   addPhotoText: { fontSize: 11, color: colors.primary[500], marginTop: 4 },
   photoThumb: {
     width: 90, height: 90, borderRadius: 10, backgroundColor: colors.neutral[100],
-    justifyContent: 'center', alignItems: 'center', marginRight: 10,
+    marginRight: 10, position: 'relative', overflow: 'hidden',
+  },
+  photoImage: {
+    width: 90, height: 90, borderRadius: 10,
+  },
+  removePhoto: {
+    position: 'absolute', top: 2, right: 2, backgroundColor: colors.neutral[0], borderRadius: 11,
   },
   chipGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
@@ -213,5 +337,6 @@ const styles = StyleSheet.create({
     margin: 16, backgroundColor: colors.primary[600], paddingVertical: 16,
     borderRadius: 12, alignItems: 'center',
   },
+  publishDisabled: { opacity: 0.6 },
   publishText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
 });

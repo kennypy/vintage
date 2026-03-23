@@ -1,9 +1,10 @@
 import {
-  View, Text, TextInput, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform,
+  View, Text, TextInput, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { colors } from '../../src/theme/colors';
+import { login } from '../../src/services/auth';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -12,12 +13,20 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Campos obrigatórios', 'Preencha email e senha.');
+      return;
+    }
+
     setLoading(true);
-    // TODO: Call auth API
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      await login(email, password);
       router.replace('/(tabs)');
-    }, 1000);
+    } catch (_error) {
+      Alert.alert('Erro ao entrar', 'Email ou senha incorretos. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
