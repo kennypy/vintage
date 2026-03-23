@@ -263,11 +263,168 @@ export class ListingsService {
     });
   }
 
+  async getFollowingFeed(userId: string, page: number = 1, pageSize: number = 20) {
+    const skip = (page - 1) * pageSize;
+
+    // Get all users that the current user follows
+    const follows = await this.prisma.follow.findMany({
+      where: { followerId: userId },
+      select: { followingId: true },
+    });
+
+    const followingIds = follows.map((f) => f.followingId);
+
+    if (followingIds.length === 0) {
+      return { items: [], total: 0, page, pageSize, hasMore: false };
+    }
+
+    const where: Prisma.ListingWhereInput = {
+      sellerId: { in: followingIds },
+      status: 'ACTIVE',
+    };
+
+    const [items, total] = await Promise.all([
+      this.prisma.listing.findMany({
+        where,
+        include: {
+          images: { orderBy: { position: 'asc' }, take: 1 },
+          category: { select: { namePt: true, slug: true } },
+          brand: { select: { name: true } },
+          seller: {
+            select: { id: true, name: true, avatarUrl: true, verified: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.listing.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+  }
+
   async searchBrands(query: string) {
     return this.prisma.brand.findMany({
       where: { name: { contains: query, mode: 'insensitive' } },
       take: 20,
       orderBy: { name: 'asc' },
     });
+  }
+
+  // --- Saved Searches ---
+
+  async saveSearch(userId: string, query: string, filters: Record<string, any>) {
+    if (!query || query.trim().length === 0) {
+      throw new BadRequestException('Informe um termo de busca');
+    }
+
+    const existingCount = await this.prisma.savedSearch.count({
+      where: { userId },
+    });
+
+    if (existingCount >= 50) {
+      throw new BadRequestException('Limite de 50 buscas salvas atingido');
+    }
+
+    return this.prisma.savedSearch.create({
+      data: {
+        userId,
+        query: query.trim(),
+        filtersJson: filters ?? {},
+        notify: true,
+      },
+    });
+  }
+
+  async getSavedSearches(userId: string) {
+    return this.prisma.savedSearch.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async deleteSavedSearch(searchId: string, userId: string) {
+    const savedSearch = await this.prisma.savedSearch.findUnique({
+      where: { id: searchId },
+    });
+
+    if (!savedSearch) {
+      throw new NotFoundException('Busca salva não encontrada');
+    }
+
+    if (savedSearch.userId !== userId) {
+      throw new ForbiddenException('Você só pode remover suas próprias buscas salvas');
+    }
+
+    await this.prisma.savedSearch.delete({ where: { id: searchId } });
+    return { deleted: true };
+  }
+
+  // --- Smart Pricing ---
+
+  async getPriceSuggestion(
+    categoryId: string,
+    brandId?: string,
+    condition?: string,
+    size?: string,
+  ) {
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category) {
+      throw new BadRequestException('Categoria inválida');
+    }
+
+    const where: Prisma.OrderWhereInput = {
+      status: 'COMPLETED',
+      listing: {
+        categoryId,
+        ...(brandId ? { brandId } : {}),
+        ...(condition ? { condition: condition as any } : {}),
+        ...(size ? { size } : {}),
+      },
+    };
+
+    const aggregate = await this.prisma.order.aggregate({
+      where,
+      _avg: { itemPriceBrl: true },
+      _min: { itemPriceBrl: true },
+      _max: { itemPriceBrl: true },
+      _count: true,
+    });
+
+    if (aggregate._count === 0) {
+      // Fallback: try with only categoryId
+      const fallback = await this.prisma.order.aggregate({
+        where: {
+          status: 'COMPLETED',
+          listing: { categoryId },
+        },
+        _avg: { itemPriceBrl: true },
+        _min: { itemPriceBrl: true },
+        _max: { itemPriceBrl: true },
+        _count: true,
+      });
+
+      if (fallback._count === 0) {
+        throw new NotFoundException('Não há dados suficientes para sugestão de preço nesta categoria');
+      }
+
+      return {
+        suggestedPriceBrl: Number(fallback._avg.itemPriceBrl),
+        minPriceBrl: Number(fallback._min.itemPriceBrl),
+        maxPriceBrl: Number(fallback._max.itemPriceBrl),
+        basedOnCount: fallback._count,
+      };
+    }
+
+    return {
+      suggestedPriceBrl: Number(aggregate._avg.itemPriceBrl),
+      minPriceBrl: Number(aggregate._min.itemPriceBrl),
+      maxPriceBrl: Number(aggregate._max.itemPriceBrl),
+      basedOnCount: aggregate._count,
+    };
   }
 }

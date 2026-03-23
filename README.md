@@ -43,14 +43,22 @@ vintage/
 | Módulo | Endpoints | Funcionalidade |
 |--------|-----------|---------------|
 | **Auth** | register, login, refresh | CPF validation, bcrypt, JWT tokens |
-| **Users** | profile, addresses, follow, vacation | CEP autocomplete, follow counts, vacation mode |
-| **Listings** | CRUD, search, favorites, categories | Filtros por categoria/marca/tamanho/cor/preço, paginação |
+| **Users** | profile, addresses, follow, vacation, storefront | CEP autocomplete, follow counts, vacation mode, public storefront |
+| **Listings** | CRUD, search, favorites, categories, feed, saved searches, price suggestion | Filtros, paginação, social feed, preço sugerido por IA |
 | **Orders** | create, ship, confirm | Escrow, taxa de proteção (R$3,50 + 5%), crédito na carteira |
 | **Offers** | create, accept, reject | Mínimo 50% do preço, expiração em 48h |
 | **Wallet** | balance, transactions, payout | Saque via PIX, mínimo R$10 |
 | **Messages** | conversations, send | Chat em tempo real, marcar como lido |
 | **Reviews** | create, list | Avaliação binária (1 ou 5 estrelas) |
 | **Notifications** | list, read, read-all | Contagem de não lidas |
+| **Search** | full-text search | Meilisearch: filtros, ordenação, atributos pesquisáveis |
+| **Payments** | PIX, cartão, boleto, webhook | QR code PIX, parcelamento 12x, boleto |
+| **Shipping** | rates, labels, tracking, drop-off | Correios PAC/SEDEX, Jadlog, rastreamento |
+| **Disputes** | open, resolve | Janela de 2 dias, reembolso ou liberação |
+| **Bundles** | create, checkout | Pacotes com frete combinado, múltiplos itens |
+| **Promotions** | megafone, bump, spotlight | Boost grátis 7 dias, impulsionar R$4,90, destaque R$29,90 |
+| **Reports** | file, list | Denúncia de anúncios e usuários |
+| **Nota Fiscal** | generate, preview tax | NF-e mock, cálculo ICMS/ISS |
 
 ## Database
 

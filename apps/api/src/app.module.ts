@@ -16,6 +16,10 @@ import { SearchModule } from './search/search.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { DisputesModule } from './disputes/disputes.module';
+import { ReportsModule } from './reports/reports.module';
+import { NotaFiscalModule } from './notafiscal/notafiscal.module';
+import { BundlesModule } from './bundles/bundles.module';
+import { PromotionsModule } from './promotions/promotions.module';
 
 @Module({
   imports: [
@@ -41,6 +45,10 @@ import { DisputesModule } from './disputes/disputes.module';
     PaymentsModule,
     ShippingModule,
     DisputesModule,
+    ReportsModule,
+    NotaFiscalModule,
+    BundlesModule,
+    PromotionsModule,
   ],
 })
 export class AppModule {}
