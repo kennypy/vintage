@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
@@ -20,10 +20,17 @@ const TRANSACTION_COLORS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  completed: 'Concluído',
+  completed: 'Concluido',
   pending: 'Pendente',
   failed: 'Falhou',
 };
+
+const PIX_KEY_TYPES: { value: string; label: string }[] = [
+  { value: 'cpf', label: 'CPF' },
+  { value: 'email', label: 'E-mail' },
+  { value: 'phone', label: 'Telefone' },
+  { value: 'random', label: 'Chave aleatoria' },
+];
 
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,6 +41,10 @@ export default function WalletScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [payoutLoading, setPayoutLoading] = useState(false);
+  const [payoutModalVisible, setPayoutModalVisible] = useState(false);
+  const [pixKey, setPixKey] = useState('');
+  const [pixKeyType, setPixKeyType] = useState('cpf');
+  const [payoutAmount, setPayoutAmount] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -60,38 +71,49 @@ export default function WalletScreen() {
     setRefreshing(false);
   }, [fetchData]);
 
-  const handlePayout = () => {
+  const openPayoutModal = () => {
     if (!balance || balance.availableBrl <= 0) {
-      Alert.alert('Saldo insuficiente', 'Você não tem saldo disponível para saque.');
+      Alert.alert('Saldo insuficiente', 'Voce nao tem saldo disponivel para saque.');
+      return;
+    }
+    setPayoutAmount(formatBrl(balance.availableBrl));
+    setPixKey('');
+    setPixKeyType('cpf');
+    setPayoutModalVisible(true);
+  };
+
+  const handlePayout = async () => {
+    if (!pixKey.trim()) {
+      Alert.alert('Chave PIX obrigatoria', 'Informe sua chave PIX para continuar.');
       return;
     }
 
-    Alert.alert(
-      'Sacar via PIX',
-      `Sacar R$ ${formatBrl(balance.availableBrl)} para sua chave PIX cadastrada?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sacar',
-          onPress: async () => {
-            setPayoutLoading(true);
-            try {
-              await requestPayout({
-                amountBrl: balance.availableBrl,
-                pixKey: '',
-                pixKeyType: 'cpf',
-              });
-              Alert.alert('Saque solicitado!', 'O valor será transferido em até 1 dia útil.');
-              await fetchData();
-            } catch (_error) {
-              Alert.alert('Erro', 'Não foi possível processar o saque. Tente novamente.');
-            } finally {
-              setPayoutLoading(false);
-            }
-          },
-        },
-      ],
-    );
+    const parsedAmount = parseFloat(payoutAmount.replace(/\./g, '').replace(',', '.'));
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert('Valor invalido', 'Informe um valor valido para o saque.');
+      return;
+    }
+
+    if (balance && parsedAmount > balance.availableBrl) {
+      Alert.alert('Saldo insuficiente', 'O valor informado excede seu saldo disponivel.');
+      return;
+    }
+
+    setPayoutLoading(true);
+    try {
+      await requestPayout({
+        amountBrl: parsedAmount,
+        pixKey: pixKey.trim(),
+        pixKeyType,
+      });
+      setPayoutModalVisible(false);
+      Alert.alert('Saque solicitado!', 'O valor sera transferido em ate 1 dia util.');
+      await fetchData();
+    } catch (_error) {
+      Alert.alert('Erro', 'Nao foi possivel processar o saque. Tente novamente.');
+    } finally {
+      setPayoutLoading(false);
+    }
   };
 
   if (loading) {
@@ -106,7 +128,7 @@ export default function WalletScreen() {
     <View style={styles.container}>
       {/* Balance Card */}
       <View style={styles.balanceCard}>
-        <Text style={styles.balanceLabel}>Saldo disponível</Text>
+        <Text style={styles.balanceLabel}>Saldo disponivel</Text>
         <Text style={styles.balanceAmount}>
           R$ {formatBrl(balance?.availableBrl ?? 0)}
         </Text>
@@ -116,19 +138,16 @@ export default function WalletScreen() {
           </Text>
         )}
         <TouchableOpacity
-          style={[styles.payoutButton, payoutLoading && styles.payoutDisabled]}
-          onPress={handlePayout}
-          disabled={payoutLoading}
+          style={styles.payoutButton}
+          onPress={openPayoutModal}
         >
           <Ionicons name="arrow-up-circle-outline" size={20} color={colors.neutral[0]} />
-          <Text style={styles.payoutText}>
-            {payoutLoading ? 'Processando...' : 'Sacar via PIX'}
-          </Text>
+          <Text style={styles.payoutText}>Sacar via PIX</Text>
         </TouchableOpacity>
       </View>
 
       {/* Transactions */}
-      <Text style={styles.sectionTitle}>Histórico</Text>
+      <Text style={styles.sectionTitle}>Historico</Text>
       <FlatList
         data={transactions}
         keyExtractor={(item) => item.id}
@@ -149,7 +168,7 @@ export default function WalletScreen() {
             </View>
             <Text style={[
               styles.transactionAmount,
-              { color: item.type === 'sale' || item.type === 'refund' ? colors.success[600] : colors.neutral[800] },
+              { color: item.type === 'sale' || item.type === 'refund' ? colors.success[600] : colors.error[500] },
             ]}>
               {item.type === 'sale' || item.type === 'refund' ? '+' : '-'}R$ {formatBrl(Math.abs(item.amountBrl))}
             </Text>
@@ -161,13 +180,96 @@ export default function WalletScreen() {
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="wallet-outline" size={64} color={colors.neutral[300]} />
-            <Text style={styles.emptyTitle}>Nenhuma transação</Text>
+            <Text style={styles.emptyTitle}>Nenhuma transacao</Text>
             <Text style={styles.emptyText}>
-              Seu histórico de transações aparecerá aqui.
+              Seu historico de transacoes aparecera aqui.
             </Text>
           </View>
         }
       />
+
+      {/* Payout Modal */}
+      <Modal
+        visible={payoutModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPayoutModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Sacar via PIX</Text>
+              <TouchableOpacity onPress={() => setPayoutModalVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.neutral[600]} />
+              </TouchableOpacity>
+            </View>
+
+            {/* PIX Key Type Selector */}
+            <Text style={styles.inputLabel}>Tipo de chave PIX</Text>
+            <View style={styles.pixTypeRow}>
+              {PIX_KEY_TYPES.map((type) => (
+                <TouchableOpacity
+                  key={type.value}
+                  style={[
+                    styles.pixTypeChip,
+                    pixKeyType === type.value && styles.pixTypeChipActive,
+                  ]}
+                  onPress={() => setPixKeyType(type.value)}
+                >
+                  <Text style={[
+                    styles.pixTypeText,
+                    pixKeyType === type.value && styles.pixTypeTextActive,
+                  ]}>
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* PIX Key Input */}
+            <Text style={styles.inputLabel}>Chave PIX</Text>
+            <TextInput
+              style={styles.textInput}
+              value={pixKey}
+              onChangeText={setPixKey}
+              placeholder="Informe sua chave PIX"
+              placeholderTextColor={colors.neutral[400]}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            {/* Amount Input */}
+            <Text style={styles.inputLabel}>Valor (R$)</Text>
+            <TextInput
+              style={styles.textInput}
+              value={payoutAmount}
+              onChangeText={setPayoutAmount}
+              placeholder="0,00"
+              placeholderTextColor={colors.neutral[400]}
+              keyboardType="numeric"
+            />
+            <Text style={styles.availableHint}>
+              Disponivel: R$ {formatBrl(balance?.availableBrl ?? 0)}
+            </Text>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              style={[styles.submitButton, payoutLoading && styles.submitDisabled]}
+              onPress={handlePayout}
+              disabled={payoutLoading}
+            >
+              {payoutLoading ? (
+                <ActivityIndicator size="small" color={colors.neutral[0]} />
+              ) : (
+                <>
+                  <Ionicons name="arrow-up-circle" size={20} color={colors.neutral[0]} />
+                  <Text style={styles.submitText}>Confirmar saque</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -187,7 +289,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.pix, paddingHorizontal: 20, paddingVertical: 12,
     borderRadius: 10, marginTop: 16,
   },
-  payoutDisabled: { opacity: 0.6 },
   payoutText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
   sectionTitle: {
     fontSize: 16, fontWeight: '600', color: colors.neutral[900],
@@ -209,4 +310,48 @@ const styles = StyleSheet.create({
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginTop: 16 },
   emptyText: { fontSize: 14, color: colors.neutral[400], marginTop: 4 },
+  // Modal styles
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.neutral[0], borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 24, paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: { fontSize: 20, fontWeight: '700', color: colors.neutral[900] },
+  inputLabel: {
+    fontSize: 14, fontWeight: '600', color: colors.neutral[700],
+    marginTop: 16, marginBottom: 8,
+  },
+  pixTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pixTypeChip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.neutral[300],
+    backgroundColor: colors.neutral[0],
+  },
+  pixTypeChipActive: {
+    borderColor: colors.pix, backgroundColor: colors.pix + '15',
+  },
+  pixTypeText: { fontSize: 13, fontWeight: '500', color: colors.neutral[600] },
+  pixTypeTextActive: { color: colors.pix, fontWeight: '600' },
+  textInput: {
+    borderWidth: 1, borderColor: colors.neutral[300], borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
+    color: colors.neutral[900], backgroundColor: colors.neutral[50],
+  },
+  availableHint: {
+    fontSize: 12, color: colors.neutral[400], marginTop: 4,
+  },
+  submitButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: colors.pix, paddingVertical: 14, borderRadius: 10,
+    marginTop: 24,
+  },
+  submitDisabled: { opacity: 0.6 },
+  submitText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
 });
