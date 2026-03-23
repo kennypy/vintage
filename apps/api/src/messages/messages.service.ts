@@ -107,4 +107,47 @@ export class MessagesService {
       data: { participant1Id: id1, participant2Id: id2 },
     });
   }
+
+  async getUnreadCount(userId: string): Promise<number> {
+    // Count all unread messages across all conversations for this user
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        OR: [{ participant1Id: userId }, { participant2Id: userId }],
+      },
+      select: { id: true },
+    });
+
+    const conversationIds = conversations.map((c) => c.id);
+    if (conversationIds.length === 0) return 0;
+
+    return this.prisma.message.count({
+      where: {
+        conversationId: { in: conversationIds },
+        senderId: { not: userId },
+        readAt: null,
+      },
+    });
+  }
+
+  async markConversationRead(conversationId: string, userId: string): Promise<number> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+
+    if (!conversation) throw new NotFoundException('Conversa não encontrada');
+    if (conversation.participant1Id !== userId && conversation.participant2Id !== userId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+
+    const result = await this.prisma.message.updateMany({
+      where: {
+        conversationId,
+        senderId: { not: userId },
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
+
+    return result.count;
+  }
 }

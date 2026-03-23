@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
 
@@ -11,6 +12,13 @@ const mockMercadoPago = {
   refundPayment: jest.fn(),
 };
 
+const mockConfigService = {
+  get: jest.fn((key: string, defaultValue?: string) => {
+    if (key === 'NODE_ENV') return 'development';
+    return defaultValue ?? '';
+  }),
+};
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
 
@@ -21,6 +29,7 @@ describe('PaymentsService', () => {
       providers: [
         PaymentsService,
         { provide: MercadoPagoClient, useValue: mockMercadoPago },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -164,12 +173,12 @@ describe('PaymentsService', () => {
     it('should reject webhook with invalid signature', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(false);
 
-      const result = await service.handleWebhook(
-        { type: 'payment' },
-        'bad-sig',
-      );
-
-      expect(result).toEqual({ received: false, error: 'Invalid signature' });
+      await expect(
+        service.handleWebhook(
+          { action: 'payment.updated', data: { id: 'pay-1' } },
+          'bad-sig',
+        ),
+      ).rejects.toThrow();
     });
 
     it('should process payment.updated action', async () => {

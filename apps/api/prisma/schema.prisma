@@ -14,23 +14,26 @@ datasource db {
 // --- Users ---
 
 model User {
-  id             String    @id @default(cuid())
-  email          String    @unique
-  passwordHash   String
-  cpf            String    @unique
-  name           String
-  phone          String?
-  avatarUrl      String?
-  bio            String?
-  verified       Boolean   @default(false)
-  vacationMode   Boolean   @default(false)
-  vacationUntil  DateTime?
-  ratingAvg      Float     @default(0)
-  ratingCount    Int       @default(0)
-  followerCount  Int       @default(0)
-  followingCount Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String
+  cpf              String?   @unique
+  name             String
+  phone            String?
+  avatarUrl        String?
+  bio              String?
+  verified         Boolean   @default(false)
+  cpfVerified      Boolean   @default(false)
+  socialProvider   String?   // 'google', 'apple', or null
+  socialProviderId String?   // provider's unique user ID
+  vacationMode     Boolean   @default(false)
+  vacationUntil    DateTime?
+  ratingAvg        Float     @default(0)
+  ratingCount      Int       @default(0)
+  followerCount    Int       @default(0)
+  followingCount   Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // Relations
   listings          Listing[]
@@ -52,9 +55,11 @@ model User {
   promotions        Promotion[]
   savedSearches     SavedSearch[]
   priceDropAlerts   PriceDropAlert[]
+  deviceTokens      DeviceToken[]
 
   @@index([email])
   @@index([cpf])
+  @@index([socialProvider, socialProviderId])
 }
 
 // --- Listings ---
@@ -361,6 +366,20 @@ model Notification {
 
   @@index([userId, readAt])
   @@index([userId, createdAt])
+}
+
+// --- Device Tokens (Push Notifications) ---
+
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String   // 'ios' or 'android'
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 // --- Addresses ---

@@ -20,6 +20,9 @@ import { ReportsModule } from './reports/reports.module';
 import { NotaFiscalModule } from './notafiscal/notafiscal.module';
 import { BundlesModule } from './bundles/bundles.module';
 import { PromotionsModule } from './promotions/promotions.module';
+import { EmailModule } from './email/email.module';
+import { PushModule } from './push/push.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -49,6 +52,9 @@ import { PromotionsModule } from './promotions/promotions.module';
     NotaFiscalModule,
     BundlesModule,
     PromotionsModule,
+    EmailModule,
+    PushModule,
+    UploadsModule,
   ],
 })
 export class AppModule {}
