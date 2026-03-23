@@ -13,6 +13,27 @@ import { CreateAddressDto } from './dto/create-address.dto';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('storefront/:username')
+  @ApiOperation({ summary: 'Ver vitrine pública de um vendedor' })
+  getStorefront(
+    @Param('username') username: string,
+    @Query('page') page: number = 1,
+    @Query('pageSize') pageSize: number = 20,
+  ) {
+    return this.usersService.getStorefront(username, page, pageSize);
+  }
+
+  @Patch('me/cover-photo')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Atualizar foto de capa do perfil' })
+  updateCoverPhoto(
+    @Body() body: { coverPhotoUrl: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.updateCoverPhoto(user.id, body.coverPhotoUrl);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar perfil de usuário' })
   getProfile(@Param('id') id: string) {

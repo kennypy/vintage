@@ -40,6 +40,58 @@ export class ListingsController {
     return this.listingsService.searchBrands(q || '');
   }
 
+  @Post('saved-searches')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Salvar busca para receber notificações' })
+  saveSearch(
+    @Body() body: { query: string; filters?: Record<string, any> },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.listingsService.saveSearch(user.id, body.query, body.filters ?? {});
+  }
+
+  @Get('saved-searches')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Listar buscas salvas do usuário' })
+  getSavedSearches(@CurrentUser() user: AuthUser) {
+    return this.listingsService.getSavedSearches(user.id);
+  }
+
+  @Delete('saved-searches/:id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Remover busca salva' })
+  deleteSavedSearch(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.listingsService.deleteSavedSearch(id, user.id);
+  }
+
+  @Get('price-suggestion')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Obter sugestão de preço inteligente baseada em vendas anteriores' })
+  getPriceSuggestion(
+    @Query('categoryId') categoryId: string,
+    @Query('brandId') brandId?: string,
+    @Query('condition') condition?: string,
+    @Query('size') size?: string,
+  ) {
+    return this.listingsService.getPriceSuggestion(categoryId, brandId, condition, size);
+  }
+
+  @Get('feed')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Feed de anúncios de quem você segue' })
+  getFollowingFeed(
+    @CurrentUser() user: AuthUser,
+    @Query('page') page: number = 1,
+    @Query('pageSize') pageSize: number = 20,
+  ) {
+    return this.listingsService.getFollowingFeed(user.id, page, pageSize);
+  }
+
   @Get('favorites')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

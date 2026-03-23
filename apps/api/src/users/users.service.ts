@@ -194,6 +194,89 @@ export class UsersService {
     return { following: false };
   }
 
+  // --- Storefront ---
+
+  async getStorefront(username: string, page: number = 1, pageSize: number = 20) {
+    // Search by name field (case-insensitive) since User model has no username field
+    const user = await this.prisma.user.findFirst({
+      where: { name: { equals: username, mode: 'insensitive' } },
+      select: {
+        id: true,
+        name: true,
+        avatarUrl: true,
+        bio: true,
+        verified: true,
+        ratingAvg: true,
+        ratingCount: true,
+        followerCount: true,
+        followingCount: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Loja não encontrada');
+    }
+
+    const skip = (page - 1) * pageSize;
+
+    const [items, total] = await Promise.all([
+      this.prisma.listing.findMany({
+        where: { sellerId: user.id, status: 'ACTIVE' },
+        include: {
+          images: { orderBy: { position: 'asc' }, take: 1 },
+          category: { select: { namePt: true, slug: true } },
+          brand: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.listing.count({
+        where: { sellerId: user.id, status: 'ACTIVE' },
+      }),
+    ]);
+
+    return {
+      seller: user,
+      listings: {
+        items,
+        total,
+        page,
+        pageSize,
+        hasMore: skip + items.length < total,
+      },
+    };
+  }
+
+  async updateCoverPhoto(userId: string, coverPhotoUrl: string) {
+    // TODO: Add coverPhotoUrl field to User model in Prisma schema.
+    // For now, storing in the bio field as a workaround is not ideal.
+    // Instead, we store it as a JSON-encoded prefix in bio: "{{cover:<url>}}<actual bio>"
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { bio: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
+    // TODO: Replace this with a proper coverPhotoUrl column on the User model
+    // Extract existing bio text (strip any previous cover photo marker)
+    const existingBio = (user.bio || '').replace(/^\{\{cover:[^}]*\}\}/, '');
+    const newBio = `{{cover:${coverPhotoUrl}}}${existingBio}`;
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { bio: newBio },
+      select: {
+        id: true,
+        bio: true,
+      },
+    });
+  }
+
   // --- Vacation Mode ---
 
   async toggleVacationMode(userId: string, enabled: boolean, untilDate?: string) {
