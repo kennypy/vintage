@@ -12,6 +12,10 @@ import { MessagesModule } from './messages/messages.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
+import { SearchModule } from './search/search.module';
+import { PaymentsModule } from './payments/payments.module';
+import { ShippingModule } from './shipping/shipping.module';
+import { DisputesModule } from './disputes/disputes.module';
 
 @Module({
   imports: [
@@ -33,6 +37,10 @@ import { HealthModule } from './health/health.module';
     ReviewsModule,
     NotificationsModule,
     HealthModule,
+    SearchModule,
+    PaymentsModule,
+    ShippingModule,
+    DisputesModule,
   ],
 })
 export class AppModule {}
