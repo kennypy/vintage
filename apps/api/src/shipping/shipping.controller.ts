@@ -80,7 +80,11 @@ export class ShippingController {
   @Get('dropoff-points')
   @ApiOperation({ summary: 'Buscar pontos de coleta próximos' })
   @ApiQuery({ name: 'cep', required: true, description: 'CEP para busca' })
-  @ApiQuery({ name: 'carrier', required: false, description: 'Filtrar por transportadora' })
+  @ApiQuery({
+    name: 'carrier',
+    required: false,
+    description: 'Filtrar por transportadora',
+  })
   @ApiResponse({ status: 200, description: 'Lista de pontos de coleta' })
   getDropoffPoints(
     @Query('cep') cep: string,

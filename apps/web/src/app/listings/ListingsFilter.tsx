@@ -1,19 +1,54 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-const categories = ['Vestidos', 'Calças', 'Camisetas', 'Blusas', 'Sapatos', 'Bolsas', 'Acessórios'];
-const conditions = ['Novo com etiqueta', 'Novo', 'Ótimo', 'Bom', 'Satisfatório'];
+export interface FilterState {
+  category: string;
+  condition: string;
+  size: string;
+  brand: string;
+  priceMin: string;
+  priceMax: string;
+}
+
+interface ListingsFilterProps {
+  onFilterChange?: (filters: FilterState) => void;
+}
+
+const categories = ['Vestidos', 'Calcas', 'Camisetas', 'Blusas', 'Sapatos', 'Bolsas', 'Acessorios'];
+const conditions = ['Novo com etiqueta', 'Novo', 'Otimo', 'Bom', 'Satisfatorio'];
 const sizes = ['PP', 'P', 'M', 'G', 'GG', 'XG'];
-const brands = ['Farm', 'Zara', 'Levi\'s', 'Adidas', 'Nike', 'Arezzo', 'Animale', 'Osklen'];
+const brands = ['Farm', 'Zara', "Levi's", 'Adidas', 'Nike', 'Arezzo', 'Animale', 'Osklen'];
 
-export default function ListingsFilter() {
+export default function ListingsFilter({ onFilterChange }: ListingsFilterProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedCondition, setSelectedCondition] = useState<string>('');
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [selectedBrand, setSelectedBrand] = useState<string>('');
   const [priceMin, setPriceMin] = useState('');
   const [priceMax, setPriceMax] = useState('');
+
+  useEffect(() => {
+    if (onFilterChange) {
+      onFilterChange({
+        category: selectedCategory,
+        condition: selectedCondition,
+        size: selectedSize,
+        brand: selectedBrand,
+        priceMin,
+        priceMax,
+      });
+    }
+  }, [selectedCategory, selectedCondition, selectedSize, selectedBrand, priceMin, priceMax, onFilterChange]);
+
+  const clearFilters = () => {
+    setSelectedCategory('');
+    setSelectedCondition('');
+    setSelectedSize('');
+    setSelectedBrand('');
+    setPriceMin('');
+    setPriceMax('');
+  };
 
   return (
     <aside className="hidden md:block w-64 shrink-0">
@@ -40,7 +75,7 @@ export default function ListingsFilter() {
 
         {/* Condition */}
         <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Condição</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Condicao</h3>
           <div className="space-y-2">
             {conditions.map((cond) => (
               <label key={cond} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -80,7 +115,7 @@ export default function ListingsFilter() {
 
         {/* Price range */}
         <div>
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Preço (R$)</h3>
+          <h3 className="text-sm font-semibold text-gray-900 mb-3">Preco (R$)</h3>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -89,7 +124,7 @@ export default function ListingsFilter() {
               onChange={(e) => setPriceMin(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-600"
             />
-            <span className="text-gray-400">—</span>
+            <span className="text-gray-400">&mdash;</span>
             <input
               type="number"
               placeholder="Max"
@@ -122,14 +157,7 @@ export default function ListingsFilter() {
 
         {/* Clear filters */}
         <button
-          onClick={() => {
-            setSelectedCategory('');
-            setSelectedCondition('');
-            setSelectedSize('');
-            setSelectedBrand('');
-            setPriceMin('');
-            setPriceMax('');
-          }}
+          onClick={clearFilters}
           className="w-full text-sm text-brand-600 hover:text-brand-700 transition py-2"
         >
           Limpar filtros
