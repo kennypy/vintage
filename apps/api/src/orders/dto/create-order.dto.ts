@@ -1,0 +1,29 @@
+import { IsString, IsEnum, IsOptional, IsInt, Min, Max } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+enum PaymentMethod {
+  PIX = 'PIX',
+  CREDIT_CARD = 'CREDIT_CARD',
+  BOLETO = 'BOLETO',
+}
+
+export class CreateOrderDto {
+  @ApiProperty({ example: 'clxyz789', description: 'ID do anúncio' })
+  @IsString()
+  listingId!: string;
+
+  @ApiProperty({ example: 'clxyz012', description: 'ID do endereço de entrega' })
+  @IsString()
+  addressId!: string;
+
+  @ApiProperty({ enum: PaymentMethod, example: 'PIX', description: 'Método de pagamento' })
+  @IsEnum(PaymentMethod)
+  paymentMethod!: PaymentMethod;
+
+  @ApiPropertyOptional({ example: 3, description: 'Número de parcelas (apenas cartão de crédito)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  installments?: number;
+}
