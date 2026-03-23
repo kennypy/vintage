@@ -38,3 +38,42 @@ export async function startConversation(
     body: JSON.stringify({ listingId, message }),
   });
 }
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface MessagesResponse {
+  items: Message[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export async function getMessages(
+  conversationId: string,
+  page?: number,
+): Promise<MessagesResponse> {
+  const query = page ? `?page=${page}` : '';
+  return apiFetch<MessagesResponse>(
+    `/messages/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
+  );
+}
+
+export async function sendMessage(
+  conversationId: string,
+  body: string,
+): Promise<Message> {
+  return apiFetch<Message>(
+    `/messages/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    },
+  );
+}

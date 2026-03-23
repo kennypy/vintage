@@ -1,9 +1,10 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { AuthProvider } from '../src/contexts/AuthContext';
 
 export default function RootLayout() {
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -46,7 +47,35 @@ export default function RootLayout() {
           name="seller/[id]"
           options={{ title: 'Perfil do vendedor' }}
         />
+        <Stack.Screen
+          name="conversation/[id]"
+          options={{ title: 'Conversa' }}
+        />
+        <Stack.Screen
+          name="profile/edit"
+          options={{ title: 'Editar perfil' }}
+        />
+        <Stack.Screen
+          name="addresses/index"
+          options={{ title: 'Endereços' }}
+        />
+        <Stack.Screen
+          name="favorites/index"
+          options={{ title: 'Favoritos' }}
+        />
+        <Stack.Screen
+          name="my-listings/index"
+          options={{ title: 'Meus anúncios' }}
+        />
+        <Stack.Screen
+          name="reviews/[userId]"
+          options={{ title: 'Avaliações' }}
+        />
+        <Stack.Screen
+          name="reviews/write"
+          options={{ title: 'Escrever avaliação', presentation: 'modal' }}
+        />
       </Stack>
-    </>
+    </AuthProvider>
   );
 }

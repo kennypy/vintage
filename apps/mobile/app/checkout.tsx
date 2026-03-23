@@ -2,10 +2,11 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
 import { createOrder } from '../src/services/orders';
+import { getAddresses, Address } from '../src/services/addresses';
 
 type PaymentMethod = 'pix' | 'credit_card' | 'boleto';
 
@@ -24,6 +25,22 @@ export default function CheckoutScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
   const [paying, setPaying] = useState(false);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
+
+  useEffect(() => {
+    async function fetchAddresses() {
+      try {
+        const data = await getAddresses();
+        setAddresses(data);
+        const defaultAddr = data.find((a) => a.isDefault) ?? data[0] ?? null;
+        setSelectedAddress(defaultAddr);
+      } catch (_error) {
+        // fallback to no address
+      }
+    }
+    fetchAddresses();
+  }, []);
 
   const itemPrice = params.priceBrl ? parseFloat(params.priceBrl) : 89.9;
   const listingTitle = params.title ?? 'Item';
@@ -43,7 +60,7 @@ export default function CheckoutScreen() {
     try {
       await createOrder({
         listingId: params.listingId,
-        addressId: 'default',
+        addressId: selectedAddress?.id ?? 'default',
         shippingOptionId: 'standard',
       });
       Alert.alert(
@@ -83,12 +100,23 @@ export default function CheckoutScreen() {
         {/* Address */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Endereço de entrega</Text>
-          <TouchableOpacity style={styles.addressCard}>
+          <TouchableOpacity style={styles.addressCard} onPress={() => router.push('/addresses')}>
             <Ionicons name="location-outline" size={20} color={colors.neutral[600]} />
             <View style={styles.addressInfo}>
-              <Text style={styles.addressLabel}>Casa</Text>
-              <Text style={styles.addressText}>Rua das Flores, 123 - Jardim Paulista</Text>
-              <Text style={styles.addressText}>São Paulo, SP - 01234-567</Text>
+              {selectedAddress ? (
+                <>
+                  <Text style={styles.addressLabel}>{selectedAddress.label}</Text>
+                  <Text style={styles.addressText}>
+                    {selectedAddress.street}, {selectedAddress.number}
+                    {selectedAddress.complement ? ` - ${selectedAddress.complement}` : ''}
+                  </Text>
+                  <Text style={styles.addressText}>
+                    {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.cep}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.addressText}>Adicionar endereço de entrega</Text>
+              )}
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.neutral[400]} />
           </TouchableOpacity>

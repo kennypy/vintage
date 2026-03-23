@@ -4,10 +4,11 @@ import {
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { colors } from '../../src/theme/colors';
-import { login } from '../../src/services/auth';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,7 +21,7 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      await login(email, password);
+      await signIn(email, password);
       router.replace('/(tabs)');
     } catch (_error) {
       Alert.alert('Erro ao entrar', 'Email ou senha incorretos. Tente novamente.');

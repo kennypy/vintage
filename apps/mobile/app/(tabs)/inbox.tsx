@@ -48,7 +48,7 @@ export default function InboxScreen() {
   }, [fetchConversations]);
 
   const handleConversationPress = (conversation: Conversation) => {
-    router.push(`/listing/${conversation.listingId}`);
+    router.push(`/conversation/${conversation.id}?participantName=${encodeURIComponent(conversation.participant.name)}`);
   };
 
   if (loading) {
