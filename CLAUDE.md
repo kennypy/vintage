@@ -95,6 +95,12 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - **Mobile app**: `react@18.3.1` (pinned by Expo)
 - **ESLint**: v9 flat config — do NOT add `eslint-config-next` (requires ESLint 8)
 
+### README Maintenance
+- **Always update `README.md`** when making changes that affect the project structure, setup instructions, available scripts, API modules, database models, or tech stack
+- Examples of changes that require a README update: adding a new API module, adding a new app or package, changing the database schema significantly, adding new environment variables, changing how to run the project
+- Keep the README in Portuguese (BR) to match the project locale
+- The README should always reflect the current state of the project — not aspirational features
+
 ### Commit Hygiene
 - Run the full pre-push checklist above before every commit that will be pushed
 - Do not commit code with lint errors
