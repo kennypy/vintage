@@ -5,10 +5,11 @@ import {
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { colors } from '../../src/theme/colors';
-import { register } from '../../src/services/auth';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const { signUp } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
@@ -36,7 +37,7 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       const rawCpf = cpf.replace(/\D/g, '');
-      await register(name, email, rawCpf, password);
+      await signUp(name, email, rawCpf, password);
       router.replace('/(tabs)');
     } catch (_error) {
       Alert.alert('Erro ao criar conta', 'Não foi possível criar sua conta. Verifique os dados e tente novamente.');

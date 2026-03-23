@@ -1,41 +1,14 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
-import { getProfile } from '../../src/services/users';
-import { logout } from '../../src/services/auth';
-import { getToken } from '../../src/services/api';
-import type { UserProfile } from '../../src/services/users';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { user, isAuthenticated, isLoading: loading, signOut } = useAuth();
   const [vacationMode, setVacationMode] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
-
-  const checkAuthAndFetch = useCallback(async () => {
-    try {
-      const token = await getToken();
-      if (!token) {
-        setIsAuthenticated(false);
-        setLoading(false);
-        return;
-      }
-      setIsAuthenticated(true);
-      const profile = await getProfile();
-      setUser(profile);
-    } catch (_error) {
-      setIsAuthenticated(false);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    checkAuthAndFetch();
-  }, [checkAuthAndFetch]);
 
   const handleLogout = async () => {
     Alert.alert('Sair da conta', 'Tem certeza que deseja sair?', [
@@ -44,9 +17,7 @@ export default function ProfileScreen() {
         text: 'Sair',
         style: 'destructive',
         onPress: async () => {
-          await logout();
-          setIsAuthenticated(false);
-          setUser(null);
+          await signOut();
           router.replace('/(auth)/login');
         },
       },
@@ -101,7 +72,7 @@ export default function ProfileScreen() {
             <Text style={styles.ratingText}>{user.ratingAvg} ({user.ratingCount})</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.editButton}>
+        <TouchableOpacity style={styles.editButton} onPress={() => router.push('/profile/edit')}>
           <Ionicons name="create-outline" size={20} color={colors.primary[600]} />
         </TouchableOpacity>
       </View>
@@ -144,10 +115,10 @@ export default function ProfileScreen() {
       <View style={styles.menuSection}>
         <Text style={styles.menuSectionTitle}>Compras e Vendas</Text>
         <MenuItem icon="bag-outline" label="Minhas compras" onPress={() => router.push('/orders')} />
-        <MenuItem icon="pricetag-outline" label="Meus anúncios" />
-        <MenuItem icon="heart-outline" label="Favoritos" />
+        <MenuItem icon="pricetag-outline" label="Meus anúncios" onPress={() => router.push('/my-listings')} />
+        <MenuItem icon="heart-outline" label="Favoritos" onPress={() => router.push('/favorites')} />
         <MenuItem icon="chatbubble-outline" label="Ofertas recebidas" onPress={() => router.push('/offers')} />
-        <MenuItem icon="star-outline" label="Avaliações" />
+        <MenuItem icon="star-outline" label="Avaliações" onPress={() => router.push(`/reviews/${user?.id}`)} />
       </View>
 
       <View style={styles.menuSection}>
@@ -169,7 +140,7 @@ export default function ProfileScreen() {
           />
         </View>
         <MenuItem icon="notifications-outline" label="Notificações" onPress={() => router.push('/notifications')} />
-        <MenuItem icon="location-outline" label="Endereços" />
+        <MenuItem icon="location-outline" label="Endereços" onPress={() => router.push('/addresses')} />
         <MenuItem icon="shield-checkmark-outline" label="Verificação" />
         <MenuItem icon="settings-outline" label="Configurações" />
         <MenuItem icon="help-circle-outline" label="Ajuda" />

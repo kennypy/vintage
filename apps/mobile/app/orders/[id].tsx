@@ -1,8 +1,9 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { getOrder, markShipped, confirmReceipt } from '../../src/services/orders';
 import type { Order, OrderStatus } from '../../src/services/orders';
 
@@ -23,6 +24,8 @@ const formatBrl = (value: number) =>
 
 export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const { user: authUser } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -108,8 +111,8 @@ export default function OrderDetailScreen() {
   }
 
   const currentStatusIndex = STATUS_TIMELINE.indexOf(order.status);
-  const isSeller = true; // In production, compare with authenticated user ID
-  const isBuyer = !isSeller;
+  const isSeller = authUser?.id === (order as Record<string, unknown>).sellerId;
+  const isBuyer = authUser?.id === (order as Record<string, unknown>).buyerId;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -241,6 +244,16 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
+      {order.status === 'confirmed' && isBuyer && (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.reviewButton]}
+          onPress={() => router.push(`/reviews/write?orderId=${order.id}`)}
+        >
+          <Ionicons name="star-outline" size={20} color={colors.neutral[0]} />
+          <Text style={styles.actionButtonText}>Deixar avaliação</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -282,6 +295,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[600],
   },
   confirmButton: { backgroundColor: colors.success[600] },
+  reviewButton: { backgroundColor: colors.accent[500] },
   actionDisabled: { opacity: 0.6 },
   actionButtonText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
 });
