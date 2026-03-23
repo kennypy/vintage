@@ -250,29 +250,21 @@ export class UsersService {
   }
 
   async updateCoverPhoto(userId: string, coverPhotoUrl: string) {
-    // TODO: Add coverPhotoUrl field to User model in Prisma schema.
-    // For now, storing in the bio field as a workaround is not ideal.
-    // Instead, we store it as a JSON-encoded prefix in bio: "{{cover:<url>}}<actual bio>"
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { bio: true },
+      select: { id: true },
     });
 
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // TODO: Replace this with a proper coverPhotoUrl column on the User model
-    // Extract existing bio text (strip any previous cover photo marker)
-    const existingBio = (user.bio || '').replace(/^\{\{cover:[^}]*\}\}/, '');
-    const newBio = `{{cover:${coverPhotoUrl}}}${existingBio}`;
-
     return this.prisma.user.update({
       where: { id: userId },
-      data: { bio: newBio },
+      data: { coverPhotoUrl },
       select: {
         id: true,
-        bio: true,
+        coverPhotoUrl: true,
       },
     });
   }

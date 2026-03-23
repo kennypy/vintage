@@ -26,6 +26,7 @@ model User {
   cpfVerified      Boolean   @default(false)
   socialProvider   String?   // 'google', 'apple', or null
   socialProviderId String?   // provider's unique user ID
+  coverPhotoUrl    String?
   vacationMode     Boolean   @default(false)
   vacationUntil    DateTime?
   ratingAvg        Float     @default(0)
@@ -56,6 +57,7 @@ model User {
   savedSearches     SavedSearch[]
   priceDropAlerts   PriceDropAlert[]
   deviceTokens      DeviceToken[]
+  reports           Report[]
 
   @@index([email])
   @@index([cpf])
@@ -333,6 +335,27 @@ model Review {
   @@unique([orderId, reviewerId])
 }
 
+// --- Reports ---
+
+model Report {
+  id          String       @id @default(cuid())
+  reporterId  String
+  targetType  String       // 'listing' or 'user'
+  targetId    String
+  reason      String
+  description String?
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  reporter User @relation(fields: [reporterId], references: [id])
+
+  @@unique([reporterId, targetType, targetId, status])
+  @@index([reporterId])
+  @@index([targetType, targetId])
+  @@index([status])
+}
+
 // --- Disputes ---
 
 model Dispute {
@@ -537,6 +560,12 @@ enum DisputeStatus {
   OPEN
   RESOLVED
   ESCALATED
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
 }
 
 enum Carrier {
