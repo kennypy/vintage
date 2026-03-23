@@ -1,7 +1,131 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateOfferDto } from './dto/create-offer.dto';
+import {
+  MIN_OFFER_PERCENTAGE,
+  OFFER_EXPIRY_HOURS,
+} from '@vintage/shared';
 
 @Injectable()
 export class OffersService {
   constructor(private prisma: PrismaService) {}
+
+  async create(buyerId: string, dto: CreateOfferDto) {
+    const listing = await this.prisma.listing.findUnique({
+      where: { id: dto.listingId },
+    });
+
+    if (!listing) {
+      throw new NotFoundException('Anúncio não encontrado');
+    }
+
+    if (listing.status !== 'ACTIVE') {
+      throw new BadRequestException('Este anúncio não está disponível para ofertas');
+    }
+
+    if (listing.sellerId === buyerId) {
+      throw new BadRequestException('Você não pode fazer uma oferta no seu próprio anúncio');
+    }
+
+    const minAmount = Number(listing.priceBrl) * MIN_OFFER_PERCENTAGE;
+    if (dto.amountBrl < minAmount) {
+      throw new BadRequestException(
+        `O valor mínimo da oferta é R$ ${minAmount.toFixed(2)} (50% do preço do anúncio)`,
+      );
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + OFFER_EXPIRY_HOURS);
+
+    return this.prisma.offer.create({
+      data: {
+        listingId: dto.listingId,
+        buyerId,
+        amountBrl: dto.amountBrl,
+        status: 'PENDING',
+        expiresAt,
+      },
+      include: {
+        listing: {
+          include: {
+            images: { orderBy: { position: 'asc' }, take: 1 },
+          },
+        },
+        buyer: { select: { id: true, name: true, avatarUrl: true } },
+      },
+    });
+  }
+
+  async accept(offerId: string, sellerId: string) {
+    const offer = await this.prisma.offer.findUnique({
+      where: { id: offerId },
+      include: { listing: true },
+    });
+
+    if (!offer) {
+      throw new NotFoundException('Oferta não encontrada');
+    }
+
+    if (offer.listing.sellerId !== sellerId) {
+      throw new ForbiddenException('Apenas o vendedor pode aceitar esta oferta');
+    }
+
+    if (offer.status !== 'PENDING') {
+      throw new BadRequestException('Esta oferta não está mais pendente');
+    }
+
+    if (offer.expiresAt < new Date()) {
+      throw new BadRequestException('Esta oferta expirou');
+    }
+
+    return this.prisma.offer.update({
+      where: { id: offerId },
+      data: { status: 'ACCEPTED' },
+      include: {
+        listing: {
+          include: {
+            images: { orderBy: { position: 'asc' }, take: 1 },
+          },
+        },
+        buyer: { select: { id: true, name: true, avatarUrl: true } },
+      },
+    });
+  }
+
+  async reject(offerId: string, sellerId: string) {
+    const offer = await this.prisma.offer.findUnique({
+      where: { id: offerId },
+      include: { listing: true },
+    });
+
+    if (!offer) {
+      throw new NotFoundException('Oferta não encontrada');
+    }
+
+    if (offer.listing.sellerId !== sellerId) {
+      throw new ForbiddenException('Apenas o vendedor pode rejeitar esta oferta');
+    }
+
+    if (offer.status !== 'PENDING') {
+      throw new BadRequestException('Esta oferta não está mais pendente');
+    }
+
+    return this.prisma.offer.update({
+      where: { id: offerId },
+      data: { status: 'REJECTED' },
+      include: {
+        listing: {
+          include: {
+            images: { orderBy: { position: 'asc' }, take: 1 },
+          },
+        },
+        buyer: { select: { id: true, name: true, avatarUrl: true } },
+      },
+    });
+  }
 }
