@@ -8,6 +8,8 @@ export default [
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parser: tsParser,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
       parserOptions: {
         ecmaFeatures: { jsx: true },
       },
@@ -35,7 +37,7 @@ export default [
     },
     rules: {
       'no-unused-vars': 'off',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-console': 'warn',
     },
   },

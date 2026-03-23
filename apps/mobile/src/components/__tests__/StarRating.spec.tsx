@@ -1,10 +1,10 @@
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import { StarRating } from '../StarRating';
 
 describe('StarRating', () => {
   it('renders 5 star icons', () => {
-    const { getAllByTestId, toJSON } = render(<StarRating rating={3} />);
+    const { toJSON } = render(<StarRating rating={3} />);
     // Count total Ionicons rendered (they show up as Text elements in RN testing)
     const tree = toJSON();
     // With rating=3, we should see 5 stars total
@@ -19,7 +19,7 @@ describe('StarRating', () => {
 
   it('calls onRate with correct value when interactive star is pressed', () => {
     const onRate = jest.fn();
-    const { UNSAFE_getAllByType } = render(
+    const _renderResult = render(
       <StarRating rating={2} interactive onRate={onRate} />,
     );
 

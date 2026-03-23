@@ -14,6 +14,11 @@ const mockPrisma = {
   notification: {
     create: jest.fn(),
   },
+  report: {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
 };
 
 describe('ReportsService', () => {
@@ -35,6 +40,17 @@ describe('ReportsService', () => {
   describe('createReport', () => {
     it('should create a report for a listing target', async () => {
       mockPrisma.listing.findUnique.mockResolvedValue({ id: 'listing-1', status: 'ACTIVE' });
+      mockPrisma.report.findFirst.mockResolvedValue(null);
+      mockPrisma.report.create.mockResolvedValue({
+        id: 'report-1',
+        reporterId: 'reporter-1',
+        targetType: 'listing',
+        targetId: 'listing-1',
+        reason: 'counterfeit',
+        description: 'Produto falso',
+        status: 'PENDING',
+        createdAt: new Date(),
+      });
       mockPrisma.notification.create.mockResolvedValue({});
 
       const result = await service.createReport('reporter-1', {
@@ -47,11 +63,28 @@ describe('ReportsService', () => {
       expect(result.reporterId).toBe('reporter-1');
       expect(result.targetType).toBe('listing');
       expect(result.targetId).toBe('listing-1');
-      expect(result.status).toBe('pending');
+      expect(result.status).toBe('PENDING');
+      expect(mockPrisma.report.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          reporterId: 'reporter-1',
+          targetType: 'listing',
+          targetId: 'listing-1',
+        }),
+      });
     });
 
     it('should create a report for a user target', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', name: 'Test' });
+      mockPrisma.report.findFirst.mockResolvedValue(null);
+      mockPrisma.report.create.mockResolvedValue({
+        id: 'report-2',
+        reporterId: 'reporter-1',
+        targetType: 'user',
+        targetId: 'user-1',
+        reason: 'harassment',
+        status: 'PENDING',
+        createdAt: new Date(),
+      });
       mockPrisma.notification.create.mockResolvedValue({});
 
       const result = await service.createReport('reporter-1', {
@@ -124,16 +157,14 @@ describe('ReportsService', () => {
 
     it('should prevent duplicate pending reports from same user', async () => {
       mockPrisma.listing.findUnique.mockResolvedValue({ id: 'listing-1', status: 'ACTIVE' });
-      mockPrisma.notification.create.mockResolvedValue({});
-
-      // Create first report
-      await service.createReport('reporter-1', {
-        targetType: ReportTargetType.LISTING,
+      mockPrisma.report.findFirst.mockResolvedValue({
+        id: 'existing-report',
+        reporterId: 'reporter-1',
+        targetType: 'listing',
         targetId: 'listing-1',
-        reason: 'spam' as any,
+        status: 'PENDING',
       });
 
-      // Try to create duplicate
       await expect(
         service.createReport('reporter-1', {
           targetType: ReportTargetType.LISTING,
@@ -153,22 +184,32 @@ describe('ReportsService', () => {
 
   describe('getUserReports', () => {
     it('should return reports for the given user', async () => {
-      mockPrisma.listing.findUnique.mockResolvedValue({ id: 'listing-1', status: 'ACTIVE' });
-      mockPrisma.notification.create.mockResolvedValue({});
-
-      await service.createReport('user-1', {
-        targetType: ReportTargetType.LISTING,
-        targetId: 'listing-1',
-        reason: 'spam' as any,
-      });
+      const mockReports = [
+        {
+          id: 'report-1',
+          reporterId: 'user-1',
+          targetType: 'listing',
+          targetId: 'listing-1',
+          reason: 'spam',
+          status: 'PENDING',
+          createdAt: new Date(),
+        },
+      ];
+      mockPrisma.report.findMany.mockResolvedValue(mockReports);
 
       const result = await service.getUserReports('user-1');
 
       expect(result).toHaveLength(1);
       expect(result[0].reporterId).toBe('user-1');
+      expect(mockPrisma.report.findMany).toHaveBeenCalledWith({
+        where: { reporterId: 'user-1' },
+        orderBy: { createdAt: 'desc' },
+      });
     });
 
     it('should return empty array for user with no reports', async () => {
+      mockPrisma.report.findMany.mockResolvedValue([]);
+
       const result = await service.getUserReports('user-with-no-reports');
 
       expect(result).toEqual([]);

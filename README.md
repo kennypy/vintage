@@ -13,7 +13,7 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 |--------|-----------|-----------|
 | Mobile (P1) | React Native (Expo) | App iOS + Android — plataforma principal |
 | Web (P2) | Next.js 14 + Tailwind CSS | Site secundário |
-| API | NestJS + Prisma + PostgreSQL | Backend com 17 módulos |
+| API | NestJS + Prisma + PostgreSQL | Backend com 20+ módulos |
 | Shared | TypeScript package | Tipos, constantes, validação CPF/CEP |
 | Infra | Docker Compose | Postgres 16, Redis 7, Meilisearch |
 | CI | GitHub Actions | Lint, type-check, test, build |
@@ -24,13 +24,13 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 vintage/
 ├── apps/
 │   ├── mobile/           # React Native (Expo) — iOS + Android
-│   │   ├── app/          # Expo Router (16 telas: tabs, auth, orders, offers, wallet, etc.)
-│   │   └── src/          # 8 services API, theme, hooks, components
+│   │   ├── app/          # Expo Router (16+ telas: tabs, auth, orders, offers, wallet, chat, etc.)
+│   │   └── src/          # 8 services API, theme, hooks, contexts, components
 │   ├── web/              # Next.js 14 + Tailwind CSS
-│   │   └── src/          # 8 páginas (home, listings, sell, auth, profile) + componentes
+│   │   └── src/          # 8 páginas (home, listings, sell, auth, profile) + componentes + testes
 │   └── api/              # NestJS backend
-│       ├── prisma/       # Schema (20+ models) + seed
-│       └── src/          # 17 módulos + 81 testes unitários
+│       ├── prisma/       # Schema (25+ models) + seed
+│       └── src/          # 20+ módulos + 111 testes unitários
 ├── packages/
 │   └── shared/           # Types, constants, CPF/CEP validation
 ├── docker-compose.yml    # Postgres, Redis, Meilisearch
@@ -42,13 +42,13 @@ vintage/
 
 | Módulo | Endpoints | Funcionalidade |
 |--------|-----------|---------------|
-| **Auth** | register, login, refresh | CPF validation, bcrypt, JWT tokens |
+| **Auth** | register, login, refresh, Google OAuth, Apple Sign In | CPF validation, bcrypt, JWT, social login |
 | **Users** | profile, addresses, follow, vacation, storefront | CEP autocomplete, follow counts, vacation mode, public storefront |
 | **Listings** | CRUD, search, favorites, categories, feed, saved searches, price suggestion | Filtros, paginação, social feed, preço sugerido por IA |
 | **Orders** | create, ship, confirm | Escrow, taxa de proteção (R$3,50 + 5%), crédito na carteira |
 | **Offers** | create, accept, reject | Mínimo 50% do preço, expiração em 48h |
 | **Wallet** | balance, transactions, payout | Saque via PIX, mínimo R$10 |
-| **Messages** | conversations, send | Chat em tempo real, marcar como lido |
+| **Messages** | conversations, send, WebSocket gateway | Chat em tempo real (Socket.io), typing, read receipts, online status |
 | **Reviews** | create, list | Avaliação binária (1 ou 5 estrelas) |
 | **Notifications** | list, read, read-all | Contagem de não lidas |
 | **Search** | full-text search | Meilisearch: filtros, ordenação, atributos pesquisáveis |
@@ -57,12 +57,15 @@ vintage/
 | **Disputes** | open, resolve | Janela de 2 dias, reembolso ou liberação |
 | **Bundles** | create, checkout | Pacotes com frete combinado, múltiplos itens |
 | **Promotions** | megafone, bump, spotlight | Boost grátis 7 dias, impulsionar R$4,90, destaque R$29,90 |
-| **Reports** | file, list | Denúncia de anúncios e usuários |
+| **Reports** | file, list | Denúncia de anúncios e usuários (Prisma-backed) |
 | **Nota Fiscal** | generate, preview tax | NF-e mock, cálculo ICMS/ISS |
+| **Uploads** | presigned URLs, file upload | S3 com criptografia AES256, validação MIME |
+| **Email** | transactional emails | Boas-vindas, confirmação de pedido, envio, pagamento |
+| **Push** | device tokens, send | Push notifications via Expo (iOS + Android) |
 
 ## Database
 
-20 modelos Prisma: User, Listing, ListingImage, Category, Brand, Order, Offer, Bundle, BundleItem, Wallet, WalletTransaction, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Promotion, SavedSearch, PriceSuggestion, PriceDropAlert.
+25+ modelos Prisma: User, Listing, ListingImage, Category, Brand, Order, Offer, Bundle, BundleItem, Wallet, WalletTransaction, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Promotion, SavedSearch, PriceSuggestion, PriceDropAlert, Report, DeviceToken.
 
 **Seed**: 10 categorias com 55 subcategorias + 55 marcas brasileiras e internacionais.
 

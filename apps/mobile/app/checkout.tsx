@@ -25,7 +25,7 @@ export default function CheckoutScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
   const [paying, setPaying] = useState(false);
-  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [_addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
 
   useEffect(() => {

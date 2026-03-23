@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import Home from '../page';
 
@@ -40,15 +40,15 @@ beforeEach(() => {
 describe('Home page', () => {
   it('renders the hero section with heading', async () => {
     mockFetch({ data: [] });
-    render(<Home />);
-    expect(screen.getByText(/Moda de segunda mao/)).toBeInTheDocument();
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText(/Moda de segunda mao/)).toBeInTheDocument());
     expect(screen.getByText(/com estilo e economia/)).toBeInTheDocument();
   });
 
   it('renders hero call-to-action links', async () => {
     mockFetch({ data: [] });
-    render(<Home />);
-    expect(screen.getByText('Explorar pecas')).toBeInTheDocument();
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText('Explorar pecas')).toBeInTheDocument());
     expect(screen.getByText('Comecar a vender')).toBeInTheDocument();
   });
 
@@ -95,14 +95,14 @@ describe('Home page', () => {
 
   it('shows the Destaques section heading', async () => {
     mockFetch({ data: [] });
-    render(<Home />);
-    expect(screen.getByText('Destaques')).toBeInTheDocument();
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText('Destaques')).toBeInTheDocument());
   });
 
   it('renders category grid with all categories', async () => {
     mockFetch({ data: [] });
-    render(<Home />);
-    expect(screen.getByText('Categorias')).toBeInTheDocument();
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText('Categorias')).toBeInTheDocument());
     expect(screen.getByText('Vestidos')).toBeInTheDocument();
     expect(screen.getByText('Calcas')).toBeInTheDocument();
     expect(screen.getByText('Camisetas')).toBeInTheDocument();
@@ -113,8 +113,8 @@ describe('Home page', () => {
 
   it('renders how it works section', async () => {
     mockFetch({ data: [] });
-    render(<Home />);
-    expect(screen.getByText('Como funciona')).toBeInTheDocument();
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText('Como funciona')).toBeInTheDocument());
     expect(screen.getByText('Encontre')).toBeInTheDocument();
     expect(screen.getByText('Compre')).toBeInTheDocument();
     expect(screen.getByText('Receba')).toBeInTheDocument();
