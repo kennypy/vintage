@@ -22,6 +22,30 @@ export default function RootLayout() {
           name="checkout"
           options={{ title: 'Checkout', presentation: 'modal' }}
         />
+        <Stack.Screen
+          name="orders/index"
+          options={{ title: 'Meus pedidos' }}
+        />
+        <Stack.Screen
+          name="orders/[id]"
+          options={{ title: 'Detalhes do pedido' }}
+        />
+        <Stack.Screen
+          name="offers/index"
+          options={{ title: 'Ofertas' }}
+        />
+        <Stack.Screen
+          name="notifications/index"
+          options={{ title: 'Notificações' }}
+        />
+        <Stack.Screen
+          name="wallet/index"
+          options={{ title: 'Carteira' }}
+        />
+        <Stack.Screen
+          name="seller/[id]"
+          options={{ title: 'Perfil do vendedor' }}
+        />
       </Stack>
     </>
   );

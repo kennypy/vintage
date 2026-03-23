@@ -21,6 +21,7 @@ export default [
         window: 'readonly',
         process: 'readonly',
         URL: 'readonly',
+        localStorage: 'readonly',
       },
     },
     plugins: {

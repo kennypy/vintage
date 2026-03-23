@@ -1,12 +1,14 @@
-import { View, Text, StyleSheet, FlatList, RefreshControl, Dimensions } from 'react-native';
-import { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, RefreshControl, Dimensions, ActivityIndicator } from 'react-native';
+import { useState, useCallback, useEffect } from 'react';
 import { colors } from '../../src/theme/colors';
 import { ListingCard } from '../../src/components/ListingCard';
+import { getListings, toggleFavorite as toggleFavoriteApi } from '../../src/services/listings';
+import type { Listing } from '../../src/services/listings';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: _SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = 12;
 
-// Mock data until API integration
+// Mock data as fallback
 const MOCK_LISTINGS = [
   { id: '1', title: 'Vestido Zara tamanho M', priceBrl: 89.9, sellerName: 'Maria S.', sellerVerified: true, condition: 'VERY_GOOD', size: 'M' },
   { id: '2', title: 'Tênis Nike Air Max 42', priceBrl: 199.9, sellerName: 'João P.', condition: 'GOOD', size: '42' },
@@ -16,23 +18,79 @@ const MOCK_LISTINGS = [
   { id: '6', title: 'Jaqueta Farm estampada', priceBrl: 129.9, sellerName: 'Bia F.', condition: 'GOOD', size: 'P' },
 ];
 
+function mapListingToCard(listing: Listing) {
+  return {
+    id: listing.id,
+    title: listing.title,
+    priceBrl: listing.priceBrl,
+    imageUrl: listing.images[0]?.url,
+    sellerName: listing.seller.name,
+    sellerVerified: false,
+    condition: listing.condition,
+    size: listing.size,
+    favorited: listing.isFavorited,
+  };
+}
+
 export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [listings, setListings] = useState<any[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    // TODO: Fetch feed from API
-    setTimeout(() => setRefreshing(false), 1000);
+  const fetchListings = useCallback(async () => {
+    try {
+      const response = await getListings({ sortBy: 'newest', limit: 20 });
+      const mapped = response.items.map(mapListingToCard);
+      setListings(mapped);
+      const favSet = new Set<string>();
+      response.items.forEach((item) => {
+        if (item.isFavorited) favSet.add(item.id);
+      });
+      setFavorites(favSet);
+    } catch (_error) {
+      // Fallback to mock data
+      setListings(MOCK_LISTINGS);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const toggleFavorite = (id: string) => {
+  useEffect(() => {
+    fetchListings();
+  }, [fetchListings]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchListings();
+    setRefreshing(false);
+  }, [fetchListings]);
+
+  const toggleFavorite = async (id: string) => {
     setFavorites((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    try {
+      await toggleFavoriteApi(id);
+    } catch (_error) {
+      // Revert on failure
+      setFavorites((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+    }
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color={colors.primary[500]} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -41,7 +99,7 @@ export default function HomeScreen() {
         <Text style={styles.tagline}>Moda de segunda mão</Text>
       </View>
       <FlatList
-        data={MOCK_LISTINGS}
+        data={listings}
         numColumns={2}
         keyExtractor={(item) => item.id}
         columnWrapperStyle={styles.row}
@@ -64,6 +122,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral[50] },
+  centered: { justifyContent: 'center', alignItems: 'center' },
   header: {
     paddingHorizontal: 16,
     paddingTop: 8,

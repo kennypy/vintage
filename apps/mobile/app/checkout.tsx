@@ -1,29 +1,85 @@
 import {
-  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
+import { createOrder } from '../src/services/orders';
 
 type PaymentMethod = 'pix' | 'credit_card' | 'boleto';
 
+const formatBrl = (value: number) =>
+  value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export default function CheckoutScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    listingId: string;
+    title: string;
+    priceBrl: string;
+    imageUrl: string;
+  }>();
+
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
+  const [paying, setPaying] = useState(false);
 
-  // TODO: Get order data from navigation params / API
-  const itemPrice = 89.9;
+  const itemPrice = params.priceBrl ? parseFloat(params.priceBrl) : 89.9;
+  const listingTitle = params.title ?? 'Item';
   const shippingCost = 18.9;
   const buyerProtectionFee = 3.5 + itemPrice * 0.05;
   const total = itemPrice + shippingCost + buyerProtectionFee;
 
   const installmentOptions = [1, 2, 3, 6, 10, 12];
 
+  const handlePay = async () => {
+    if (!params.listingId) {
+      Alert.alert('Erro', 'Dados do anúncio não encontrados.');
+      return;
+    }
+
+    setPaying(true);
+    try {
+      await createOrder({
+        listingId: params.listingId,
+        addressId: 'default',
+        shippingOptionId: 'standard',
+      });
+      Alert.alert(
+        'Pedido realizado!',
+        `Seu pedido de "${listingTitle}" foi realizado com sucesso.`,
+        [
+          {
+            text: 'Ver pedidos',
+            onPress: () => {
+              router.dismiss();
+              router.push('/orders');
+            },
+          },
+          {
+            text: 'OK',
+            onPress: () => router.dismiss(),
+          },
+        ],
+      );
+    } catch (_error) {
+      Alert.alert('Erro no pagamento', 'Não foi possível processar o pagamento. Tente novamente.');
+    } finally {
+      setPaying(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* Item Info */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Item</Text>
+          <Text style={styles.itemTitle}>{listingTitle}</Text>
+          <Text style={styles.itemPrice}>R$ {formatBrl(itemPrice)}</Text>
+        </View>
+
         {/* Address */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Endereço de entrega</Text>
@@ -115,7 +171,7 @@ export default function CheckoutScreen() {
                   onPress={() => setInstallments(n)}
                 >
                   <Text style={styles.installmentLabel}>
-                    {n}x de R$ {installmentAmount.toFixed(2)}
+                    {n}x de R$ {formatBrl(installmentAmount)}
                   </Text>
                   {n === 1 && <Text style={styles.installmentHint}>sem juros</Text>}
                   <Ionicons
@@ -134,19 +190,19 @@ export default function CheckoutScreen() {
           <Text style={styles.sectionTitle}>Resumo do pedido</Text>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Item</Text>
-            <Text style={styles.summaryValue}>R$ {itemPrice.toFixed(2)}</Text>
+            <Text style={styles.summaryValue}>R$ {formatBrl(itemPrice)}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Frete</Text>
-            <Text style={styles.summaryValue}>R$ {shippingCost.toFixed(2)}</Text>
+            <Text style={styles.summaryValue}>R$ {formatBrl(shippingCost)}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Proteção ao comprador</Text>
-            <Text style={styles.summaryValue}>R$ {buyerProtectionFee.toFixed(2)}</Text>
+            <Text style={styles.summaryValue}>R$ {formatBrl(buyerProtectionFee)}</Text>
           </View>
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>R$ {total.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>R$ {formatBrl(total)}</Text>
           </View>
         </View>
 
@@ -170,20 +226,22 @@ export default function CheckoutScreen() {
         <View style={styles.bottomTotal}>
           <Text style={styles.bottomTotalLabel}>Total</Text>
           <Text style={styles.bottomTotalValue}>
-            R$ {total.toFixed(2)}
+            R$ {formatBrl(total)}
           </Text>
         </View>
         <TouchableOpacity
-          style={styles.payButton}
-          onPress={() => {
-            // TODO: Call payments API
-            router.back();
-          }}
+          style={[styles.payButton, paying && styles.payButtonDisabled]}
+          onPress={handlePay}
+          disabled={paying}
         >
-          <Text style={styles.payButtonText}>
-            {paymentMethod === 'pix' ? 'Pagar com PIX' :
-              paymentMethod === 'credit_card' ? 'Pagar com cartão' : 'Gerar boleto'}
-          </Text>
+          {paying ? (
+            <ActivityIndicator color={colors.neutral[0]} size="small" />
+          ) : (
+            <Text style={styles.payButtonText}>
+              {paymentMethod === 'pix' ? 'Pagar com PIX' :
+                paymentMethod === 'credit_card' ? 'Pagar com cartão' : 'Gerar boleto'}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -201,6 +259,8 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16, fontWeight: '600', color: colors.neutral[900], marginBottom: 12,
   },
+  itemTitle: { fontSize: 15, color: colors.neutral[700] },
+  itemPrice: { fontSize: 18, fontWeight: '700', color: colors.neutral[900], marginTop: 4 },
   addressCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     padding: 12, backgroundColor: colors.neutral[50], borderRadius: 10,
@@ -263,5 +323,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[600], paddingHorizontal: 24, paddingVertical: 14,
     borderRadius: 12,
   },
+  payButtonDisabled: { opacity: 0.6 },
   payButtonText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
 });
