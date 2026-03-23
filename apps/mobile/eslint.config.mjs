@@ -40,6 +40,22 @@ export default [
     },
   },
   {
+    files: ['**/*.spec.{ts,tsx}', '**/*.test.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}', '**/__mocks__/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        globalThis: 'readonly',
+        jest: 'readonly',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+      },
+    },
+  },
+  {
     ignores: ['.expo/', 'node_modules/', 'dist/', 'babel.config.js'],
   },
 ];
