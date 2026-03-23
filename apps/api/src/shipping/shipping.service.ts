@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { CorreiosClient } from './correios.client';
+import { JadlogClient } from './jadlog.client';
 
 export interface ShippingOption {
   carrier: string;
@@ -34,115 +36,131 @@ export interface DropoffPoint {
 
 @Injectable()
 export class ShippingService {
-  // TODO: Replace with real Correios API (sigepweb) and Jadlog API integration
+  private readonly logger = new Logger(ShippingService.name);
+
+  constructor(
+    private readonly correios: CorreiosClient,
+    private readonly jadlog: JadlogClient,
+  ) {}
 
   /**
    * Calcula fretes disponíveis com base no CEP de origem/destino e peso.
    */
-  calculateRates(
-    _originCep: string,
-    _destinationCep: string,
+  async calculateRates(
+    originCep: string,
+    destinationCep: string,
     weightG: number,
-    _length?: number,
-    _width?: number,
-    _height?: number,
-  ): ShippingOption[] {
-    const baseRateMin = 15;
-    const baseRateMax = 25;
-    const perGramRate = 0.01;
+    length?: number,
+    width?: number,
+    height?: number,
+  ): Promise<ShippingOption[]> {
+    const dimensions =
+      length && width && height ? { length, width, height } : undefined;
 
-    const baseCorreiosPac =
-      baseRateMin + Math.random() * (baseRateMax - baseRateMin);
-    const baseCorreiosSedex =
-      baseRateMax + Math.random() * (baseRateMax - baseRateMin);
-    const baseJadlog =
-      (baseRateMin + baseRateMax) / 2 + Math.random() * (baseRateMax - baseRateMin);
+    const [correiosRates, jadlogRates] = await Promise.all([
+      this.correios
+        .calculateRates(originCep, destinationCep, weightG, dimensions)
+        .catch((err) => {
+          this.logger.error(
+            `Correios rate calculation failed: ${String(err).slice(0, 200)}`,
+          );
+          return [];
+        }),
+      this.jadlog
+        .calculateRates(originCep, destinationCep, weightG)
+        .catch((err) => {
+          this.logger.error(
+            `Jadlog rate calculation failed: ${String(err).slice(0, 200)}`,
+          );
+          return [];
+        }),
+    ]);
 
-    const weightCost = weightG * perGramRate;
+    const options: ShippingOption[] = [];
 
-    return [
-      {
+    for (const rate of correiosRates) {
+      options.push({
         carrier: 'Correios',
-        serviceName: 'PAC',
-        priceBrl: Math.round((baseCorreiosPac + weightCost) * 100) / 100,
-        estimatedDays: '5-10 dias úteis',
+        serviceName: rate.serviceName,
+        priceBrl: rate.priceBrl,
+        estimatedDays: `${rate.estimatedDays} dias úteis`,
         trackingAvailable: true,
-      },
-      {
-        carrier: 'Correios',
-        serviceName: 'SEDEX',
-        priceBrl: Math.round((baseCorreiosSedex + weightCost) * 100) / 100,
-        estimatedDays: '1-3 dias úteis',
-        trackingAvailable: true,
-      },
-      {
+      });
+    }
+
+    for (const rate of jadlogRates) {
+      options.push({
         carrier: 'Jadlog',
-        serviceName: '.Package',
-        priceBrl: Math.round((baseJadlog + weightCost) * 100) / 100,
-        estimatedDays: '3-7 dias úteis',
+        serviceName: rate.serviceName,
+        priceBrl: rate.priceBrl,
+        estimatedDays: `${rate.estimatedDays} dias úteis`,
         trackingAvailable: true,
-      },
-    ];
+      });
+    }
+
+    return options;
   }
 
   /**
    * Gera etiqueta de envio para o pedido.
    */
-  generateShippingLabel(
+  async generateShippingLabel(
     orderId: string,
     carrier: string,
-    _originAddress: string,
-    _destinationAddress: string,
-    _weightG: number,
-  ): ShippingLabel {
-    // TODO: Call Correios SIGEP Web API or Jadlog API to generate real label
-    const trackingCode = 'BR' + this.generateRandomAlphanumeric(11);
-    const estimatedDelivery = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    originAddress: string,
+    destinationAddress: string,
+    weightG: number,
+  ): Promise<ShippingLabel> {
+    const normalizedCarrier = carrier.toLowerCase();
 
+    if (normalizedCarrier === 'jadlog') {
+      const label = await this.jadlog.generateLabel(
+        orderId,
+        originAddress,
+        destinationAddress,
+        weightG,
+      );
+      return {
+        labelUrl: label.labelUrl,
+        trackingCode: label.trackingCode,
+        carrier: 'Jadlog',
+        estimatedDelivery: label.estimatedDelivery,
+      };
+    }
+
+    // Default to Correios
+    const label = await this.correios.generateLabel(
+      orderId,
+      originAddress,
+      destinationAddress,
+      weightG,
+    );
     return {
-      labelUrl: `https://vintage.br/labels/${orderId}-${carrier.toLowerCase()}.pdf`,
-      trackingCode,
-      carrier,
-      estimatedDelivery,
+      labelUrl: label.labelUrl,
+      trackingCode: label.trackingCode,
+      carrier: 'Correios',
+      estimatedDelivery: label.estimatedDelivery,
     };
   }
 
   /**
    * Consulta status de rastreamento de um envio.
    */
-  getTrackingStatus(_trackingCode: string): TrackingEvent[] {
-    // TODO: Poll Correios SRO API or Jadlog tracking API
-    const now = new Date();
+  async getTrackingStatus(trackingCode: string): Promise<TrackingEvent[]> {
+    // Determine carrier from tracking code prefix
+    if (trackingCode.startsWith('JD')) {
+      return this.jadlog.getTracking(trackingCode);
+    }
 
-    return [
-      {
-        status: 'POSTED',
-        location: 'São Paulo, SP',
-        timestamp: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-        description: 'Objeto postado',
-      },
-      {
-        status: 'IN_TRANSIT',
-        location: 'Curitiba, PR',
-        timestamp: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-        description: 'Em trânsito',
-      },
-      {
-        status: 'OUT_FOR_DELIVERY',
-        location: 'Curitiba, PR',
-        timestamp: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        description: 'Saiu para entrega',
-      },
-    ];
+    // Default to Correios
+    return this.correios.getTracking(trackingCode);
   }
 
   /**
    * Retorna pontos de coleta/entrega próximos ao CEP informado.
    */
-  getDropoffPoints(cep: string, carrier?: string): DropoffPoint[] {
-    // TODO: Use Correios agency locator API
+  getDropoffPoints(_cep: string, carrier?: string): DropoffPoint[] {
+    // TODO: Integrate with Correios agency locator and Jadlog partner points API
     const allPoints: DropoffPoint[] = [
       {
         name: 'Agência Correios Centro',
@@ -189,14 +207,5 @@ export class ShippingService {
     }
 
     return allPoints;
-  }
-
-  private generateRandomAlphanumeric(length: number): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
   }
 }

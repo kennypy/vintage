@@ -4,6 +4,7 @@ import {
   Post,
   Param,
   Body,
+  Headers,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -67,8 +68,11 @@ export class PaymentsController {
   @Post('webhook')
   @ApiOperation({ summary: 'Receber webhook de pagamento (Mercado Pago)' })
   @ApiResponse({ status: 200, description: 'Webhook processado' })
-  handleWebhook(@Body() payload: Record<string, any>) {
-    return this.paymentsService.handleWebhook(payload);
+  handleWebhook(
+    @Body() payload: Record<string, unknown>,
+    @Headers('x-signature') signature?: string,
+  ) {
+    return this.paymentsService.handleWebhook(payload, signature);
   }
 
   @Get(':id')

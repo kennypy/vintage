@@ -1,91 +1,84 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { MercadoPagoClient } from './mercadopago.client';
 
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
-  async createPixPayment(orderId: string, amountBrl: number) {
-    const id = randomUUID();
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
+  constructor(private readonly mercadoPago: MercadoPagoClient) {}
 
-    // TODO: Integrar com Mercado Pago SDK para gerar QR Code PIX real
-    return {
-      id,
+  async createPixPayment(orderId: string, amountBrl: number) {
+    this.logger.log(`Creating PIX payment for order ${orderId}`);
+    return this.mercadoPago.createPixPayment(
       orderId,
-      method: 'pix',
       amountBrl,
-      qrCode: `00020126580014br.gov.bcb.pix0136${id}5204000053039865802BR5913VintageBR6009SAO PAULO`,
-      qrCodeBase64: 'data:image/png;base64,MOCK_QR_CODE_BASE64',
-      pixCopiaECola: `00020126580014br.gov.bcb.pix0136${id}`,
-      expiresAt: expiresAt.toISOString(),
-      status: 'pending',
-    };
+      `Vintage.br - Pedido ${orderId}`,
+    );
   }
 
   async createCardPayment(
     orderId: string,
     amountBrl: number,
     installments: number,
+    cardToken?: string,
   ) {
-    const id = randomUUID();
-    const installmentAmount = Math.ceil((amountBrl / installments) * 100) / 100;
-    const total = installmentAmount * installments;
-
-    // TODO: Integrar com Mercado Pago SDK para processar pagamento com cartão
-    return {
-      id,
+    this.logger.log(`Creating card payment for order ${orderId}`);
+    return this.mercadoPago.createCardPayment(
       orderId,
-      method: 'card',
+      amountBrl,
       installments,
-      installmentAmount,
-      total,
-      status: 'pending',
-    };
+      cardToken ?? '',
+    );
   }
 
   async createBoletoPayment(orderId: string, amountBrl: number) {
-    const id = randomUUID();
-    const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 dias
-
-    // TODO: Integrar com Mercado Pago SDK para gerar boleto real
-    return {
-      id,
+    this.logger.log(`Creating boleto payment for order ${orderId}`);
+    return this.mercadoPago.createBoletoPayment(
       orderId,
-      method: 'boleto',
       amountBrl,
-      barcodeUrl: `https://api.mercadopago.com/v1/payments/${id}/boleto`,
-      expiresAt: expiresAt.toISOString(),
-      status: 'pending',
-    };
+      `Vintage.br - Pedido ${orderId}`,
+    );
   }
 
-  async handleWebhook(payload: Record<string, any>) {
-    // TODO: Verify Mercado Pago webhook signature (HMAC-SHA256) before processing
-    this.logger.log(`Webhook recebido: ${JSON.stringify(payload)}`);
+  async handleWebhook(payload: Record<string, unknown>, signature?: string) {
+    const payloadStr = JSON.stringify(payload);
+
+    // Verify webhook signature (HMAC-SHA256)
+    if (signature) {
+      const valid = this.mercadoPago.verifyWebhookSignature(
+        payloadStr,
+        signature,
+      );
+      if (!valid) {
+        this.logger.warn('Invalid webhook signature — rejecting');
+        return { received: false, error: 'Invalid signature' };
+      }
+    }
+
+    this.logger.log('Webhook received and verified');
+
+    // Process payment notification
+    const action = payload['action'] as string | undefined;
+    const dataId = (payload['data'] as Record<string, unknown>)?.['id'] as
+      | string
+      | undefined;
+
+    if (action === 'payment.updated' && dataId) {
+      const status = await this.mercadoPago.getPaymentStatus(dataId);
+      this.logger.log(
+        `Payment ${dataId} status updated: ${status.status}`,
+      );
+    }
 
     return { received: true };
   }
 
   async getPaymentStatus(paymentId: string) {
-    // TODO: Consultar status real via Mercado Pago SDK
-    return {
-      id: paymentId,
-      status: 'pending',
-      updatedAt: new Date().toISOString(),
-    };
+    return this.mercadoPago.getPaymentStatus(paymentId);
   }
 
   async refundPayment(paymentId: string, amountBrl?: number) {
-    const id = randomUUID();
-
-    // TODO: Processar reembolso via Mercado Pago SDK
-    return {
-      id,
-      paymentId,
-      amountBrl: amountBrl ?? 0,
-      status: 'refunded',
-      refundedAt: new Date().toISOString(),
-    };
+    this.logger.log(`Refunding payment ${paymentId}`);
+    return this.mercadoPago.refundPayment(paymentId, amountBrl);
   }
 }

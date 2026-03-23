@@ -1,7 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-// TODO: Integrate with Enotas or NFe.io API for real NF-e generation
+import { NFeClient } from './nfe.client';
 
 export interface NFeData {
   nfeId: string;
@@ -22,10 +21,14 @@ export interface TaxBreakdown {
 
 @Injectable()
 export class NotaFiscalService {
-  // TODO: Replace in-memory store with proper NF-e persistence
-  private nfeStore: Map<string, NFeData> = new Map();
+  private readonly logger = new Logger(NotaFiscalService.name);
+  // In-memory cache for fast lookup — authoritative data comes from NFeClient
+  private nfeCache: Map<string, NFeData> = new Map();
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly nfeClient: NFeClient,
+  ) {}
 
   async generateNFe(orderId: string): Promise<NFeData> {
     // Validate order exists
@@ -36,37 +39,63 @@ export class NotaFiscalService {
       throw new NotFoundException('Pedido não encontrado');
     }
 
-    // Check if NF-e already exists for this order
-    const existing = this.nfeStore.get(orderId);
-    if (existing) {
-      return existing;
+    // Check cache first
+    const cached = this.nfeCache.get(orderId);
+    if (cached) {
+      return cached;
     }
 
-    // TODO: Integrate with Enotas or NFe.io API for real NF-e generation
-    const accessKey = Array.from({ length: 44 }, () =>
-      Math.floor(Math.random() * 10),
-    ).join('');
+    // Calculate tax
+    const taxBreakdown = this.calculateTax(
+      Number(order.totalBrl),
+      'SP', // Default origin state — in production would come from seller profile
+      'SP', // Default destination state — in production would come from buyer address
+    );
+
+    // Delegate to NF-e client
+    const response = await this.nfeClient.generateNFe(
+      {
+        orderId,
+        itemDescription: `Vintage.br - Pedido ${orderId}`,
+        itemPriceBrl: Number(order.totalBrl),
+        sellerCnpj: '', // Would come from seller profile
+        buyerCpf: '', // Would come from buyer profile
+        originState: 'SP',
+        destinationState: 'SP',
+      },
+      {
+        icms: taxBreakdown.icms,
+        iss: taxBreakdown.iss,
+        total: taxBreakdown.total,
+      },
+    );
 
     const nfe: NFeData = {
-      nfeId: `NFe-${Date.now()}-${orderId.slice(0, 8)}`,
+      nfeId: response.nfeId,
       orderId,
-      accessKey,
-      xml: `<mock><nfeProc><NFe><infNFe Id="NFe${accessKey}"><orderId>${orderId}</orderId></infNFe></NFe></nfeProc></mock>`,
-      pdfUrl: `/nota-fiscal/${orderId}/pdf`,
-      status: 'authorized',
-      issuedAt: new Date(),
+      accessKey: response.accessKey,
+      xml: response.xml,
+      pdfUrl: response.pdfUrl,
+      status: response.status,
+      issuedAt: new Date(response.issuedAt),
     };
 
-    this.nfeStore.set(orderId, nfe);
+    // Cache it
+    this.nfeCache.set(orderId, nfe);
+    this.logger.log(`NF-e generated for order ${orderId}: ${nfe.nfeId}`);
+
     return nfe;
   }
 
   async getNFe(orderId: string): Promise<NFeData> {
-    const nfe = this.nfeStore.get(orderId);
-    if (!nfe) {
-      throw new NotFoundException('NF-e não encontrada para este pedido');
+    // Check cache first
+    const cached = this.nfeCache.get(orderId);
+    if (cached) {
+      return cached;
     }
-    return nfe;
+
+    // If not cached, we have no NF-e for this order yet
+    throw new NotFoundException('NF-e não encontrada para este pedido');
   }
 
   calculateTax(
