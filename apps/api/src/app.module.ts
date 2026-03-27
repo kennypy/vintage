@@ -1,6 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { HashThrottlerGuard } from './common/guards/hash-throttler.guard';
+import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -56,5 +59,24 @@ import { UploadsModule } from './uploads/uploads.module';
     PushModule,
     UploadsModule,
   ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: HashThrottlerGuard,
+    },
+    CsrfMiddleware,
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(CsrfMiddleware)
+      .exclude(
+        { path: 'api/v1/payments/webhook', method: RequestMethod.POST },
+        { path: 'api/v1/auth/register', method: RequestMethod.POST },
+        { path: 'api/v1/auth/login', method: RequestMethod.POST },
+        { path: 'api/v1/auth/apple/callback', method: RequestMethod.POST },
+      )
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
+  }
+}

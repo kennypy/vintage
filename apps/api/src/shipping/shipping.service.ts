@@ -159,53 +159,33 @@ export class ShippingService {
   /**
    * Retorna pontos de coleta/entrega próximos ao CEP informado.
    */
-  getDropoffPoints(_cep: string, carrier?: string): DropoffPoint[] {
-    // TODO: Integrate with Correios agency locator and Jadlog partner points API
-    const allPoints: DropoffPoint[] = [
-      {
-        name: 'Agência Correios Centro',
-        address: 'Rua XV de Novembro, 100',
-        city: 'São Paulo',
-        state: 'SP',
-        cep: '01010-000',
-        carrier: 'Correios',
-        distanceKm: 0.8,
-      },
-      {
-        name: 'Agência Correios Vila Mariana',
-        address: 'Rua Domingos de Morais, 500',
-        city: 'São Paulo',
-        state: 'SP',
-        cep: '04010-000',
-        carrier: 'Correios',
-        distanceKm: 2.3,
-      },
-      {
-        name: 'Jadlog Filial São Paulo',
-        address: 'Av. Paulista, 1500',
-        city: 'São Paulo',
-        state: 'SP',
-        cep: '01310-000',
-        carrier: 'Jadlog',
-        distanceKm: 1.5,
-      },
-      {
-        name: 'Jadlog Ponto Parceiro - Papelaria Express',
-        address: 'Rua Augusta, 800',
-        city: 'São Paulo',
-        state: 'SP',
-        cep: '01304-000',
-        carrier: 'Jadlog',
-        distanceKm: 3.1,
-      },
+  async getDropoffPoints(cep: string, carrier?: string): Promise<DropoffPoint[]> {
+    const normalizedCarrier = carrier?.toLowerCase();
+
+    const [correiosPoints, jadlogPoints] = await Promise.all([
+      normalizedCarrier && normalizedCarrier !== 'correios'
+        ? Promise.resolve([])
+        : this.correios.findAgencies(cep).catch((err) => {
+            this.logger.error(
+              `Correios agency lookup failed: ${String(err).slice(0, 200)}`,
+            );
+            return [];
+          }),
+      normalizedCarrier && normalizedCarrier !== 'jadlog'
+        ? Promise.resolve([])
+        : this.jadlog.findPartnerPoints(cep).catch((err) => {
+            this.logger.error(
+              `Jadlog partner point lookup failed: ${String(err).slice(0, 200)}`,
+            );
+            return [];
+          }),
+    ]);
+
+    const points: DropoffPoint[] = [
+      ...correiosPoints.map((p) => ({ ...p, carrier: 'Correios' as const })),
+      ...jadlogPoints.map((p) => ({ ...p, carrier: 'Jadlog' as const })),
     ];
 
-    if (carrier) {
-      return allPoints.filter(
-        (p) => p.carrier.toLowerCase() === carrier.toLowerCase(),
-      );
-    }
-
-    return allPoints;
+    return points.sort((a, b) => a.distanceKm - b.distanceKm);
   }
 }

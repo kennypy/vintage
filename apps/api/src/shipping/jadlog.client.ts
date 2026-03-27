@@ -159,7 +159,76 @@ export class JadlogClient {
     }));
   }
 
+  /**
+   * Find Jadlog partner drop-off points near a given CEP.
+   */
+  async findPartnerPoints(cep: string): Promise<
+    Array<{
+      name: string;
+      address: string;
+      city: string;
+      state: string;
+      cep: string;
+      distanceKm: number;
+    }>
+  > {
+    if (!this.isConfigured) {
+      return this.mockPartnerPoints(cep);
+    }
+
+    const result = await this.request<{
+      pontos: Array<{
+        nome: string;
+        endereco: string;
+        cidade: string;
+        uf: string;
+        cep: string;
+        distancia: number;
+      }>;
+    }>('GET', `/parceiro/pontos?cep=${cep.replace(/\D/g, '')}`);
+
+    return result.pontos.map((p) => ({
+      name: p.nome,
+      address: p.endereco,
+      city: p.cidade,
+      state: p.uf,
+      cep: p.cep,
+      distanceKm: p.distancia,
+    }));
+  }
+
   // --------------- Mock implementations ---------------
+
+  private mockPartnerPoints(
+    _cep: string,
+  ): Array<{
+    name: string;
+    address: string;
+    city: string;
+    state: string;
+    cep: string;
+    distanceKm: number;
+  }> {
+    this.logger.warn('Using mock Jadlog partner points (JADLOG_TOKEN not set)');
+    return [
+      {
+        name: 'Jadlog Filial São Paulo',
+        address: 'Av. Paulista, 1500',
+        city: 'São Paulo',
+        state: 'SP',
+        cep: '01310-000',
+        distanceKm: 1.5,
+      },
+      {
+        name: 'Jadlog Ponto Parceiro - Papelaria Express',
+        address: 'Rua Augusta, 800',
+        city: 'São Paulo',
+        state: 'SP',
+        cep: '01304-000',
+        distanceKm: 3.1,
+      },
+    ];
+  }
 
   private mockRates(weightG: number): JadlogRate[] {
     this.logger.warn('Using mock Jadlog rates (JADLOG_TOKEN not set)');

@@ -7,6 +7,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { MercadoPagoClient } from './mercadopago.client';
 
+/** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
+const MAX_PAYMENT_AMOUNT_BRL = 10_000;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -22,7 +25,25 @@ export class PaymentsService {
     );
   }
 
+  private validateAmount(amountBrl: number, orderId: string): void {
+    if (!Number.isFinite(amountBrl) || amountBrl <= 0) {
+      this.logger.warn(
+        `Payment rejected for order ${orderId}: invalid amount ${amountBrl}`,
+      );
+      throw new BadRequestException('Valor de pagamento inválido.');
+    }
+    if (amountBrl > MAX_PAYMENT_AMOUNT_BRL) {
+      this.logger.warn(
+        `Payment anomaly detected for order ${orderId}: amount R$${amountBrl} exceeds ceiling R$${MAX_PAYMENT_AMOUNT_BRL}`,
+      );
+      throw new BadRequestException(
+        `Valor máximo por transação é R$${MAX_PAYMENT_AMOUNT_BRL.toLocaleString('pt-BR')}.`,
+      );
+    }
+  }
+
   async createPixPayment(orderId: string, amountBrl: number) {
+    this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating PIX payment for order ${orderId}`);
     return this.mercadoPago.createPixPayment(
       orderId,
@@ -37,6 +58,7 @@ export class PaymentsService {
     installments: number,
     cardToken?: string,
   ) {
+    this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating card payment for order ${orderId}`);
     return this.mercadoPago.createCardPayment(
       orderId,
@@ -47,6 +69,7 @@ export class PaymentsService {
   }
 
   async createBoletoPayment(orderId: string, amountBrl: number) {
+    this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating boleto payment for order ${orderId}`);
     return this.mercadoPago.createBoletoPayment(
       orderId,

@@ -165,7 +165,76 @@ export class CorreiosClient {
     }));
   }
 
+  /**
+   * Find Correios agency drop-off points near a given CEP.
+   */
+  async findAgencies(cep: string): Promise<
+    Array<{
+      name: string;
+      address: string;
+      city: string;
+      state: string;
+      cep: string;
+      distanceKm: number;
+    }>
+  > {
+    if (!this.isConfigured) {
+      return this.mockAgencies(cep);
+    }
+
+    const result = await this.request<{
+      agencias: Array<{
+        nome: string;
+        logradouro: string;
+        municipio: string;
+        uf: string;
+        cep: string;
+        distancia: number;
+      }>;
+    }>('GET', `/agencias/v1/agencias?cep=${cep.replace(/\D/g, '')}`);
+
+    return result.agencias.map((a) => ({
+      name: a.nome,
+      address: a.logradouro,
+      city: a.municipio,
+      state: a.uf,
+      cep: a.cep,
+      distanceKm: a.distancia,
+    }));
+  }
+
   // --------------- Mock implementations ---------------
+
+  private mockAgencies(
+    _cep: string,
+  ): Array<{
+    name: string;
+    address: string;
+    city: string;
+    state: string;
+    cep: string;
+    distanceKm: number;
+  }> {
+    this.logger.warn('Using mock Correios agencies (CORREIOS_TOKEN not set)');
+    return [
+      {
+        name: 'Agência Correios Centro',
+        address: 'Rua XV de Novembro, 100',
+        city: 'São Paulo',
+        state: 'SP',
+        cep: '01010-000',
+        distanceKm: 0.8,
+      },
+      {
+        name: 'Agência Correios Vila Mariana',
+        address: 'Rua Domingos de Morais, 500',
+        city: 'São Paulo',
+        state: 'SP',
+        cep: '04010-000',
+        distanceKm: 2.3,
+      },
+    ];
+  }
 
   private mockRates(weightG: number): CorreiosRate[] {
     this.logger.warn('Using mock Correios rates (CORREIOS_TOKEN not set)');

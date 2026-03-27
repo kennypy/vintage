@@ -37,6 +37,7 @@ export default [
         encodeURIComponent: 'readonly',
         global: 'readonly',
         HTMLInputElement: 'readonly',
+        HTMLDivElement: 'readonly',
       },
     },
     plugins: {
