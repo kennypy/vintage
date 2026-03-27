@@ -118,16 +118,16 @@ describe('ShippingService', () => {
   });
 
   describe('getDropoffPoints', () => {
-    it('should return all dropoff points when no carrier filter', () => {
-      const result = service.getDropoffPoints('01010-000');
+    it('should return all dropoff points when no carrier filter', async () => {
+      const result = await service.getDropoffPoints('01010-000');
 
       expect(result.length).toBeGreaterThan(0);
-      const carriers = new Set(result.map((p) => p.carrier));
+      const carriers = new Set(result.map((p: { carrier: string }) => p.carrier));
       expect(carriers.size).toBeGreaterThan(1);
     });
 
-    it('should filter by carrier when specified', () => {
-      const result = service.getDropoffPoints('01010-000', 'Correios');
+    it('should filter by carrier when specified', async () => {
+      const result = await service.getDropoffPoints('01010-000', 'Correios');
 
       expect(result.length).toBeGreaterThan(0);
       for (const point of result) {
@@ -135,8 +135,8 @@ describe('ShippingService', () => {
       }
     });
 
-    it('should filter by Jadlog carrier', () => {
-      const result = service.getDropoffPoints('01010-000', 'Jadlog');
+    it('should filter by Jadlog carrier', async () => {
+      const result = await service.getDropoffPoints('01010-000', 'Jadlog');
 
       expect(result.length).toBeGreaterThan(0);
       for (const point of result) {

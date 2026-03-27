@@ -8,6 +8,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { GoogleStrategy } from './google.strategy';
 import { AppleStrategy } from './apple.strategy';
 import { UsersModule } from '../users/users.module';
+import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
 
 @Module({
   imports: [
@@ -22,8 +23,8 @@ import { UsersModule } from '../users/users.module';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, AppleStrategy],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, AppleStrategy, CsrfMiddleware],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, CsrfMiddleware],
 })
 export class AuthModule {}
