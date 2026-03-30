@@ -38,6 +38,8 @@ export default [
         global: 'readonly',
         HTMLInputElement: 'readonly',
         HTMLDivElement: 'readonly',
+        KeyboardEvent: 'readonly',
+        alert: 'readonly',
       },
     },
     plugins: {
