@@ -39,6 +39,7 @@ export default [
         HTMLInputElement: 'readonly',
         HTMLDivElement: 'readonly',
         KeyboardEvent: 'readonly',
+        HTMLFormElement: 'readonly',
         alert: 'readonly',
       },
     },
