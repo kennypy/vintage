@@ -164,7 +164,7 @@ export async function getCategories(): Promise<Category[]> {
 export async function getPriceSuggestion(
   params: PriceSuggestionParams,
 ): Promise<PriceSuggestion> {
-  const query = buildQueryString(params as Record<string, unknown>);
+  const query = buildQueryString(params as unknown as Record<string, unknown>);
   return apiFetch<PriceSuggestion>(`/listings/price-suggestion${query}`);
 }
 

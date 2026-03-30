@@ -30,7 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshUser = useCallback(async () => {
     try {
       const profile = await getProfile();
-      setUser(profile);
+      setUser(profile as AuthUser & Partial<UserProfile>);
     } catch (_error) {
       setUser(null);
       await clearTokens();
@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const token = await getToken();
         if (token) {
           const profile = await getProfile();
-          setUser(profile);
+          setUser(profile as AuthUser & Partial<UserProfile>);
         }
       } catch (_error) {
         setUser(null);

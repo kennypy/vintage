@@ -58,6 +58,6 @@ export default [
     },
   },
   {
-    ignores: ['.expo/', 'node_modules/', 'dist/', 'babel.config.js', 'metro.config.js'],
+    ignores: ['.expo/', 'node_modules/', 'dist/', 'babel.config.js', 'metro.config.js', 'jest.config.js', 'jest.setup.js'],
   },
 ];

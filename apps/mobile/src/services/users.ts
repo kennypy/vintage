@@ -5,6 +5,8 @@ export interface UserProfile {
   name: string;
   email: string;
   avatarUrl?: string;
+  bio?: string;
+  phone?: string;
   verified: boolean;
   ratingAvg: number;
   ratingCount: number;

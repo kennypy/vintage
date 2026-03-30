@@ -102,7 +102,7 @@ export default function ProfileScreen() {
           <View>
             <Text style={styles.walletLabel}>Carteira</Text>
             <Text style={styles.walletBalance}>
-              R$ {formatBalance(user.walletBalance)}
+              R$ {formatBalance(user.walletBalance ?? 0)}
             </Text>
           </View>
         </View>
