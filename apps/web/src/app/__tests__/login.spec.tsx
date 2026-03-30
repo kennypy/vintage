@@ -15,11 +15,21 @@ jest.mock('next/link', () => {
 });
 
 function mockFetch(body: unknown, status = 200) {
-  const fn = jest.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(JSON.stringify(body)),
+  const fn = jest.fn().mockImplementation((url: string) => {
+    if (typeof url === 'string' && url.includes('/auth/csrf-token')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ csrfToken: 'test-csrf-token' }),
+        text: () => Promise.resolve(JSON.stringify({ csrfToken: 'test-csrf-token' })),
+      });
+    }
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
+    });
   });
   global.fetch = fn;
   return fn;
@@ -63,12 +73,12 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const loginCall = fetchMock.mock.calls.find(
+        ([url]: [string]) => url.includes('/auth/login') && !url.includes('csrf'),
+      );
+      expect(loginCall).toBeDefined();
+      expect(JSON.parse(loginCall[1].body)).toEqual({ email: 'user@test.com', password: 'password123' });
     });
-
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toContain('/auth/login');
-    expect(JSON.parse(callArgs[1].body)).toEqual({ email: 'user@test.com', password: 'password123' });
   });
 
   it('stores token on successful login', async () => {
@@ -98,11 +108,16 @@ describe('LoginPage', () => {
   });
 
   it('shows error on invalid credentials', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({ message: 'Invalid credentials' }),
-      text: () => Promise.resolve('Invalid credentials'),
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/auth/csrf-token')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ csrfToken: 'token' }), text: () => Promise.resolve('') });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ message: 'Invalid credentials' }),
+        text: () => Promise.resolve('Invalid credentials'),
+      });
     });
     render(<LoginPage />);
 

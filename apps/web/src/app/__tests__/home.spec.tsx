@@ -103,12 +103,12 @@ describe('Home page', () => {
     mockFetch({ data: [] });
     await act(async () => { render(<Home />); });
     await waitFor(() => expect(screen.getByText('Categorias')).toBeInTheDocument());
-    expect(screen.getByText('Vestidos')).toBeInTheDocument();
-    expect(screen.getByText('Calcas')).toBeInTheDocument();
-    expect(screen.getByText('Camisetas')).toBeInTheDocument();
-    expect(screen.getByText('Sapatos')).toBeInTheDocument();
+    expect(screen.getByText('Moda Feminina')).toBeInTheDocument();
+    expect(screen.getByText('Moda Masculina')).toBeInTheDocument();
+    expect(screen.getByText('Calcados')).toBeInTheDocument();
     expect(screen.getByText('Bolsas')).toBeInTheDocument();
     expect(screen.getByText('Acessorios')).toBeInTheDocument();
+    expect(screen.getByText('Vintage')).toBeInTheDocument();
   });
 
   it('renders how it works section', async () => {

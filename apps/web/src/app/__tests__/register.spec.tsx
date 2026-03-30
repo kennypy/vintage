@@ -15,11 +15,21 @@ jest.mock('next/link', () => {
 });
 
 function mockFetch(body: unknown, status = 200) {
-  const fn = jest.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-    text: () => Promise.resolve(JSON.stringify(body)),
+  const fn = jest.fn().mockImplementation((url: string) => {
+    if (typeof url === 'string' && url.includes('/auth/csrf-token')) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ csrfToken: 'test-csrf-token' }),
+        text: () => Promise.resolve(JSON.stringify({ csrfToken: 'test-csrf-token' })),
+      });
+    }
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
+    });
   });
   global.fetch = fn;
   return fn;
@@ -99,16 +109,16 @@ describe('RegisterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const registerCall = fetchMock.mock.calls.find(
+        ([url]: [string]) => url.includes('/auth/register'),
+      );
+      expect(registerCall).toBeDefined();
+      const body = JSON.parse(registerCall[1].body);
+      expect(body.name).toBe('Test User');
+      expect(body.email).toBe('test@test.com');
+      expect(body.cpf).toBe('12345678901');
+      expect(body.password).toBe('password123');
     });
-
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs[0]).toContain('/auth/register');
-    const body = JSON.parse(callArgs[1].body);
-    expect(body.name).toBe('Test User');
-    expect(body.email).toBe('test@test.com');
-    expect(body.cpf).toBe('12345678901');
-    expect(body.password).toBe('password123');
   });
 
   it('stores token and redirects after successful registration', async () => {
@@ -130,11 +140,21 @@ describe('RegisterPage', () => {
   });
 
   it('shows error on duplicate email', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: () => Promise.resolve({ message: 'Email already exists' }),
-      text: () => Promise.resolve('Email already exists'),
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/auth/csrf-token')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ csrfToken: 'test-csrf-token' }),
+          text: () => Promise.resolve('{"csrfToken":"test-csrf-token"}'),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({ message: 'Email already exists' }),
+        text: () => Promise.resolve('Email already exists'),
+      });
     });
     render(<RegisterPage />);
 
