@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from '@prisma/client/runtime/client';
 import { DisputesService } from './disputes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DisputeReason } from './dto/create-dispute.dto';
