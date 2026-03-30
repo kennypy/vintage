@@ -4,6 +4,13 @@ const path = require('path');
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
 
+// In a monorepo Metro's transform workers may not inherit EXPO_ROUTER_APP_ROOT
+// from the Expo CLI process. Set it here so babel-preset-expo can substitute
+// the literal path into expo-router's require.context() call at transform time.
+if (!process.env.EXPO_ROUTER_APP_ROOT) {
+  process.env.EXPO_ROUTER_APP_ROOT = path.join(projectRoot, 'app');
+}
+
 const config = getDefaultConfig(projectRoot);
 
 // Watch all files within the monorepo
