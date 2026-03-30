@@ -22,4 +22,12 @@ config.resolver.blockList = [
   /node_modules\/.*\/node_modules\/react-native\/.*/,
 ];
 
+// Explicitly resolve react and react-native to the workspace root copies.
+// This prevents Metro from accidentally resolving `react` to `@types/react`
+// when the actual react package is hoisted to the monorepo root.
+config.resolver.extraNodeModules = {
+  react: path.resolve(workspaceRoot, 'node_modules/react'),
+  'react-native': path.resolve(workspaceRoot, 'node_modules/react-native'),
+};
+
 module.exports = config;
