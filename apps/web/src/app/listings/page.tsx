@@ -6,6 +6,19 @@ import ListingCard from '@/components/ListingCard';
 import ListingsFilter, { FilterState } from './ListingsFilter';
 import { apiGet } from '@/lib/api';
 
+interface ApiListingItem {
+  id: string;
+  title: string;
+  priceBrl?: number;
+  price?: number;
+  size?: string;
+  condition?: string;
+  seller?: { name: string };
+  sellerName?: string;
+  images?: Array<{ url: string } | string>;
+  imageUrl?: string;
+}
+
 interface ListingItem {
   id: string;
   title: string;
@@ -16,11 +29,33 @@ interface ListingItem {
   imageUrl?: string;
 }
 
-interface ListingsResponse {
-  data: ListingItem[];
-  total: number;
-  page: number;
-  totalPages: number;
+function normalizeItem(raw: ApiListingItem): ListingItem {
+  let imageUrl: string | undefined;
+  if (raw.imageUrl) {
+    imageUrl = raw.imageUrl;
+  } else if (raw.images && raw.images.length > 0) {
+    const first = raw.images[0];
+    imageUrl = typeof first === 'string' ? first : first.url;
+  }
+  return {
+    id: raw.id,
+    title: raw.title,
+    price: raw.priceBrl ?? raw.price ?? 0,
+    size: raw.size ?? '',
+    condition: raw.condition ?? '',
+    sellerName: raw.seller?.name ?? raw.sellerName ?? '',
+    imageUrl,
+  };
+}
+
+interface ApiResponse {
+  items?: ApiListingItem[];
+  data?: ApiListingItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  hasMore?: boolean;
 }
 
 const SORT_OPTIONS = [
@@ -48,7 +83,7 @@ function ListingsContent() {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
-  const [sort, setSort] = useState(searchParams.get('sort') ?? 'relevance');
+  const [sort, setSort] = useState(searchParams.get('sort') ?? 'newest');
   const [page, setPage] = useState(Number(searchParams.get('page') ?? '1'));
   const [filters, setFilters] = useState<FilterState>({
     category: searchParams.get('category') ?? '',
@@ -64,27 +99,34 @@ function ListingsContent() {
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
+      params.set('pageSize', '20');
       params.set('sort', sort);
       if (search) params.set('q', search);
       if (filters.category) params.set('category', filters.category);
       if (filters.condition) params.set('condition', filters.condition);
       if (filters.size) params.set('size', filters.size);
       if (filters.brand) params.set('brand', filters.brand);
-      if (filters.priceMin) params.set('priceMin', filters.priceMin);
-      if (filters.priceMax) params.set('priceMax', filters.priceMax);
+      if (filters.priceMin) params.set('minPrice', filters.priceMin);
+      if (filters.priceMax) params.set('maxPrice', filters.priceMax);
 
-      const response = await apiGet<ListingsResponse | ListingItem[]>(
+      const response = await apiGet<ApiListingItem[] | ApiResponse>(
         `/listings?${params.toString()}`
       );
 
       if (Array.isArray(response)) {
-        setListings(response);
-        setTotal(response.length);
+        const normalized = response.map(normalizeItem);
+        setListings(normalized);
+        setTotal(normalized.length);
         setTotalPages(1);
       } else {
-        setListings(response.data ?? []);
-        setTotal(response.total ?? 0);
-        setTotalPages(response.totalPages ?? 1);
+        const rawItems = response.items ?? response.data ?? [];
+        const normalized = rawItems.map(normalizeItem);
+        const t = response.total ?? normalized.length;
+        const ps = response.pageSize ?? 20;
+        const tp = response.totalPages ?? Math.max(1, Math.ceil(t / ps));
+        setListings(normalized);
+        setTotal(t);
+        setTotalPages(tp);
       }
     } catch (_err) {
       setListings([]);
@@ -122,7 +164,7 @@ function ListingsContent() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Search bar */}
-      <div className="mb-8">
+      <div className="mb-6">
         <form onSubmit={handleSearch} className="relative max-w-2xl mx-auto">
           <input
             type="text"
@@ -143,14 +185,14 @@ function ListingsContent() {
       </div>
 
       <div className="flex gap-8">
-        {/* Filter sidebar */}
+        {/* Filter sidebar (desktop) + mobile toggle */}
         <ListingsFilter onFilterChange={handleFilterChange} />
 
         {/* Listing grid */}
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-6">
             <p className="text-sm text-gray-500">
-              {loading ? 'Carregando...' : `${total} resultados`}
+              {loading ? 'Carregando...' : `${total} resultado${total !== 1 ? 's' : ''}`}
             </p>
             <select
               value={sort}
@@ -180,7 +222,7 @@ function ListingsContent() {
                 <ListingCard key={listing.id} {...listing} />
               ))}
               {listings.length === 0 && (
-                <p className="col-span-full text-center text-gray-500 py-8">
+                <p className="col-span-full text-center text-gray-500 py-12">
                   Nenhum resultado encontrado.
                 </p>
               )}
