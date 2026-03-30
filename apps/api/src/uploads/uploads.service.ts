@@ -35,12 +35,17 @@ const MAGIC_BYTES: Record<string, number[]> = {
   'image/png': [0x89, 0x50, 0x4e, 0x47],
 };
 
+/** Placeholder image dimensions used in dev/stub mode. */
+const PLACEHOLDER_WIDTH = 800;
+const PLACEHOLDER_HEIGHT = 1000;
+
 @Injectable()
 export class UploadsService {
   private readonly logger = new Logger(UploadsService.name);
   private readonly s3: S3Client;
   private readonly bucket: string;
   private readonly presignedUrlExpiry: number;
+  private readonly s3Configured: boolean;
 
   constructor(private readonly configService: ConfigService) {
     const region = this.configService.get<string>('S3_REGION', 'us-east-1');
@@ -59,11 +64,14 @@ export class UploadsService {
       this.configService.get<string>('PRESIGNED_URL_EXPIRY', '3600'),
     );
 
+    // S3 is only usable when real credentials are provided
+    this.s3Configured = !!(accessKeyId && secretAccessKey && this.bucket !== 'vintage-uploads');
+
     const s3Config: ConstructorParameters<typeof S3Client>[0] = {
       region,
       credentials: {
-        accessKeyId,
-        secretAccessKey,
+        accessKeyId: accessKeyId || 'dev',
+        secretAccessKey: secretAccessKey || 'dev',
       },
     };
 
@@ -73,6 +81,12 @@ export class UploadsService {
     }
 
     this.s3 = new S3Client(s3Config);
+
+    if (!this.s3Configured) {
+      this.logger.warn(
+        'S3 credentials not configured — uploads will use placeholder images (dev mode)',
+      );
+    }
   }
 
   /**
@@ -175,6 +189,17 @@ export class UploadsService {
     const safeName = this.sanitizeFilename(filename);
     const timestamp = Date.now();
     const key = `listings/${timestamp}-${safeName}.jpg`;
+
+    // Dev fallback: when S3 is not configured return a stable placeholder URL
+    if (!this.s3Configured) {
+      const seed = timestamp % 1000;
+      return {
+        url: `https://picsum.photos/seed/${seed}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`,
+        key,
+        width: PLACEHOLDER_WIDTH,
+        height: PLACEHOLDER_HEIGHT,
+      };
+    }
 
     try {
       // 5. Process with Sharp: resize + compress to JPEG
