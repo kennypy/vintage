@@ -20,9 +20,9 @@ describe('ListingsFilter', () => {
     render(<ListingsFilter />);
     expect(screen.getByText('Condicao')).toBeInTheDocument();
     expect(screen.getByText('Novo com etiqueta')).toBeInTheDocument();
-    expect(screen.getByText('Novo')).toBeInTheDocument();
-    expect(screen.getByText('Otimo')).toBeInTheDocument();
-    expect(screen.getByText('Bom')).toBeInTheDocument();
+    expect(screen.getByText('Novo sem etiqueta')).toBeInTheDocument();
+    expect(screen.getByText('Otimo estado')).toBeInTheDocument();
+    expect(screen.getByText('Bom estado')).toBeInTheDocument();
     expect(screen.getByText('Satisfatorio')).toBeInTheDocument();
   });
 
@@ -53,17 +53,21 @@ describe('ListingsFilter', () => {
     expect(screen.getByText('Nike')).toBeInTheDocument();
   });
 
-  it('renders clear filters button', () => {
+  it('shows clear filters button only when a filter is active', async () => {
     render(<ListingsFilter />);
-    expect(screen.getByText('Limpar filtros')).toBeInTheDocument();
+    expect(screen.queryByText('Limpar filtros')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Vestidos'));
+    await waitFor(() => {
+      expect(screen.getByText('Limpar filtros')).toBeInTheDocument();
+    });
   });
 
-  it('calls onFilterChange when category is selected', async () => {
+  it('calls onFilterChange when category chip is clicked', async () => {
     const onFilterChange = jest.fn();
     render(<ListingsFilter onFilterChange={onFilterChange} />);
 
-    const vestidosRadio = screen.getByDisplayValue('Vestidos');
-    fireEvent.click(vestidosRadio);
+    fireEvent.click(screen.getByText('Vestidos'));
 
     await waitFor(() => {
       const lastCall = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
@@ -71,16 +75,15 @@ describe('ListingsFilter', () => {
     });
   });
 
-  it('calls onFilterChange when condition is selected', async () => {
+  it('calls onFilterChange when condition chip is clicked', async () => {
     const onFilterChange = jest.fn();
     render(<ListingsFilter onFilterChange={onFilterChange} />);
 
-    const novoRadio = screen.getByDisplayValue('Novo');
-    fireEvent.click(novoRadio);
+    fireEvent.click(screen.getByText('Novo sem etiqueta'));
 
     await waitFor(() => {
       const lastCall = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
-      expect(lastCall.condition).toBe('Novo');
+      expect(lastCall.condition).toBe('NEW_WITHOUT_TAGS');
     });
   });
 
@@ -123,8 +126,7 @@ describe('ListingsFilter', () => {
     const onFilterChange = jest.fn();
     render(<ListingsFilter onFilterChange={onFilterChange} />);
 
-    const zaraRadio = screen.getByDisplayValue('Zara');
-    fireEvent.click(zaraRadio);
+    fireEvent.click(screen.getByText('Zara'));
 
     await waitFor(() => {
       const lastCall = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
@@ -137,11 +139,15 @@ describe('ListingsFilter', () => {
     render(<ListingsFilter onFilterChange={onFilterChange} />);
 
     // Set some filters
-    fireEvent.click(screen.getByDisplayValue('Vestidos'));
+    fireEvent.click(screen.getByText('Vestidos'));
     fireEvent.click(screen.getByText('M'));
     fireEvent.change(screen.getByPlaceholderText('Min'), { target: { value: '50' } });
 
-    // Clear
+    // Clear button should now be visible
+    await waitFor(() => {
+      expect(screen.getByText('Limpar filtros')).toBeInTheDocument();
+    });
+
     fireEvent.click(screen.getByText('Limpar filtros'));
 
     await waitFor(() => {
