@@ -115,8 +115,34 @@ export class ListingsService {
         { description: { contains: dto.q, mode: 'insensitive' } },
       ];
     }
-    if (dto.categoryId) where.categoryId = dto.categoryId;
-    if (dto.brandId) where.brandId = dto.brandId;
+
+    // Resolve categoryId from explicit ID or name/slug
+    let resolvedCategoryId = dto.categoryId;
+    if (!resolvedCategoryId && dto.category) {
+      const found = await this.prisma.category.findFirst({
+        where: {
+          OR: [
+            { namePt: { contains: dto.category, mode: 'insensitive' } },
+            { slug: { contains: dto.category.toLowerCase().replace(/\s+/g, '-'), mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+      resolvedCategoryId = found?.id;
+    }
+    if (resolvedCategoryId) where.categoryId = resolvedCategoryId;
+
+    // Resolve brandId from explicit ID or name
+    let resolvedBrandId = dto.brandId;
+    if (!resolvedBrandId && dto.brand) {
+      const found = await this.prisma.brand.findFirst({
+        where: { name: { contains: dto.brand, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      resolvedBrandId = found?.id;
+    }
+    if (resolvedBrandId) where.brandId = resolvedBrandId;
+
     if (dto.condition) where.condition = dto.condition as Prisma.EnumItemConditionFilter;
     if (dto.size) where.size = dto.size;
     if (dto.color) where.color = { contains: dto.color, mode: 'insensitive' };

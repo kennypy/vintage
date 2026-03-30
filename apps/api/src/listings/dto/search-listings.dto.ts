@@ -15,15 +15,27 @@ export class SearchListingsDto {
   @IsString()
   q?: string;
 
-  @ApiPropertyOptional({ example: 'clxyz123' })
+  @ApiPropertyOptional({ example: 'clxyz123', description: 'UUID da categoria' })
   @IsOptional()
   @IsString()
   categoryId?: string;
 
-  @ApiPropertyOptional({ example: 'clxyz456' })
+  /** Category name or slug — resolved to ID server-side for web clients */
+  @ApiPropertyOptional({ example: 'Vestidos' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({ example: 'clxyz456', description: 'UUID da marca' })
   @IsOptional()
   @IsString()
   brandId?: string;
+
+  /** Brand name — resolved to ID server-side for web clients */
+  @ApiPropertyOptional({ example: 'Zara' })
+  @IsOptional()
+  @IsString()
+  brand?: string;
 
   @ApiPropertyOptional({ example: 'VERY_GOOD' })
   @IsOptional()
@@ -74,3 +86,4 @@ export class SearchListingsDto {
   @Max(100)
   pageSize?: number;
 }
+

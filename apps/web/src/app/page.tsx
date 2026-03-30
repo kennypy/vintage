@@ -5,6 +5,19 @@ import Link from 'next/link';
 import ListingCard from '@/components/ListingCard';
 import { apiGet } from '@/lib/api';
 
+interface ApiListingItem {
+  id: string;
+  title: string;
+  priceBrl?: number;
+  price?: number;
+  size?: string;
+  condition?: string;
+  seller?: { name: string };
+  sellerName?: string;
+  images?: Array<{ url: string } | string>;
+  imageUrl?: string;
+}
+
 interface ListingItem {
   id: string;
   title: string;
@@ -15,13 +28,32 @@ interface ListingItem {
   imageUrl?: string;
 }
 
+function normalizeItem(raw: ApiListingItem): ListingItem {
+  let imageUrl: string | undefined;
+  if (raw.imageUrl) {
+    imageUrl = raw.imageUrl;
+  } else if (raw.images && raw.images.length > 0) {
+    const first = raw.images[0];
+    imageUrl = typeof first === 'string' ? first : first.url;
+  }
+  return {
+    id: raw.id,
+    title: raw.title,
+    price: raw.priceBrl ?? raw.price ?? 0,
+    size: raw.size ?? '',
+    condition: raw.condition ?? '',
+    sellerName: raw.seller?.name ?? raw.sellerName ?? '',
+    imageUrl,
+  };
+}
+
 const categories = [
-  { name: 'Vestidos', icon: '\uD83D\uDC57', href: '/listings?category=vestidos' },
-  { name: 'Calcas', icon: '\uD83D\uDC56', href: '/listings?category=calcas' },
-  { name: 'Camisetas', icon: '\uD83D\uDC55', href: '/listings?category=camisetas' },
-  { name: 'Sapatos', icon: '\uD83D\uDC5F', href: '/listings?category=sapatos' },
-  { name: 'Bolsas', icon: '\uD83D\uDC5C', href: '/listings?category=bolsas' },
-  { name: 'Acessorios', icon: '\uD83D\uDC8D', href: '/listings?category=acessorios' },
+  { name: 'Moda Feminina', icon: '👗', href: '/listings?category=moda-feminina' },
+  { name: 'Moda Masculina', icon: '👔', href: '/listings?category=moda-masculina' },
+  { name: 'Calcados', icon: '👟', href: '/listings?category=calcados' },
+  { name: 'Bolsas', icon: '👜', href: '/listings?category=bolsas-mochilas' },
+  { name: 'Acessorios', icon: '💎', href: '/listings?category=acessorios' },
+  { name: 'Vintage', icon: '✨', href: '/listings?category=vintage-retro' },
 ];
 
 const steps = [
@@ -59,10 +91,14 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiGet<{ data: ListingItem[] } | ListingItem[]>('/listings?sort=newest&limit=8')
+    apiGet<{ items?: ApiListingItem[]; data?: ApiListingItem[] } | ApiListingItem[]>(
+      '/listings?sort=newest&pageSize=8'
+    )
       .then((response) => {
-        const items = Array.isArray(response) ? response : response.data ?? [];
-        setListings(items);
+        const raw = Array.isArray(response)
+          ? response
+          : (response.items ?? response.data ?? []);
+        setListings(raw.map(normalizeItem));
       })
       .catch(() => {
         setListings([]);
