@@ -111,8 +111,8 @@ export default function OrderDetailScreen() {
   }
 
   const currentStatusIndex = STATUS_TIMELINE.indexOf(order.status);
-  const isSeller = authUser?.id === (order as Record<string, unknown>).sellerId;
-  const isBuyer = authUser?.id === (order as Record<string, unknown>).buyerId;
+  const isSeller = authUser?.id === order.seller?.id;
+  const isBuyer = authUser?.id === order.buyer?.id;
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>

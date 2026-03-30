@@ -22,8 +22,8 @@ export default function EditProfileScreen() {
   const { user, refreshUser } = useAuth();
 
   const [name, setName] = useState(user?.name ?? '');
-  const [bio, setBio] = useState((user as Record<string, string>)?.bio ?? '');
-  const [phone, setPhone] = useState((user as Record<string, string>)?.phone ?? '');
+  const [bio, setBio] = useState(user?.bio ?? '');
+  const [phone, setPhone] = useState(user?.phone ?? '');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {

@@ -25,7 +25,8 @@ const STATUS_LABELS: Record<string, string> = {
   failed: 'Falhou',
 };
 
-const PIX_KEY_TYPES: { value: string; label: string }[] = [
+type PixKeyType = 'cpf' | 'email' | 'phone' | 'random';
+const PIX_KEY_TYPES: { value: PixKeyType; label: string }[] = [
   { value: 'cpf', label: 'CPF' },
   { value: 'email', label: 'E-mail' },
   { value: 'phone', label: 'Telefone' },
@@ -43,7 +44,7 @@ export default function WalletScreen() {
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutModalVisible, setPayoutModalVisible] = useState(false);
   const [pixKey, setPixKey] = useState('');
-  const [pixKeyType, setPixKeyType] = useState('cpf');
+  const [pixKeyType, setPixKeyType] = useState<PixKeyType>('cpf');
   const [payoutAmount, setPayoutAmount] = useState('');
 
   const fetchData = useCallback(async () => {
