@@ -5,8 +5,7 @@
     "typeRoots": ["./node_modules/@types"],
     "paths": {
       "@/*": ["./src/*"],
-      "react": ["./node_modules/@types/react"],
-      "react-native": ["./node_modules/react-native"]
+      "react": ["./node_modules/@types/react"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
