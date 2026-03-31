@@ -231,6 +231,24 @@ export function addDemoListing(listing: Listing): void {
   demoListingsMap.set(listing.id, listing);
 }
 
+export function getUserDemoListings(userId: string): Listing[] {
+  return Array.from(demoListingsMap.values()).filter(
+    (l) => l.seller.id === userId,
+  );
+}
+
+export function toggleDemoFavorite(id: string): boolean {
+  const listing = demoListingsMap.get(id);
+  if (!listing) return false;
+  const next = !listing.isFavorited;
+  demoListingsMap.set(id, { ...listing, isFavorited: next });
+  return next;
+}
+
+export function getDemoFavorites(): Listing[] {
+  return Array.from(demoListingsMap.values()).filter((l) => l.isFavorited);
+}
+
 export function searchDemoListings(params: {
   search?: string;
   category?: string;

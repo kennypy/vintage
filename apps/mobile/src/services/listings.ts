@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { isDemoModeSync, toggleDemoFavorite, getDemoFavorites } from './demoStore';
 
 export interface ListingImage {
   id: string;
@@ -144,15 +145,33 @@ export async function deleteListing(id: string): Promise<void> {
 }
 
 export async function toggleFavorite(id: string): Promise<{ favorited: boolean }> {
-  return apiFetch<{ favorited: boolean }>(
-    `/listings/${encodeURIComponent(id)}/favorite`,
-    { method: 'POST' },
-  );
+  if (isDemoModeSync()) {
+    const favorited = toggleDemoFavorite(id);
+    return { favorited };
+  }
+  try {
+    return await apiFetch<{ favorited: boolean }>(
+      `/listings/${encodeURIComponent(id)}/favorite`,
+      { method: 'POST' },
+    );
+  } catch (_error) {
+    const favorited = toggleDemoFavorite(id);
+    return { favorited };
+  }
 }
 
 export async function getFavorites(page?: number): Promise<ListingsResponse> {
-  const query = page ? `?page=${page}` : '';
-  return apiFetch<ListingsResponse>(`/listings/favorites${query}`);
+  if (isDemoModeSync()) {
+    const items = getDemoFavorites() as unknown as Listing[];
+    return { items, total: items.length, page: 1, totalPages: 1 };
+  }
+  try {
+    const query = page ? `?page=${page}` : '';
+    return await apiFetch<ListingsResponse>(`/listings/favorites${query}`);
+  } catch (_error) {
+    const items = getDemoFavorites() as unknown as Listing[];
+    return { items, total: items.length, page: 1, totalPages: 1 };
+  }
 }
 
 export async function getCategories(): Promise<Category[]> {

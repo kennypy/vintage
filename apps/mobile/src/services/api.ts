@@ -60,7 +60,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     clearTimeout(timeoutId);
     // AbortError or network error — rethrow as TypeError so callers fall back to demo
     if (err instanceof Error && err.name === 'AbortError') {
-      throw new TypeError('Request timed out');
+      throw new TypeError('Request timed out', { cause: err });
     }
     throw err;
   } finally {
