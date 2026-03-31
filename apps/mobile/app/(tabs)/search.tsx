@@ -25,7 +25,7 @@ const CATEGORIES = [
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
   { value: 'NEW_WITHOUT_TAGS', label: 'Novo' },
-  { value: 'VERY_GOOD', label: 'Muito bom' },
+  { value: 'VERY_GOOD', label: 'Excelente' },
   { value: 'GOOD', label: 'Bom' },
   { value: 'SATISFACTORY', label: 'Satisfatório' },
 ];
@@ -116,10 +116,15 @@ export default function SearchScreen() {
   };
 
   const clearAllFilters = () => {
+    // Cancel any pending debounced search and reset results synchronously
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     setSelectedCategory(null);
     setSelectedCondition(null);
     setSelectedSize(null);
     setQuery('');
+    setResults([]);
+    setHasSearched(false);
+    setLoading(false);
   };
 
   const hasActiveFilters = !!(selectedCategory || selectedCondition || selectedSize);

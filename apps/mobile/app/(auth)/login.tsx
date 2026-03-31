@@ -4,10 +4,12 @@ import {
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
   const { signIn, signInDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,18 +34,18 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: theme.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.content}>
-        <Text style={styles.logo}>Vintage.br</Text>
-        <Text style={styles.subtitle}>Entre na sua conta</Text>
+        <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
+        <Text style={[styles.subtitle, { color: theme.textSecondary }]}>Entre na sua conta</Text>
 
         <View style={styles.form}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
             placeholder="Email"
-            placeholderTextColor={colors.neutral[400]}
+            placeholderTextColor={theme.textTertiary}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -51,9 +53,9 @@ export default function LoginScreen() {
             autoComplete="email"
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
             placeholder="Senha"
-            placeholderTextColor={colors.neutral[400]}
+            placeholderTextColor={theme.textTertiary}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -71,22 +73,22 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.linkButton}>
-            <Text style={styles.linkText}>Esqueceu a senha?</Text>
+            <Text style={[styles.linkText, { color: colors.primary[600] }]}>Esqueceu a senha?</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>ou</Text>
-          <View style={styles.dividerLine} />
+          <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+          <Text style={[styles.dividerText, { color: theme.textTertiary }]}>ou</Text>
+          <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
         </View>
 
-        <TouchableOpacity style={styles.socialButton}>
-          <Text style={styles.socialButtonText}>Continuar com Google</Text>
+        <TouchableOpacity style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
+          <Text style={[styles.socialButtonText, { color: theme.text }]}>Continuar com Google</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.socialButton}>
-          <Text style={styles.socialButtonText}>Continuar com Apple</Text>
+        <TouchableOpacity style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
+          <Text style={[styles.socialButtonText, { color: theme.text }]}>Continuar com Apple</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -96,13 +98,13 @@ export default function LoginScreen() {
             router.replace('/(tabs)');
           }}
         >
-          <Text style={styles.demoButtonText}>Testar em modo demo (sem conta)</Text>
+          <Text style={[styles.demoButtonText, { color: theme.textTertiary }]}>Testar em modo demo (sem conta)</Text>
         </TouchableOpacity>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Não tem conta? </Text>
+          <Text style={[styles.footerText, { color: theme.textSecondary }]}>Não tem conta? </Text>
           <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
-            <Text style={styles.footerLink}>Cadastre-se</Text>
+            <Text style={[styles.footerLink, { color: colors.primary[600] }]}>Cadastre-se</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -111,15 +113,14 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[0] },
+  container: { flex: 1 },
   content: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
-  logo: { fontSize: 32, fontWeight: '700', color: colors.primary[600], textAlign: 'center' },
-  subtitle: { fontSize: 16, color: colors.neutral[500], textAlign: 'center', marginTop: 8, marginBottom: 32 },
+  logo: { fontSize: 32, fontWeight: '700', textAlign: 'center' },
+  subtitle: { fontSize: 16, textAlign: 'center', marginTop: 8, marginBottom: 32 },
   form: { gap: 12 },
   input: {
-    height: 50, borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 12,
-    paddingHorizontal: 16, fontSize: 16, color: colors.neutral[900],
-    backgroundColor: colors.neutral[50],
+    height: 50, borderWidth: 1, borderRadius: 12,
+    paddingHorizontal: 16, fontSize: 16,
   },
   button: {
     height: 50, backgroundColor: colors.primary[600], borderRadius: 12,
@@ -128,20 +129,18 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
   linkButton: { alignItems: 'center', paddingVertical: 8 },
-  linkText: { color: colors.primary[600], fontSize: 14 },
+  linkText: { fontSize: 14 },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 24 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: colors.neutral[200] },
-  dividerText: { marginHorizontal: 16, color: colors.neutral[400], fontSize: 14 },
+  dividerLine: { flex: 1, height: 1 },
+  dividerText: { marginHorizontal: 16, fontSize: 14 },
   socialButton: {
-    height: 50, borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 12,
+    height: 50, borderWidth: 1, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center', marginBottom: 10,
   },
-  socialButtonText: { fontSize: 15, color: colors.neutral[700], fontWeight: '500' },
-  demoButton: {
-    alignItems: 'center', paddingVertical: 12, marginTop: 4,
-  },
-  demoButtonText: { color: colors.neutral[400], fontSize: 13, textDecorationLine: 'underline' },
+  socialButtonText: { fontSize: 15, fontWeight: '500' },
+  demoButton: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  demoButtonText: { fontSize: 13, textDecorationLine: 'underline' },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
-  footerText: { color: colors.neutral[500], fontSize: 14 },
-  footerLink: { color: colors.primary[600], fontSize: 14, fontWeight: '600' },
+  footerText: { fontSize: 14 },
+  footerLink: { fontSize: 14, fontWeight: '600' },
 });
