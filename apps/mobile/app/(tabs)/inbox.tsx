@@ -1,11 +1,11 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
-import { DEMO_CONVERSATIONS } from '../../src/services/demoStore';
+import { getAllDemoConversations } from '../../src/services/demoStore';
 
 function formatTimeAgo(dateString: string): string {
   const now = new Date();
@@ -33,7 +33,7 @@ export default function InboxScreen() {
       setConversations(response.items);
     } catch (_error) {
       // API unavailable — show demo conversations
-      setConversations(DEMO_CONVERSATIONS);
+      setConversations(getAllDemoConversations());
     } finally {
       setLoading(false);
     }
@@ -42,6 +42,13 @@ export default function InboxScreen() {
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  // Refresh when tab focused so new conversations from listing detail appear
+  useFocusEffect(
+    useCallback(() => {
+      fetchConversations();
+    }, [fetchConversations]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

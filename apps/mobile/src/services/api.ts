@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { isDemoModeSync } from './demoStore';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
@@ -26,6 +27,11 @@ interface RequestOptions extends RequestInit {
 const FETCH_TIMEOUT_MS = 5000;
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  // In demo mode there is no API — fail immediately so fallbacks trigger without delay
+  if (isDemoModeSync()) {
+    throw new TypeError('Demo mode — no API available');
+  }
+
   const { authenticated = true, headers: customHeaders, ...rest } = options;
 
   const headers: Record<string, string> = {
