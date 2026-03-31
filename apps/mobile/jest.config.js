@@ -38,4 +38,8 @@ module.exports = {
     ...cleanedMapper,
     ...reactMapper,
   },
+  // react-native is not hoisted to the monorepo root. When expo (hoisted to root
+  // node_modules) imports react-native/* sub-paths, Jest needs to resolve them
+  // from the mobile workspace's local node_modules.
+  modulePaths: [path.resolve(__dirname, 'node_modules')],
 };
