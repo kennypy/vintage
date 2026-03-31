@@ -486,6 +486,195 @@ model PriceDropAlert {
   @@unique([listingId, userId])
 }
 
+// ============================================================
+// Ad System
+// ============================================================
+
+// --- Ad Partners (third-party advertisers) ---
+
+model AdPartner {
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  apiKeyHash     String   @unique // SHA256 of raw API key — never store raw
+  apiKeyPrefix   String   @db.VarChar(8) // first 8 chars, for display only
+  active         Boolean  @default(true)
+  canReceiveData Boolean  @default(false) // LGPD: explicit consent to receive anonymized data
+  webhookUrl     String?
+  webhookSecret  String? // HMAC-SHA256 secret for webhook delivery
+  dailyBudgetBrl Decimal? @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  campaigns AdCampaign[]
+
+  @@index([apiKeyHash])
+}
+
+// --- Ad Campaigns ---
+
+model AdCampaign {
+  id             String           @id @default(cuid())
+  partnerId      String
+  name           String
+  status         AdCampaignStatus @default(DRAFT)
+  targetAudience Json             @default("{}") // audience segment criteria
+  budgetBrl      Decimal          @db.Decimal(10, 2)
+  spentBrl       Decimal          @default(0) @db.Decimal(10, 2)
+  cpmBrl         Decimal          @db.Decimal(10, 4) // cost per 1000 impressions
+  startsAt       DateTime?
+  endsAt         DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  partner     AdPartner      @relation(fields: [partnerId], references: [id])
+  creatives   AdCreative[]
+  impressions AdImpression[]
+  clicks      AdClick[]
+
+  @@index([partnerId])
+  @@index([status])
+  @@index([startsAt, endsAt])
+}
+
+// --- Ad Creatives ---
+
+model AdCreative {
+  id             String   @id @default(cuid())
+  campaignId     String
+  title          String
+  body           String?
+  imageUrl       String?
+  ctaText        String? // call to action label
+  destinationUrl String // validated at creation (no SSRF)
+  format         AdFormat
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  campaign    AdCampaign     @relation(fields: [campaignId], references: [id])
+  impressions AdImpression[]
+  clicks      AdClick[]
+
+  @@index([campaignId])
+}
+
+// --- Ad Impressions (shown to user) ---
+
+model AdImpression {
+  id         String   @id @default(cuid())
+  campaignId String
+  creativeId String
+  userId     String? // null for anonymous sessions
+  deviceId   String? // hashed device fingerprint
+  placement  String // 'dashboard', 'search', 'listing', 'feed'
+  costBrl    Decimal  @db.Decimal(10, 6)
+  ipHash     String   @db.VarChar(64) // SHA256(IP) — never store raw IP
+  createdAt  DateTime @default(now())
+
+  campaign AdCampaign @relation(fields: [campaignId], references: [id])
+  creative AdCreative @relation(fields: [creativeId], references: [id])
+
+  @@index([campaignId, createdAt])
+  @@index([userId])
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+// --- Ad Clicks (with bot/fraud scoring) ---
+
+model AdClick {
+  id            String   @id @default(cuid())
+  campaignId    String
+  creativeId    String
+  impressionId  String?
+  userId        String?
+  deviceId      String?
+  ipHash        String   @db.VarChar(64)
+  botScore      Float    @default(0) // 0.0–1.0; ≥0.7 treated as bot
+  isBot         Boolean  @default(false)
+  fraudSignals  Json     @default("{}") // structured signals for audit
+  msToClick     Int? // milliseconds from impression to click (frontend supplied)
+  createdAt     DateTime @default(now())
+
+  campaign AdCampaign @relation(fields: [campaignId], references: [id])
+  creative AdCreative @relation(fields: [creativeId], references: [id])
+
+  @@index([campaignId, createdAt])
+  @@index([isBot])
+  @@index([userId])
+  @@index([ipHash, createdAt])
+}
+
+// --- User Behaviour Events (first-party data) ---
+
+model UserEvent {
+  id         String        @id @default(cuid())
+  userId     String? // null for anonymous
+  sessionId  String // anonymous session UUID
+  deviceId   String? // hashed device fingerprint
+  eventType  UserEventType
+  entityType String? // 'listing', 'category', 'brand', 'seller'
+  entityId   String?
+  metadata   Json          @default("{}")
+  ipHash     String        @db.VarChar(64)
+  createdAt  DateTime      @default(now())
+
+  @@index([userId, createdAt])
+  @@index([sessionId])
+  @@index([deviceId])
+  @@index([eventType, createdAt])
+  @@index([entityType, entityId])
+}
+
+// --- Personalised Ad Profile (computed from events) ---
+
+model UserAdProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  categoryScores  Json     @default("{}") // categoryId -> float score
+  brandScores     Json     @default("{}") // brandId -> float score
+  priceRangeLow   Decimal? @db.Decimal(10, 2)
+  priceRangeHigh  Decimal? @db.Decimal(10, 2)
+  preferredSizes  String[]
+  preferredColors String[]
+  activeHours     Json     @default("{}") // hour (0-23) -> event count
+  interestTags    String[]
+  lastComputedAt  DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// --- Cross-device Linking ---
+
+model DeviceLink {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceId    String // SHA256(raw fingerprint)
+  platform    String // 'ios', 'android', 'web'
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@index([deviceId])
+}
+
+// --- LGPD Consent Records ---
+
+model ConsentRecord {
+  id          String      @id @default(cuid())
+  userId      String
+  consentType ConsentType
+  granted     Boolean
+  ipHash      String      @db.VarChar(64)
+  grantedAt   DateTime    @default(now())
+  revokedAt   DateTime?
+
+  @@index([userId, consentType])
+  @@index([userId])
+}
+
 // --- Enums ---
 
 enum ItemCondition {
@@ -570,4 +759,41 @@ enum ReportStatus {
 enum Carrier {
   CORREIOS
   JADLOG
+}
+
+enum AdCampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum AdFormat {
+  BANNER
+  CARD
+  SPONSORED_LISTING
+  INTERSTITIAL
+}
+
+enum UserEventType {
+  LISTING_VIEW
+  LISTING_FAVORITE
+  LISTING_UNFAVORITE
+  LISTING_SHARE
+  SEARCH
+  CATEGORY_BROWSE
+  BRAND_BROWSE
+  SELLER_PROFILE_VIEW
+  AD_IMPRESSION
+  AD_CLICK
+  ORDER_COMPLETE
+  OFFER_MADE
+}
+
+enum ConsentType {
+  PERSONALIZED_ADS
+  ANALYTICS
+  THIRD_PARTY_DATA_SHARING
+  MARKETING_EMAILS
 }
