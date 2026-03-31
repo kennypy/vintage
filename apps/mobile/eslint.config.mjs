@@ -30,6 +30,8 @@ export default [
         URLSearchParams: 'readonly',
         alert: 'readonly',
         FormData: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     plugins: {

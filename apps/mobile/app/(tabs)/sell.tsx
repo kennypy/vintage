@@ -60,7 +60,7 @@ export default function SellScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaType.images,
       allowsMultipleSelection: true,
       selectionLimit: 20 - photos.length,
       quality: 0.8,

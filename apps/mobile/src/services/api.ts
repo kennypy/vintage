@@ -23,6 +23,8 @@ interface RequestOptions extends RequestInit {
   authenticated?: boolean;
 }
 
+const FETCH_TIMEOUT_MS = 5000;
+
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { authenticated = true, headers: customHeaders, ...rest } = options;
 
@@ -38,10 +40,26 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers,
-    ...rest,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers,
+      signal: controller.signal,
+      ...rest,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    // AbortError or network error — rethrow as TypeError so callers fall back to demo
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new TypeError('Request timed out');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 401 && authenticated) {
     // Attempt token refresh
@@ -49,14 +67,23 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     if (refreshed) {
       const newToken = await getToken();
       headers['Authorization'] = `Bearer ${newToken}`;
-      const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
-        headers,
-        ...rest,
-      });
-      if (!retryResponse.ok) {
-        throw new ApiError(retryResponse.status, await safeParseError(retryResponse));
+      const retryController = new AbortController();
+      const retryTimeout = setTimeout(() => retryController.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
+          headers,
+          signal: retryController.signal,
+          ...rest,
+        });
+        clearTimeout(retryTimeout);
+        if (!retryResponse.ok) {
+          throw new ApiError(retryResponse.status, await safeParseError(retryResponse));
+        }
+        return retryResponse.json();
+      } catch (err) {
+        clearTimeout(retryTimeout);
+        throw err;
       }
-      return retryResponse.json();
     }
     throw new ApiError(401, 'Session expired');
   }
