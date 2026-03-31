@@ -85,7 +85,6 @@ export default function HomeScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
-        <Text style={[styles.tagline, { color: theme.textTertiary }]}>Moda de segunda mão</Text>
       </View>
       <FlatList
         data={listings}
@@ -119,7 +118,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   logo: { fontSize: 24, fontWeight: '700' },
-  tagline: { fontSize: 13, marginTop: 2 },
   list: { padding: CARD_GAP },
   row: { justifyContent: 'space-between' },
 });

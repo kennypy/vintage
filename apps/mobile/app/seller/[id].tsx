@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { getPublicProfile, followUser, unfollowUser } from '../../src/services/users';
 import { getListings } from '../../src/services/listings';
 import { ListingCard } from '../../src/components/ListingCard';
@@ -24,6 +25,7 @@ function mapListingToCard(listing: Listing) {
 
 export default function SellerProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { theme } = useTheme();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,17 +46,19 @@ export default function SellerProfileScreen() {
       const sellerListings = demoListings.filter((l) => l.seller.id === id);
       const seller = sellerListings[0]?.seller ?? { id: id ?? 'demo', name: 'Vendedor', rating: 5.0 };
 
+      // Generate unique-ish counts per seller using id hash
+      const idHash = (id ?? 'demo').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
       const demoProfile: PublicProfile = {
         id: seller.id,
         name: seller.name,
         verified: true,
         ratingAvg: seller.rating ?? 4.8,
-        ratingCount: 12,
-        followerCount: 34,
-        followingCount: 8,
+        ratingCount: (idHash % 40) + 5,
+        followerCount: (idHash % 80) + 10,
+        followingCount: (idHash % 30) + 3,
         listingCount: sellerListings.length,
         isFollowing: false,
-        createdAt: new Date(Date.now() - 86400000 * 180).toISOString(),
+        createdAt: new Date(Date.now() - 86400000 * (90 + (idHash % 300))).toISOString(),
       };
       setProfile(demoProfile);
       setListings(sellerListings.map(mapListingToCard));
@@ -93,7 +97,7 @@ export default function SellerProfileScreen() {
 
   if (loading || !profile) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
@@ -102,53 +106,53 @@ export default function SellerProfileScreen() {
   const headerComponent = (
     <View>
       {/* Profile Header */}
-      <View style={styles.profileHeader}>
-        <View style={styles.avatarPlaceholder}>
-          <Ionicons name="person" size={36} color={colors.neutral[400]} />
+      <View style={[styles.profileHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+        <View style={[styles.avatarPlaceholder, { backgroundColor: theme.cardSecondary }]}>
+          <Ionicons name="person" size={36} color={theme.textTertiary} />
         </View>
         <View style={styles.profileInfo}>
           <View style={styles.nameRow}>
-            <Text style={styles.name}>{profile.name}</Text>
+            <Text style={[styles.name, { color: theme.text }]}>{profile.name}</Text>
             {profile.verified && (
               <Ionicons name="checkmark-circle" size={18} color={colors.primary[500]} />
             )}
           </View>
           <View style={styles.ratingRow}>
             <Ionicons name="star" size={14} color={colors.warning[500]} />
-            <Text style={styles.ratingText}>
+            <Text style={[styles.ratingText, { color: theme.textSecondary }]}>
               {profile.ratingAvg} ({profile.ratingCount} avaliações)
             </Text>
           </View>
-          <Text style={styles.memberSince}>
+          <Text style={[styles.memberSince, { color: theme.textTertiary }]}>
             Membro desde {new Date(profile.createdAt).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
           </Text>
         </View>
       </View>
 
       {/* Stats */}
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{profile.listingCount}</Text>
-          <Text style={styles.statLabel}>Anúncios</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{profile.listingCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Anúncios</Text>
         </View>
-        <View style={styles.statDivider} />
+        <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{profile.followerCount}</Text>
-          <Text style={styles.statLabel}>Seguidores</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{profile.followerCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguidores</Text>
         </View>
-        <View style={styles.statDivider} />
+        <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{profile.followingCount}</Text>
-          <Text style={styles.statLabel}>Seguindo</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{profile.followingCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguindo</Text>
         </View>
       </View>
 
       {/* Follow Button */}
-      <View style={styles.followContainer}>
+      <View style={[styles.followContainer, { backgroundColor: theme.card }]}>
         <TouchableOpacity
           style={[
             styles.followButton,
-            profile.isFollowing && styles.followingButton,
+            profile.isFollowing && [styles.followingButton, { borderColor: colors.primary[600] }],
             followLoading && styles.followDisabled,
           ]}
           onPress={handleFollowToggle}
@@ -173,15 +177,15 @@ export default function SellerProfileScreen() {
       </View>
 
       {/* Listings Header */}
-      <View style={styles.listingsHeader}>
-        <Text style={styles.listingsTitle}>Anúncios ({profile.listingCount})</Text>
+      <View style={[styles.listingsHeader, { backgroundColor: theme.background }]}>
+        <Text style={[styles.listingsTitle, { color: theme.text }]}>Anúncios ({profile.listingCount})</Text>
       </View>
     </View>
   );
 
   return (
     <FlatList
-      style={styles.container}
+      style={[styles.container, { backgroundColor: theme.background }]}
       data={listings}
       numColumns={2}
       keyExtractor={(item) => item.id}
@@ -194,8 +198,8 @@ export default function SellerProfileScreen() {
       }
       ListEmptyComponent={
         <View style={styles.empty}>
-          <Ionicons name="pricetags-outline" size={48} color={colors.neutral[300]} />
-          <Text style={styles.emptyText}>Nenhum anúncio publicado</Text>
+          <Ionicons name="pricetags-outline" size={48} color={theme.textTertiary} />
+          <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum anúncio publicado</Text>
         </View>
       }
     />
@@ -203,7 +207,7 @@ export default function SellerProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   profileHeader: {
     flexDirection: 'row', alignItems: 'center', padding: 16,

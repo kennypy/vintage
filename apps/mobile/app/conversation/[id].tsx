@@ -9,6 +9,8 @@ import {
   Platform,
   ActivityIndicator,
   StyleSheet,
+  Alert,
+  Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -23,14 +25,29 @@ import { getDemoMessages, addDemoMessage } from '../../src/services/demoStore';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+const formatBrl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 export default function ConversationScreen() {
-  const { id, participantName } = useLocalSearchParams<{
+  const { id, participantName, isOffer, offerAmount, listingId } = useLocalSearchParams<{
     id: string;
     participantName?: string;
+    isOffer?: string;
+    offerAmount?: string;
+    listingId?: string;
   }>();
   const { theme } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+
+  // Offer state (local, for demo purposes)
+  const [pendingOfferAmount, setPendingOfferAmount] = useState<number | null>(
+    isOffer === '1' && offerAmount ? parseFloat(offerAmount) : null,
+  );
+  const [offerStatus, setOfferStatus] = useState<'pending' | 'accepted' | 'rejected' | 'countered' | null>(
+    isOffer === '1' ? 'pending' : null,
+  );
+  const [counterModalVisible, setCounterModalVisible] = useState(false);
+  const [counterInput, setCounterInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -224,6 +241,79 @@ export default function ConversationScreen() {
     }
   }, [text, id, sending, user?.id]);
 
+  // --- Offer actions ---
+  const handleAcceptOffer = () => {
+    if (pendingOfferAmount == null) return;
+    Alert.alert(
+      'Confirmar aceitação',
+      `Tem certeza que deseja aceitar a oferta de R$ ${formatBrl(pendingOfferAmount)}? O comprador receberá um botão de compra com este valor.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Aceitar',
+          onPress: () => {
+            setOfferStatus('accepted');
+            const confirmMsg: Message = {
+              id: `offer-accepted-${Date.now()}`,
+              conversationId: id ?? '',
+              senderId: user?.id ?? '',
+              body: `✅ Oferta de R$ ${formatBrl(pendingOfferAmount)} aceita! O comprador pode finalizar a compra agora.`,
+              readAt: null,
+              createdAt: new Date().toISOString(),
+            };
+            setMessages((prev) => [confirmMsg, ...prev]);
+            addDemoMessage(id ?? '', confirmMsg);
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRejectOffer = () => {
+    Alert.alert('Rejeitar oferta', 'Tem certeza que deseja rejeitar esta oferta?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Rejeitar',
+        style: 'destructive',
+        onPress: () => {
+          setOfferStatus('rejected');
+          const rejectMsg: Message = {
+            id: `offer-rejected-${Date.now()}`,
+            conversationId: id ?? '',
+            senderId: user?.id ?? '',
+            body: '❌ Oferta rejeitada.',
+            readAt: null,
+            createdAt: new Date().toISOString(),
+          };
+          setMessages((prev) => [rejectMsg, ...prev]);
+          addDemoMessage(id ?? '', rejectMsg);
+        },
+      },
+    ]);
+  };
+
+  const handleCounterOffer = () => {
+    const counter = parseFloat(counterInput.replace(',', '.'));
+    if (isNaN(counter) || counter <= 0) {
+      Alert.alert('Valor inválido', 'Informe um valor válido para a contraproposta.');
+      return;
+    }
+    setOfferStatus('countered');
+    setPendingOfferAmount(counter);
+    setCounterModalVisible(false);
+    setCounterInput('');
+    const counterMsg: Message = {
+      id: `offer-counter-${Date.now()}`,
+      conversationId: id ?? '',
+      senderId: user?.id ?? '',
+      body: `🔄 Contraproposta: R$ ${formatBrl(counter)}\n\nO vendedor fez uma contraproposta. Você pode aceitar, rejeitar ou fazer uma nova oferta.`,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [counterMsg, ...prev]);
+    addDemoMessage(id ?? '', counterMsg);
+  };
+
   const loadMore = useCallback(() => {
     if (!hasMore || loading) return;
     const nextPage = page + 1;
@@ -350,6 +440,52 @@ export default function ConversationScreen() {
           ),
         }}
       />
+      {/* Offer banner — visible when there's a pending/active offer */}
+      {pendingOfferAmount != null && (
+        <View style={[styles.offerBanner, { backgroundColor: offerStatus === 'accepted' ? colors.success[50] : offerStatus === 'rejected' ? colors.error[50] : theme.cardSecondary, borderBottomColor: theme.border }]}>
+          <View style={styles.offerBannerLeft}>
+            <Ionicons
+              name={offerStatus === 'accepted' ? 'checkmark-circle' : offerStatus === 'rejected' ? 'close-circle' : 'pricetag'}
+              size={20}
+              color={offerStatus === 'accepted' ? colors.success[600] : offerStatus === 'rejected' ? colors.error[500] : colors.primary[600]}
+            />
+            <View>
+              <Text style={[styles.offerBannerLabel, { color: theme.textSecondary }]}>
+                {offerStatus === 'accepted' ? 'Oferta aceita' : offerStatus === 'rejected' ? 'Oferta rejeitada' : offerStatus === 'countered' ? 'Contraproposta' : 'Oferta pendente'}
+              </Text>
+              <Text style={[styles.offerBannerAmount, { color: theme.text }]}>
+                R$ {formatBrl(pendingOfferAmount)}
+              </Text>
+            </View>
+          </View>
+
+          {/* Show actions only for pending/countered offers */}
+          {(offerStatus === 'pending' || offerStatus === 'countered') && (
+            <View style={styles.offerActions}>
+              <TouchableOpacity style={[styles.offerActionBtn, styles.offerRejectBtn]} onPress={handleRejectOffer}>
+                <Text style={styles.offerRejectText}>Rejeitar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.offerActionBtn, styles.offerCounterBtn]} onPress={() => setCounterModalVisible(true)}>
+                <Text style={styles.offerCounterText}>Contra</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.offerActionBtn, styles.offerAcceptBtn]} onPress={handleAcceptOffer}>
+                <Text style={styles.offerAcceptText}>Aceitar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Buy Now button shown to buyer after seller accepts */}
+          {offerStatus === 'accepted' && (
+            <TouchableOpacity
+              style={styles.buyNowBtn}
+              onPress={() => Alert.alert('Comprar agora', `Finalize a compra por R$ ${formatBrl(pendingOfferAmount)}. Redirecionando para o checkout...`)}
+            >
+              <Text style={styles.buyNowText}>Comprar agora</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -390,6 +526,40 @@ export default function ConversationScreen() {
           />
         </TouchableOpacity>
       </View>
+      {/* Counter offer modal */}
+      <Modal visible={counterModalVisible} transparent animationType="slide">
+        <View style={styles.counterOverlay}>
+          <View style={[styles.counterModal, { backgroundColor: theme.card }]}>
+            <Text style={[styles.counterTitle, { color: theme.text }]}>Fazer contraproposta</Text>
+            <Text style={[styles.counterSubtitle, { color: theme.textSecondary }]}>
+              Oferta atual: R$ {pendingOfferAmount != null ? formatBrl(pendingOfferAmount) : '—'}
+            </Text>
+            <View style={styles.counterInputRow}>
+              <Text style={[styles.counterPrefix, { color: theme.text }]}>R$</Text>
+              <TextInput
+                style={[styles.counterInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
+                placeholder="0,00"
+                placeholderTextColor={theme.textTertiary}
+                value={counterInput}
+                onChangeText={setCounterInput}
+                keyboardType="decimal-pad"
+                autoFocus
+              />
+            </View>
+            <View style={styles.counterButtons}>
+              <TouchableOpacity
+                style={[styles.counterCancelBtn, { borderColor: theme.border }]}
+                onPress={() => { setCounterModalVisible(false); setCounterInput(''); }}
+              >
+                <Text style={[styles.counterCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.counterConfirmBtn} onPress={handleCounterOffer}>
+                <Text style={styles.counterConfirmText}>Enviar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -517,4 +687,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendButtonDisabled: {},
+  // Offer banner
+  offerBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, flexWrap: 'wrap', gap: 8,
+  },
+  offerBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  offerBannerLabel: { fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
+  offerBannerAmount: { fontSize: 16, fontWeight: '700' },
+  offerActions: { flexDirection: 'row', gap: 6 },
+  offerActionBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  offerRejectBtn: { backgroundColor: colors.error[50], borderWidth: 1, borderColor: colors.error[200] },
+  offerRejectText: { fontSize: 12, fontWeight: '600', color: colors.error[600] },
+  offerCounterBtn: { backgroundColor: colors.warning[50], borderWidth: 1, borderColor: colors.warning[200] },
+  offerCounterText: { fontSize: 12, fontWeight: '600', color: colors.warning[700] },
+  offerAcceptBtn: { backgroundColor: colors.success[500] },
+  offerAcceptText: { fontSize: 12, fontWeight: '600', color: '#fff' },
+  buyNowBtn: { backgroundColor: colors.primary[600], paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 },
+  buyNowText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  // Counter modal
+  counterOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  counterModal: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
+  counterTitle: { fontSize: 20, fontWeight: '700' },
+  counterSubtitle: { fontSize: 14, marginTop: 4, marginBottom: 20 },
+  counterInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  counterPrefix: { fontSize: 20, fontWeight: '600', marginRight: 8 },
+  counterInput: { flex: 1, height: 50, borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, fontSize: 18 },
+  counterButtons: { flexDirection: 'row', gap: 12 },
+  counterCancelBtn: { flex: 1, height: 50, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+  counterCancelText: { fontSize: 15, fontWeight: '500' },
+  counterConfirmBtn: { flex: 1, height: 50, borderRadius: 12, backgroundColor: colors.primary[600], justifyContent: 'center', alignItems: 'center' },
+  counterConfirmText: { fontSize: 15, color: '#fff', fontWeight: '600' },
 });

@@ -39,6 +39,8 @@ export async function startConversation(
   });
 }
 
+export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'countered';
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -46,6 +48,10 @@ export interface Message {
   body: string;
   readAt: string | null;
   createdAt: string;
+  // Offer fields (present only for offer-type messages)
+  offerAmount?: number;
+  offerStatus?: OfferStatus;
+  offerListingId?: string;
 }
 
 export interface MessagesResponse {
