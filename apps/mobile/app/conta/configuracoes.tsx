@@ -17,14 +17,18 @@ async function loadNotifPrefs(): Promise<NotifPrefs> {
   try {
     const raw = await SecureStore.getItemAsync(NOTIF_PREFS_KEY);
     if (raw) return JSON.parse(raw) as NotifPrefs;
-  } catch {}
+  } catch (_e) {
+    // Return defaults if SecureStore unavailable
+  }
   return { push: true, email: true, sms: false };
 }
 
 async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
   try {
     await SecureStore.setItemAsync(NOTIF_PREFS_KEY, JSON.stringify(prefs));
-  } catch {}
+  } catch (_e) {
+    // Silently fail if SecureStore unavailable
+  }
 }
 
 export default function ConfiguracoesScreen() {
