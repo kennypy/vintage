@@ -41,8 +41,11 @@ module.exports = function (api) {
           },
         };
       },
-      // react-native-reanimated plugin MUST be listed last
-      'react-native-reanimated/plugin',
+      // react-native-reanimated plugin MUST be listed last.
+      // Skip in test environment — react-native-worklets (its peer dep in v4)
+      // is not installed as a dev dependency and the plugin is not needed for
+      // Jest unit tests.
+      ...(process.env.NODE_ENV !== 'test' ? ['react-native-reanimated/plugin'] : []),
     ],
   };
 };
