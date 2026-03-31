@@ -6,11 +6,13 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
+import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { EmptyState } from '../../src/components/EmptyState';
 import { ListingCard } from '../../src/components/ListingCard';
-import { getFavorites, toggleFavorite } from '../../src/services/listings';
+import { getFavorites } from '../../src/services/listings';
 
 interface FavoriteListing {
   id: string;
@@ -24,6 +26,8 @@ interface FavoriteListing {
 
 export default function FavoritesScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
+  const { favorites, isFavorited, toggleFavorite } = useFavorites();
   const [listings, setListings] = useState<FavoriteListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -40,7 +44,7 @@ export default function FavoritesScreen() {
         setListings((prev) => [...prev, ...items]);
       }
       setHasMore(pageNum < data.totalPages);
-    } catch (_error) {
+    } catch {
       // silently fail
     } finally {
       setLoading(false);
@@ -51,6 +55,19 @@ export default function FavoritesScreen() {
   useEffect(() => {
     fetchFavorites(1);
   }, [fetchFavorites]);
+
+  // Re-filter when FavoritesContext changes (handles unfavorites from other screens)
+  useEffect(() => {
+    setListings((prev) => prev.filter((l) => isFavorited(l.id)));
+  }, [favorites, isFavorited]);
+
+  // Refresh list when the screen comes back into focus
+  useFocusEffect(
+    useCallback(() => {
+      setPage(1);
+      fetchFavorites(1, true);
+    }, [fetchFavorites]),
+  );
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -66,17 +83,14 @@ export default function FavoritesScreen() {
   }, [hasMore, loading, page, fetchFavorites]);
 
   const handleUnfavorite = useCallback(async (listingId: string) => {
+    // Remove from local list immediately for snappy UX
     setListings((prev) => prev.filter((l) => l.id !== listingId));
-    try {
-      await toggleFavorite(listingId);
-    } catch (_error) {
-      fetchFavorites(1, true);
-    }
-  }, [fetchFavorites]);
+    await toggleFavorite(listingId);
+  }, [toggleFavorite]);
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
@@ -95,7 +109,7 @@ export default function FavoritesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <FlatList
         data={listings}
         renderItem={({ item }) => {
@@ -122,7 +136,11 @@ export default function FavoritesScreen() {
         columnWrapperStyle={styles.row}
         contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary[500]} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary[500]}
+          />
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.3}
@@ -132,23 +150,9 @@ export default function FavoritesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  list: {
-    padding: 12,
-  },
-  row: {
-    justifyContent: 'space-between',
-  },
-  cardWrapper: {
-    width: '48%',
-    marginBottom: 12,
-  },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  list: { padding: 12 },
+  row: { justifyContent: 'space-between' },
+  cardWrapper: { width: '48%', marginBottom: 12 },
 });

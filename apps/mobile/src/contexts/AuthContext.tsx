@@ -6,6 +6,7 @@ import {
   isDemoMode,
   getDemoUser,
   createDemoUser,
+  updateDemoUser,
   disableDemoMode,
   DemoUser,
 } from '../services/demoStore';
@@ -20,6 +21,7 @@ interface AuthContextType {
   signInDemo: (name?: string, email?: string, cpf?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  updateUserAvatar: (avatarUrl: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -151,6 +153,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setDemoActive(true);
   }, []);
 
+  const updateUserAvatar = useCallback(async (avatarUrl: string) => {
+    setUser((prev) => (prev ? { ...prev, avatarUrl } : null));
+    if (demoActive) {
+      await updateDemoUser({ avatarUrl }).catch(() => {});
+    }
+  }, [demoActive]);
+
   const signOut = useCallback(async () => {
     await clearTokens();
     await disableDemoMode();
@@ -170,6 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInDemo,
         signOut,
         refreshUser,
+        updateUserAvatar,
       }}
     >
       {children}
