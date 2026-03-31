@@ -4,9 +4,8 @@ const path = require('path');
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
 
-// In a monorepo Metro's transform workers may not inherit EXPO_ROUTER_APP_ROOT
-// from the Expo CLI process. Set it here so babel-preset-expo can substitute
-// the literal path into expo-router's require.context() call at transform time.
+// Set EXPO_ROUTER_APP_ROOT for monorepo setups where Metro workers
+// may not inherit it from the Expo CLI process environment.
 if (!process.env.EXPO_ROUTER_APP_ROOT) {
   process.env.EXPO_ROUTER_APP_ROOT = path.join(projectRoot, 'app');
 }
@@ -22,19 +21,54 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Prevent Metro from resolving duplicate React copies from nested node_modules
-// (exclusionList was removed in metro-config v5; blockList accepts RegExps directly)
+// Resolve the real react / react-native package directories at config load
+// time, preferring the mobile-local copy first (e.g. react@19 vs root react@18).
+function resolvePackageDir(name) {
+  try {
+    return path.dirname(
+      require.resolve(`${name}/package.json`, { paths: [projectRoot] })
+    );
+  } catch (_) {
+    return path.resolve(workspaceRoot, 'node_modules', name);
+  }
+}
+const reactDir = resolvePackageDir('react');
+const reactNativeDir = resolvePackageDir('react-native');
+
+// Intercept 'react' and 'react-native' imports to guarantee they always
+// resolve to the correct runtime package, not to @types/* stubs.
+// This fixes the "While trying to resolve react … @types/react was found"
+// error that occurs in a monorepo on Windows when Metro's exports-field
+// resolution falls back unexpectedly.
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === 'react') {
+    const pkg = require(path.join(reactDir, 'package.json'));
+    return {
+      filePath: path.resolve(reactDir, pkg.main || 'index.js'),
+      type: 'sourceFile',
+    };
+  }
+  if (moduleName === 'react-native') {
+    const pkg = require(path.join(reactNativeDir, 'package.json'));
+    return {
+      filePath: path.resolve(reactNativeDir, pkg.main || 'index.js'),
+      type: 'sourceFile',
+    };
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
+// Block duplicate React copies that may exist inside nested node_modules
+// (e.g. a dependency that ships its own react copy).
 config.resolver.blockList = [
   /node_modules\/.*\/node_modules\/react\/.*/,
   /node_modules\/.*\/node_modules\/react-native\/.*/,
 ];
 
-// Explicitly resolve react and react-native to the workspace root copies.
-// This prevents Metro from accidentally resolving `react` to `@types/react`
-// when the actual react package is hoisted to the monorepo root.
+// Also register as extraNodeModules as a secondary safety net.
 config.resolver.extraNodeModules = {
-  react: path.resolve(workspaceRoot, 'node_modules/react'),
-  'react-native': path.resolve(workspaceRoot, 'node_modules/react-native'),
+  react: reactDir,
+  'react-native': reactNativeDir,
 };
 
 module.exports = config;
