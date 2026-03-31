@@ -3,7 +3,7 @@
     "name": "Vintage.br",
     "slug": "vintage-br",
     "version": "0.0.1",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "vintage",
