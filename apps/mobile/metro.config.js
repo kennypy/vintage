@@ -35,12 +35,17 @@ function resolvePackageDir(name) {
 const reactDir = resolvePackageDir('react');
 const reactNativeDir = resolvePackageDir('react-native');
 
-// Intercept 'react' and 'react-native' imports to guarantee they always
-// resolve to the correct runtime package, not to @types/* stubs.
-// This fixes the "While trying to resolve react … @types/react was found"
-// error that occurs in a monorepo on Windows when Metro's exports-field
-// resolution falls back unexpectedly.
+// Intercept react and react-native imports to guarantee they always resolve
+// to the correct runtime packages in apps/mobile/node_modules, not to stale
+// root-level copies or @types/* stubs.
+//
+// We must intercept BOTH the exact package name AND all subpath imports
+// (e.g. react-native/Libraries/WebSocket/WebSocket) because packages hoisted
+// to the workspace root (like @expo/metro-runtime) would otherwise traverse up
+// from their own location and find root/node_modules/react-native@0.76.6 or
+// root/node_modules/react@18.3.1 for subpath imports, bypassing nodeModulesPaths.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Exact 'react' import → react@19.1.0/index.js
   if (moduleName === 'react') {
     const pkg = require(path.join(reactDir, 'package.json'));
     return {
@@ -48,12 +53,31 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       type: 'sourceFile',
     };
   }
+  // 'react/*' subpath imports (e.g. react/jsx-runtime) → anchor to react@19.1.0
+  if (moduleName.startsWith('react/')) {
+    return context.resolveRequest(
+      { ...context, originModulePath: path.join(reactDir, 'index.js') },
+      moduleName,
+      platform,
+    );
+  }
+  // Exact 'react-native' import → react-native@0.81.5/index.js
   if (moduleName === 'react-native') {
     const pkg = require(path.join(reactNativeDir, 'package.json'));
     return {
       filePath: path.resolve(reactNativeDir, pkg.main || 'index.js'),
       type: 'sourceFile',
     };
+  }
+  // 'react-native/*' subpath imports (e.g. react-native/Libraries/WebSocket/WebSocket)
+  // → anchor to react-native@0.81.5 so packages hoisted to workspace root
+  //   don't accidentally load files from the stale 0.76.6 copy.
+  if (moduleName.startsWith('react-native/')) {
+    return context.resolveRequest(
+      { ...context, originModulePath: path.join(reactNativeDir, 'index.js') },
+      moduleName,
+      platform,
+    );
   }
   return context.resolveRequest(context, moduleName, platform);
 };
