@@ -3,7 +3,6 @@ import { getToken, clearTokens } from '../services/api';
 import { login as loginService, register as registerService, AuthUser } from '../services/auth';
 import { getProfile, UserProfile } from '../services/users';
 import {
-  isDemoMode,
   getDemoUser,
   createDemoUser,
   updateDemoUser,
@@ -72,18 +71,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function bootstrap() {
       try {
-        // Check demo mode first
-        const demo = await isDemoMode();
-        if (demo) {
-          const demoUser = await getDemoUser();
-          if (demoUser) {
-            setUser(demoUserToAuthUser(demoUser));
-            setDemoActive(true);
-            setIsLoading(false);
-            return;
-          }
-        }
-
+        // Only restore real authenticated sessions (valid JWT token).
+        // Demo mode sessions are NOT restored on app open — users must log in explicitly.
+        // This ensures the auth gate always shows the login screen to unauthenticated users.
         const token = await getToken();
         if (token) {
           const profile = await getProfile();
@@ -91,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (_error) {
         setUser(null);
+        await clearTokens();
       } finally {
         setIsLoading(false);
       }

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { getPublicProfile, followUser, unfollowUser } from '../../src/services/users';
+import { useAuth } from '../../src/contexts/AuthContext';
 import { getListings } from '../../src/services/listings';
 import { ListingCard } from '../../src/components/ListingCard';
 import type { PublicProfile } from '../../src/services/users';
@@ -26,6 +27,7 @@ function mapListingToCard(listing: Listing) {
 export default function SellerProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
+  const { isDemoMode: demoMode } = useAuth();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +89,10 @@ export default function SellerProfileScreen() {
       followerCount: wasFollowing ? profile.followerCount - 1 : profile.followerCount + 1,
     };
     setProfile(optimisticProfile);
+
+    // In demo mode there is no real API — keep the optimistic state as the final state.
+    if (demoMode) return;
+
     setFollowLoading(true);
     try {
       if (wasFollowing) {
