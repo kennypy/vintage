@@ -14,6 +14,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
   },
   "devDependencies": {
+    "metro": "~0.82.0",
+    "metro-runtime": "~0.82.0",
     "prettier": "^3.4.0",
     "turbo": "^2.3.0"
   },
