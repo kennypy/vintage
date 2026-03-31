@@ -17,6 +17,7 @@ import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getToken } from '../../src/services/api';
 import { getMessages, sendMessage, Message } from '../../src/services/messages';
+import { getDemoMessages, addDemoMessage } from '../../src/services/demoStore';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -140,7 +141,12 @@ export default function ConversationScreen() {
       }
       setHasMore(pageNum < data.totalPages);
     } catch (_error) {
-      // silently fail
+      // API unavailable — load demo messages (page 1 only)
+      if (pageNum === 1) {
+        const demoMsgs = getDemoMessages(id);
+        setMessages(demoMsgs);
+        setHasMore(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -203,7 +209,12 @@ export default function ConversationScreen() {
         prev.map((m) => (m.id === optimisticMessage.id ? sent : m)),
       );
     } catch (_error) {
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id));
+      // API unavailable — keep optimistic message as sent (demo mode)
+      const demoSent: Message = { ...optimisticMessage, id: `demo-sent-${Date.now()}` };
+      addDemoMessage(id, demoSent);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === optimisticMessage.id ? demoSent : m)),
+      );
     } finally {
       setSending(false);
     }

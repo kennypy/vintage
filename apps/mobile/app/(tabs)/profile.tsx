@@ -7,7 +7,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: loading, signOut } = useAuth();
+  const { user, isAuthenticated, isLoading: loading, signOut, isDemoMode } = useAuth();
   const [vacationMode, setVacationMode] = useState(false);
 
   const handleLogout = async () => {
@@ -55,6 +55,14 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* Demo Mode Banner */}
+      {isDemoMode && (
+        <View style={styles.demoBanner}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.warning[700]} />
+          <Text style={styles.demoBannerText}>Modo demo ativo — dados locais, sem servidor</Text>
+        </View>
+      )}
+
       {/* Profile Header */}
       <View style={styles.profileHeader}>
         <View style={styles.avatarPlaceholder}>
@@ -177,6 +185,12 @@ const styles = StyleSheet.create({
   authTitle: { fontSize: 20, fontWeight: '600', color: colors.neutral[900], marginBottom: 16 },
   authButton: { backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 },
   authButtonText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
+  demoBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.warning[50], paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: colors.warning[200],
+  },
+  demoBannerText: { fontSize: 13, color: colors.warning[700], flex: 1 },
   profileHeader: {
     flexDirection: 'row', alignItems: 'center', padding: 16,
     backgroundColor: colors.neutral[0], borderBottomWidth: 1, borderBottomColor: colors.neutral[200],

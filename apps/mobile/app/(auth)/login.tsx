@@ -8,7 +8,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, signInDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -89,6 +89,16 @@ export default function LoginScreen() {
           <Text style={styles.socialButtonText}>Continuar com Apple</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.demoButton}
+          onPress={async () => {
+            await signInDemo();
+            router.replace('/(tabs)');
+          }}
+        >
+          <Text style={styles.demoButtonText}>Testar em modo demo (sem conta)</Text>
+        </TouchableOpacity>
+
         <View style={styles.footer}>
           <Text style={styles.footerText}>Não tem conta? </Text>
           <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
@@ -127,6 +137,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginBottom: 10,
   },
   socialButtonText: { fontSize: 15, color: colors.neutral[700], fontWeight: '500' },
+  demoButton: {
+    alignItems: 'center', paddingVertical: 12, marginTop: 4,
+  },
+  demoButtonText: { color: colors.neutral[400], fontSize: 13, textDecorationLine: 'underline' },
   footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 24 },
   footerText: { color: colors.neutral[500], fontSize: 14 },
   footerLink: { color: colors.primary[600], fontSize: 14, fontWeight: '600' },

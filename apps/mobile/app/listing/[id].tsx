@@ -10,6 +10,7 @@ import { getListing, toggleFavorite as toggleFavoriteApi } from '../../src/servi
 import { makeOffer } from '../../src/services/offers';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
+import { getDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -33,6 +34,7 @@ export default function ListingDetailScreen() {
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [offerLoading, setOfferLoading] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     async function fetchListing() {
@@ -41,23 +43,34 @@ export default function ListingDetailScreen() {
         setListing(data);
         setFavorited(data.isFavorited ?? false);
       } catch (_error) {
-        // Fallback mock data
-        setListing({
-          id: id ?? '1',
-          title: 'Vestido Zara tamanho M',
-          description: 'Vestido preto, usado 2 vezes, sem defeitos. Tecido leve, ideal para o verão.',
-          priceBrl: 89.9,
-          condition: 'VERY_GOOD',
-          size: 'M',
-          color: 'Preto',
-          images: [],
-          seller: { id: 'seller1', name: 'Maria Silva', rating: 4.8 },
-          category: 'Vestidos',
-          brand: 'Zara',
-          viewCount: 42,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
+        // Check demo store first (for user-created demo listings)
+        const demoListing = getDemoListing(id ?? '');
+        if (demoListing) {
+          setListing(demoListing);
+          setFavorited(demoListing.isFavorited ?? false);
+        } else {
+          // Generic fallback mock with photos
+          setListing({
+            id: id ?? '1',
+            title: 'Vestido Zara tamanho M',
+            description: 'Vestido preto fluido, usado 2 vezes, sem defeitos. Tecido leve, ideal para o verão. Excelente estado de conservação.',
+            priceBrl: 89.9,
+            condition: 'VERY_GOOD',
+            size: 'M',
+            color: 'Preto',
+            images: [
+              { id: 'img1', url: DEMO_PHOTOS[0], order: 0 },
+              { id: 'img2', url: DEMO_PHOTOS[1], order: 1 },
+              { id: 'img3', url: DEMO_PHOTOS[2], order: 2 },
+            ],
+            seller: { id: 'seller1', name: 'Maria Silva', rating: 4.8 },
+            category: 'Moda Feminina',
+            brand: 'Zara',
+            viewCount: 42,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -137,11 +150,41 @@ export default function ListingDetailScreen() {
         {/* Image Carousel */}
         <View style={styles.imageContainer}>
           {listing.images.length > 0 ? (
-            <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-              {listing.images.map((img, i) => (
-                <Image key={i} source={{ uri: img.url }} style={styles.image} resizeMode="cover" />
-              ))}
-            </ScrollView>
+            <>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e) => {
+                  const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                  setCurrentImageIndex(idx);
+                }}
+              >
+                {listing.images.map((img, i) => (
+                  <ScrollView
+                    key={i}
+                    style={styles.zoomScroll}
+                    maximumZoomScale={3}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    centerContent
+                  >
+                    <Image source={{ uri: img.url }} style={styles.image} resizeMode="cover" />
+                  </ScrollView>
+                ))}
+              </ScrollView>
+              {listing.images.length > 1 && (
+                <View style={styles.imageDots}>
+                  {listing.images.map((_, i) => (
+                    <View
+                      key={i}
+                      style={[styles.dot, i === currentImageIndex && styles.dotActive]}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
               <Ionicons name="image-outline" size={64} color={colors.neutral[300]} />
@@ -303,8 +346,15 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   imageContainer: { backgroundColor: colors.neutral[100] },
   image: { width: SCREEN_WIDTH, aspectRatio: 4 / 5 },
+  zoomScroll: { width: SCREEN_WIDTH },
   imagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
   placeholderText: { color: colors.neutral[400], marginTop: 8 },
+  imageDots: {
+    position: 'absolute', bottom: 10, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', gap: 6,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
+  dotActive: { backgroundColor: '#ffffff', width: 18 },
   priceRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,

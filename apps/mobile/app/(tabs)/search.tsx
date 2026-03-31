@@ -1,21 +1,24 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, ActivityIndicator,
+} from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { ListingCard } from '../../src/components/ListingCard';
 import { getListings } from '../../src/services/listings';
+import { searchDemoListings } from '../../src/services/demoStore';
 import type { Listing } from '../../src/services/listings';
 
 const CATEGORIES = [
-  { id: '1', name: 'Moda Feminina', icon: '👗' },
-  { id: '2', name: 'Moda Masculina', icon: '👔' },
-  { id: '3', name: 'Calçados', icon: '👟' },
-  { id: '4', name: 'Bolsas', icon: '👜' },
-  { id: '5', name: 'Acessórios', icon: '💎' },
-  { id: '6', name: 'Infantil', icon: '👶' },
-  { id: '7', name: 'Casa', icon: '🏠' },
-  { id: '8', name: 'Eletrônicos', icon: '📱' },
-  { id: '9', name: 'Vintage', icon: '✨' },
+  { id: 'Moda Feminina', name: 'Moda Feminina', icon: '👗' },
+  { id: 'Moda Masculina', name: 'Moda Masculina', icon: '👔' },
+  { id: 'Calçados', name: 'Calçados', icon: '👟' },
+  { id: 'Bolsas', name: 'Bolsas', icon: '👜' },
+  { id: 'Acessórios', name: 'Acessórios', icon: '💎' },
+  { id: 'Infantil', name: 'Infantil', icon: '👶' },
+  { id: 'Casa', name: 'Casa', icon: '🏠' },
+  { id: 'Eletrônicos', name: 'Eletrônicos', icon: '📱' },
+  { id: 'Vintage', name: 'Vintage', icon: '✨' },
 ];
 
 const CONDITIONS = [
@@ -45,12 +48,17 @@ export default function SearchScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedCondition, setSelectedCondition] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<ReturnType<typeof mapListingToCard>[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const performSearch = useCallback(async (searchQuery: string, category?: string | null, condition?: string | null, size?: string | null) => {
+  const performSearch = useCallback(async (
+    searchQuery: string,
+    category?: string | null,
+    condition?: string | null,
+    size?: string | null,
+  ) => {
     if (!searchQuery && !category && !condition && !size) {
       setResults([]);
       setHasSearched(false);
@@ -69,7 +77,14 @@ export default function SearchScreen() {
       const response = await getListings(params);
       setResults(response.items.map(mapListingToCard));
     } catch (_error) {
-      setResults([]);
+      // API unavailable — search demo listings
+      const demoResults = searchDemoListings({
+        search: searchQuery || undefined,
+        category: category || undefined,
+        condition: condition || undefined,
+        size: size || undefined,
+      });
+      setResults(demoResults.map(mapListingToCard));
     } finally {
       setLoading(false);
     }
@@ -88,17 +103,28 @@ export default function SearchScreen() {
   }, [query, selectedCategory, selectedCondition, selectedSize, performSearch]);
 
   const handleCategorySelect = (catId: string) => {
-    const newCat = selectedCategory === catId ? null : catId;
-    setSelectedCategory(newCat);
+    setSelectedCategory((prev) => (prev === catId ? null : catId));
   };
 
   const handleConditionSelect = (condValue: string) => {
-    setSelectedCondition(selectedCondition === condValue ? null : condValue);
+    setSelectedCondition((prev) => (prev === condValue ? null : condValue));
   };
 
   const handleSizeSelect = (sizeValue: string) => {
-    setSelectedSize(selectedSize === sizeValue ? null : sizeValue);
+    setSelectedSize((prev) => (prev === sizeValue ? null : sizeValue));
   };
+
+  const clearAllFilters = () => {
+    setSelectedCategory(null);
+    setSelectedCondition(null);
+    setSelectedSize(null);
+    setQuery('');
+  };
+
+  const hasActiveFilters = !!(selectedCategory || selectedCondition || selectedSize);
+  const isInSearchMode = hasSearched || query.length > 0 || hasActiveFilters;
+
+  const activeConditionLabel = CONDITIONS.find((c) => c.value === selectedCondition)?.label;
 
   return (
     <View style={styles.container}>
@@ -124,11 +150,16 @@ export default function SearchScreen() {
           style={[styles.filterButton, showFilters && styles.filterActive]}
           onPress={() => setShowFilters(!showFilters)}
         >
-          <Ionicons name="options-outline" size={20} color={showFilters ? colors.primary[600] : colors.neutral[600]} />
+          <Ionicons
+            name="options-outline"
+            size={20}
+            color={showFilters ? colors.primary[600] : colors.neutral[600]}
+          />
+          {hasActiveFilters && <View style={styles.filterDot} />}
         </TouchableOpacity>
       </View>
 
-      {/* Filters */}
+      {/* Filter Panel */}
       {showFilters && (
         <View style={styles.filters}>
           <Text style={styles.filterLabel}>Condição</Text>
@@ -161,15 +192,53 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Categories or Results */}
-      {!hasSearched && query.length === 0 && !selectedCategory && !selectedCondition && !selectedSize ? (
+      {/* Active Filters Bar — shown whenever any filter/category is active */}
+      {hasActiveFilters && (
+        <View style={styles.activeFiltersBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
+            {selectedCategory && (
+              <TouchableOpacity
+                style={styles.activeChip}
+                onPress={() => setSelectedCategory(null)}
+              >
+                <Text style={styles.activeChipText}>{selectedCategory}</Text>
+                <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
+              </TouchableOpacity>
+            )}
+            {selectedCondition && (
+              <TouchableOpacity
+                style={styles.activeChip}
+                onPress={() => setSelectedCondition(null)}
+              >
+                <Text style={styles.activeChipText}>{activeConditionLabel}</Text>
+                <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
+              </TouchableOpacity>
+            )}
+            {selectedSize && (
+              <TouchableOpacity
+                style={styles.activeChip}
+                onPress={() => setSelectedSize(null)}
+              >
+                <Text style={styles.activeChipText}>Tam. {selectedSize}</Text>
+                <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+          <TouchableOpacity style={styles.clearAllButton} onPress={clearAllFilters}>
+            <Text style={styles.clearAllText}>Limpar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Categories Grid or Results */}
+      {!isInSearchMode ? (
         <ScrollView style={styles.categoriesContainer} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionTitle}>Categorias</Text>
           <View style={styles.categoriesGrid}>
             {CATEGORIES.map((cat) => (
               <TouchableOpacity
                 key={cat.id}
-                style={[styles.categoryCard, selectedCategory === cat.id && styles.categorySelected]}
+                style={styles.categoryCard}
                 onPress={() => handleCategorySelect(cat.id)}
               >
                 <Text style={styles.categoryIcon}>{cat.icon}</Text>
@@ -204,21 +273,55 @@ export default function SearchScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral[50] },
-  searchRow: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8, backgroundColor: colors.neutral[0] },
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8,
+    backgroundColor: colors.neutral[0],
+  },
   searchBar: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.neutral[100], paddingHorizontal: 12, borderRadius: 12, height: 44,
   },
   input: { flex: 1, marginLeft: 8, fontSize: 16, color: colors.neutral[900] },
-  filterButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.neutral[100], justifyContent: 'center', alignItems: 'center' },
+  filterButton: {
+    width: 44, height: 44, borderRadius: 12, backgroundColor: colors.neutral[100],
+    justifyContent: 'center', alignItems: 'center', position: 'relative',
+  },
   filterActive: { backgroundColor: colors.primary[50] },
-  filters: { backgroundColor: colors.neutral[0], paddingHorizontal: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.neutral[200] },
+  filterDot: {
+    position: 'absolute', top: 8, right: 8,
+    width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary[500],
+  },
+  filters: {
+    backgroundColor: colors.neutral[0], paddingHorizontal: 12, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: colors.neutral[200],
+  },
   filterLabel: { fontSize: 13, fontWeight: '600', color: colors.neutral[700], marginTop: 8, marginBottom: 6 },
   chipRow: { flexDirection: 'row' },
-  chip: { backgroundColor: colors.neutral[100], paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginRight: 8 },
+  chip: {
+    backgroundColor: colors.neutral[100], paddingHorizontal: 14, paddingVertical: 6,
+    borderRadius: 20, marginRight: 8,
+  },
   chipSelected: { backgroundColor: colors.primary[50], borderWidth: 1, borderColor: colors.primary[400] },
   chipText: { fontSize: 13, color: colors.neutral[700] },
   chipTextSelected: { color: colors.primary[600], fontWeight: '600' },
+  // Active filters bar
+  activeFiltersBar: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.neutral[0],
+    borderBottomWidth: 1, borderBottomColor: colors.neutral[100],
+    paddingLeft: 12, paddingVertical: 8,
+  },
+  activeFiltersContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  activeChip: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.primary[50], borderWidth: 1, borderColor: colors.primary[300],
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 16, gap: 4,
+  },
+  activeChipText: { fontSize: 13, color: colors.primary[700], fontWeight: '500' },
+  activeChipIcon: { marginLeft: 2 },
+  clearAllButton: { paddingHorizontal: 12, paddingVertical: 8 },
+  clearAllText: { fontSize: 13, color: colors.neutral[500], fontWeight: '500' },
+  // Categories
   categoriesContainer: { flex: 1, padding: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginBottom: 12 },
   categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
@@ -226,7 +329,6 @@ const styles = StyleSheet.create({
     width: '31%', paddingVertical: 16, backgroundColor: colors.neutral[0],
     borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.neutral[200],
   },
-  categorySelected: { borderColor: colors.primary[400], backgroundColor: colors.primary[50] },
   categoryIcon: { fontSize: 28, marginBottom: 6 },
   categoryName: { fontSize: 12, color: colors.neutral[700], textAlign: 'center' },
   list: { padding: 12 },

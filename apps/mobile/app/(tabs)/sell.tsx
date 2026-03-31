@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { createListing, getCategories } from '../../src/services/listings';
 import type { Category } from '../../src/services/listings';
+import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
@@ -90,24 +91,43 @@ export default function SellScreen() {
         return;
       }
 
-      const listing = await createListing({
-        title,
-        description,
-        priceBrl: priceParsed,
-        condition,
-        size,
-        brand: brand || undefined,
-        category: selectedCategory,
-        imageIds: [], // Images would be uploaded separately in production
-      });
+      let listingId: string;
 
-      Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.', [
-        {
-          text: 'Ver anúncio',
-          onPress: () => router.push(`/listing/${listing.id}`),
-        },
-        { text: 'OK' },
-      ]);
+      try {
+        const listing = await createListing({
+          title,
+          description,
+          priceBrl: priceParsed,
+          condition,
+          size,
+          brand: brand || undefined,
+          category: selectedCategory,
+          imageIds: [],
+        });
+        listingId = listing.id;
+      } catch (_apiError) {
+        // API unavailable — create listing in local demo store
+        const demoId = `demo-user-listing-${Date.now()}`;
+        const photoUrls = photos.length > 0 ? photos : DEMO_PHOTOS.slice(0, 3);
+        addDemoListing({
+          id: demoId,
+          title,
+          description,
+          priceBrl: priceParsed,
+          condition,
+          size,
+          brand: brand || undefined,
+          category: selectedCategory || 'Outros',
+          color: undefined,
+          images: photoUrls.map((url, i) => ({ id: `img-${i}`, url, order: i })),
+          seller: { id: 'demo-user', name: 'Você (Demo)' },
+          isFavorited: false,
+          viewCount: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        listingId = demoId;
+      }
 
       // Reset form
       setPhotos([]);
@@ -119,6 +139,14 @@ export default function SellScreen() {
       setBrand('');
       setWeight('');
       setSelectedCategory('');
+
+      Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.', [
+        {
+          text: 'Ver anúncio',
+          onPress: () => router.push(`/listing/${listingId}`),
+        },
+        { text: 'OK' },
+      ]);
     } catch (_error) {
       Alert.alert('Erro', 'Não foi possível criar o anúncio. Tente novamente.');
     } finally {

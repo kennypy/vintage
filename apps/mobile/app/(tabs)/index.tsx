@@ -4,18 +4,19 @@ import { colors } from '../../src/theme/colors';
 import { ListingCard } from '../../src/components/ListingCard';
 import { getListings, toggleFavorite as toggleFavoriteApi } from '../../src/services/listings';
 import type { Listing } from '../../src/services/listings';
+import { DEMO_PHOTOS } from '../../src/services/demoStore';
 
 const { width: _SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = 12;
 
-// Mock data as fallback
+// Mock data as fallback (with photos for demo testing)
 const MOCK_LISTINGS = [
-  { id: '1', title: 'Vestido Zara tamanho M', priceBrl: 89.9, sellerName: 'Maria S.', sellerVerified: true, condition: 'VERY_GOOD', size: 'M' },
-  { id: '2', title: 'Tênis Nike Air Max 42', priceBrl: 199.9, sellerName: 'João P.', condition: 'GOOD', size: '42' },
-  { id: '3', title: 'Bolsa Arezzo couro marrom', priceBrl: 149.0, sellerName: 'Ana L.', sellerVerified: true, condition: 'NEW_WITHOUT_TAGS' },
-  { id: '4', title: 'Camisa Reserva slim fit', priceBrl: 59.9, sellerName: 'Pedro R.', condition: 'VERY_GOOD', size: 'G' },
-  { id: '5', title: 'Óculos Ray-Ban Aviador', priceBrl: 320.0, sellerName: 'Carla M.', sellerVerified: true, condition: 'NEW_WITH_TAGS' },
-  { id: '6', title: 'Jaqueta Farm estampada', priceBrl: 129.9, sellerName: 'Bia F.', condition: 'GOOD', size: 'P' },
+  { id: 'demo-1', title: 'Vestido Zara tamanho M', priceBrl: 89.9, sellerName: 'Maria S.', sellerVerified: true, condition: 'VERY_GOOD', size: 'M', imageUrl: DEMO_PHOTOS[0] },
+  { id: 'demo-2', title: 'Tênis Nike Air Max 42', priceBrl: 199.9, sellerName: 'João P.', condition: 'GOOD', size: '42', imageUrl: DEMO_PHOTOS[3] },
+  { id: 'demo-3', title: 'Bolsa Arezzo couro marrom', priceBrl: 149.0, sellerName: 'Ana L.', sellerVerified: true, condition: 'NEW_WITHOUT_TAGS', imageUrl: DEMO_PHOTOS[5] },
+  { id: 'demo-4', title: 'Camisa Reserva slim fit', priceBrl: 59.9, sellerName: 'Pedro R.', condition: 'VERY_GOOD', size: 'G', imageUrl: DEMO_PHOTOS[1] },
+  { id: 'demo-5', title: 'Óculos Ray-Ban Aviador', priceBrl: 320.0, sellerName: 'Carla M.', sellerVerified: true, condition: 'NEW_WITH_TAGS', imageUrl: DEMO_PHOTOS[6] },
+  { id: 'demo-6', title: 'Jaqueta Farm estampada', priceBrl: 129.9, sellerName: 'Bia F.', condition: 'GOOD', size: 'P', imageUrl: DEMO_PHOTOS[4] },
 ];
 
 function mapListingToCard(listing: Listing) {
