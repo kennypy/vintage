@@ -10,6 +10,11 @@ jest.mock('next/link', () => {
   };
 });
 
+// Mock next/navigation
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: jest.fn() }),
+}));
+
 // Mock ListingCard
 jest.mock('@/components/ListingCard', () => {
   return function MockListingCard({ title, id }: { title: string; id: string }) {
@@ -106,9 +111,11 @@ describe('Home page', () => {
     expect(screen.getByText('Moda Feminina')).toBeInTheDocument();
     expect(screen.getByText('Moda Masculina')).toBeInTheDocument();
     expect(screen.getByText('Calcados')).toBeInTheDocument();
-    expect(screen.getByText('Bolsas')).toBeInTheDocument();
-    expect(screen.getByText('Acessorios')).toBeInTheDocument();
-    expect(screen.getByText('Vintage')).toBeInTheDocument();
+    // Bolsas appears in both search bubbles and category grid
+    expect(screen.getAllByText('Bolsas').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Acessorios').length).toBeGreaterThanOrEqual(1);
+    // Vintage appears in both search bubbles and category grid
+    expect(screen.getAllByText('Vintage').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders how it works section', async () => {
@@ -118,5 +125,18 @@ describe('Home page', () => {
     expect(screen.getByText('Encontre')).toBeInTheDocument();
     expect(screen.getByText('Compre')).toBeInTheDocument();
     expect(screen.getByText('Receba')).toBeInTheDocument();
+  });
+
+  it('renders search bar', async () => {
+    mockFetch({ data: [] });
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByPlaceholderText(/Buscar/)).toBeInTheDocument());
+  });
+
+  it('renders search bubble suggestions', async () => {
+    mockFetch({ data: [] });
+    await act(async () => { render(<Home />); });
+    await waitFor(() => expect(screen.getByText('Vestidos')).toBeInTheDocument());
+    expect(screen.getByText('Tenis')).toBeInTheDocument();
   });
 });

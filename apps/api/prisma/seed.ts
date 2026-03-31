@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -159,6 +160,25 @@ async function main() {
   }
 
   console.log(`  ✅ ${brands.length} brands`);
+
+  // --- Test User ---
+  const testEmail = 'teste@vintage.com.br';
+  const testPassword = 'Teste@123';
+  const passwordHash = await bcrypt.hash(testPassword, 12);
+
+  const testUser = await prisma.user.upsert({
+    where: { email: testEmail },
+    create: {
+      email: testEmail,
+      passwordHash,
+      name: 'Usuario Teste',
+      verified: true,
+      wallet: { create: { balanceBrl: 0 } },
+    },
+    update: { passwordHash },
+  });
+
+  console.log(`  ✅ Test user: ${testUser.email} / ${testPassword}`);
   console.log('🌱 Seeding complete!');
 }
 
