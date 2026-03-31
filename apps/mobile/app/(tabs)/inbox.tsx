@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
+import { DEMO_CONVERSATIONS } from '../../src/services/demoStore';
 
 function formatTimeAgo(dateString: string): string {
   const now = new Date();
@@ -31,7 +32,8 @@ export default function InboxScreen() {
       const response = await getConversations();
       setConversations(response.items);
     } catch (_error) {
-      // Keep empty on error
+      // API unavailable — show demo conversations
+      setConversations(DEMO_CONVERSATIONS);
     } finally {
       setLoading(false);
     }
