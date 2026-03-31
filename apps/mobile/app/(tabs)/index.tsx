@@ -1,10 +1,11 @@
 import { View, Text, StyleSheet, FlatList, RefreshControl, Dimensions, ActivityIndicator } from 'react-native';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { colors } from '../../src/theme/colors';
 import { ListingCard } from '../../src/components/ListingCard';
 import { getListings, toggleFavorite as toggleFavoriteApi } from '../../src/services/listings';
 import type { Listing } from '../../src/services/listings';
-import { DEMO_PHOTOS } from '../../src/services/demoStore';
+import { DEMO_PHOTOS, getDemoListings } from '../../src/services/demoStore';
 
 const { width: _SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = 12;
@@ -50,16 +51,30 @@ export default function HomeScreen() {
       });
       setFavorites(favSet);
     } catch (_error) {
-      // Fallback to mock data
-      setListings(MOCK_LISTINGS);
+      // API unavailable — show demo listings (includes user-created ones)
+      const demoItems = getDemoListings().map((l) => ({
+        id: l.id,
+        title: l.title,
+        priceBrl: l.priceBrl,
+        imageUrl: l.images[0]?.url,
+        sellerName: l.seller.name,
+        sellerVerified: false,
+        condition: l.condition,
+        size: l.size,
+        favorited: l.isFavorited,
+      }));
+      setListings(demoItems.length > 0 ? demoItems : MOCK_LISTINGS);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchListings();
-  }, [fetchListings]);
+  // Refresh whenever the tab comes into focus (initial load + returning from sell screen)
+  useFocusEffect(
+    useCallback(() => {
+      fetchListings();
+    }, [fetchListings]),
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -5,6 +5,13 @@ import type { Conversation, Message } from './messages';
 const DEMO_MODE_KEY = 'vintage_demo_mode';
 const DEMO_USER_KEY = 'vintage_demo_user';
 
+// ─── Sync in-memory cache (set during bootstrap / enableDemoMode) ─────────────
+let _demoModeCache = false;
+
+export function isDemoModeSync(): boolean {
+  return _demoModeCache;
+}
+
 export const DEMO_PHOTOS = [
   'https://picsum.photos/seed/vint1/400/500',
   'https://picsum.photos/seed/vint2/400/500',
@@ -166,16 +173,19 @@ SEEDED_LISTINGS.forEach((l) => demoListingsMap.set(l.id, l));
 
 export async function isDemoMode(): Promise<boolean> {
   const flag = await SecureStore.getItemAsync(DEMO_MODE_KEY);
-  return flag === 'true';
+  _demoModeCache = flag === 'true';
+  return _demoModeCache;
 }
 
 export async function enableDemoMode(): Promise<void> {
   await SecureStore.setItemAsync(DEMO_MODE_KEY, 'true');
+  _demoModeCache = true;
 }
 
 export async function disableDemoMode(): Promise<void> {
   await SecureStore.deleteItemAsync(DEMO_MODE_KEY);
   await SecureStore.deleteItemAsync(DEMO_USER_KEY);
+  _demoModeCache = false;
 }
 
 // ─── Demo User ────────────────────────────────────────────────────────────────
@@ -318,6 +328,52 @@ const DEMO_MESSAGES_MAP: Record<string, Message[]> = {
     },
   ],
 };
+
+// ─── Demo Conversation Management ────────────────────────────────────────────
+
+const demoConversationsExtra: Conversation[] = [];
+
+export function startDemoConversation(
+  listingId: string,
+  listingTitle: string,
+  sellerId: string,
+  sellerName: string,
+  firstMessage: string,
+): Conversation {
+  // Return existing conversation for this listing if one exists
+  const all = [...DEMO_CONVERSATIONS, ...demoConversationsExtra];
+  const existing = all.find((c) => c.listingId === listingId);
+  if (existing) return existing;
+
+  const conv: Conversation = {
+    id: `demo-conv-${Date.now()}`,
+    participant: { id: sellerId, name: sellerName },
+    listingId,
+    listingTitle,
+    lastMessage: firstMessage,
+    lastMessageAt: new Date().toISOString(),
+    unreadCount: 0,
+  };
+  demoConversationsExtra.push(conv);
+
+  // Seed the first message
+  DEMO_MESSAGES_MAP[conv.id] = [
+    {
+      id: `msg-init-${Date.now()}`,
+      conversationId: conv.id,
+      senderId: 'demo-user',
+      body: firstMessage,
+      readAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  return conv;
+}
+
+export function getAllDemoConversations(): Conversation[] {
+  return [...DEMO_CONVERSATIONS, ...demoConversationsExtra];
+}
 
 // In-memory extra messages per conversation (for demo sending)
 const demoExtraMessages = new Map<string, Message[]>();

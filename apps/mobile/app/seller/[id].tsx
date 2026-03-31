@@ -8,6 +8,7 @@ import { getListings } from '../../src/services/listings';
 import { ListingCard } from '../../src/components/ListingCard';
 import type { PublicProfile } from '../../src/services/users';
 import type { Listing } from '../../src/services/listings';
+import { getDemoListings } from '../../src/services/demoStore';
 
 function mapListingToCard(listing: Listing) {
   return {
@@ -38,7 +39,25 @@ export default function SellerProfileScreen() {
       setProfile(profileData);
       setListings(listingsData.items.map(mapListingToCard));
     } catch (_error) {
-      // Keep defaults
+      // API unavailable — build a demo profile from the seller in demo listings
+      const demoListings = getDemoListings();
+      const sellerListings = demoListings.filter((l) => l.seller.id === id);
+      const seller = sellerListings[0]?.seller ?? { id: id ?? 'demo', name: 'Vendedor', rating: 5.0 };
+
+      const demoProfile: PublicProfile = {
+        id: seller.id,
+        name: seller.name,
+        verified: true,
+        ratingAvg: seller.rating ?? 4.8,
+        ratingCount: 12,
+        followerCount: 34,
+        followingCount: 8,
+        listingCount: sellerListings.length,
+        isFollowing: false,
+        createdAt: new Date(Date.now() - 86400000 * 180).toISOString(),
+      };
+      setProfile(demoProfile);
+      setListings(sellerListings.map(mapListingToCard));
     } finally {
       setLoading(false);
     }

@@ -10,7 +10,7 @@ import { getListing, toggleFavorite as toggleFavoriteApi } from '../../src/servi
 import { makeOffer } from '../../src/services/offers';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
-import { getDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
+import { getDemoListing, DEMO_PHOTOS, startDemoConversation } from '../../src/services/demoStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -124,11 +124,24 @@ export default function ListingDetailScreen() {
 
   const handleMessage = async () => {
     if (!listing) return;
+    const firstMsg = `Olá! Tenho interesse no "${listing.title}".`;
     try {
-      await startConversation(listing.id, `Olá! Tenho interesse no "${listing.title}".`);
-      Alert.alert('Mensagem enviada', 'Sua mensagem foi enviada ao vendedor.');
+      const conv = await startConversation(listing.id, firstMsg);
+      router.push(
+        `/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`,
+      );
     } catch (_error) {
-      Alert.alert('Erro', 'Não foi possível iniciar a conversa. Tente novamente.');
+      // API unavailable — create a local demo conversation and navigate to it
+      const conv = startDemoConversation(
+        listing.id,
+        listing.title,
+        listing.seller.id,
+        listing.seller.name,
+        firstMsg,
+      );
+      router.push(
+        `/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`,
+      );
     }
   };
 
