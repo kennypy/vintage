@@ -26,6 +26,11 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { EmailModule } from './email/email.module';
 import { PushModule } from './push/push.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { ConsentModule } from './consent/consent.module';
+import { TrackingModule } from './tracking/tracking.module';
+import { AudienceModule } from './audience/audience.module';
+import { AdPartnersModule } from './ad-partners/ad-partners.module';
+import { AdsModule } from './ads/ads.module';
 
 @Module({
   imports: [
@@ -58,6 +63,11 @@ import { UploadsModule } from './uploads/uploads.module';
     EmailModule,
     PushModule,
     UploadsModule,
+    ConsentModule,
+    TrackingModule,
+    AudienceModule,
+    AdPartnersModule,
+    AdsModule,
   ],
   providers: [
     {
@@ -76,6 +86,14 @@ export class AppModule implements NestModule {
         { path: 'api/v1/auth/register', method: RequestMethod.POST },
         { path: 'api/v1/auth/login', method: RequestMethod.POST },
         { path: 'api/v1/auth/apple/callback', method: RequestMethod.POST },
+        // Partner API endpoints use X-Partner-Key; CSRF middleware already
+        // skips routes where X-API-Key is present. Explicit exclusion for clarity.
+        { path: 'api/v1/partner/*path', method: RequestMethod.ALL },
+        // Tracking events may originate from SDKs without CSRF tokens
+        { path: 'api/v1/tracking/event', method: RequestMethod.POST },
+        // Ad serving / click endpoints are called from mobile SDKs
+        { path: 'api/v1/ads/serve', method: RequestMethod.POST },
+        { path: 'api/v1/ads/click', method: RequestMethod.POST },
       )
       .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
