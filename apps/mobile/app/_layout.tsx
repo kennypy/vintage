@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, ActivityIndicator } from 'react-native';
 import {
   DarkTheme,
   DefaultTheme,
@@ -19,14 +19,15 @@ function AppShell() {
   const router = useRouter();
   const segments = useSegments();
 
-  // Global auth guard — redirect to login whenever a non-auth screen is accessed without a session
+  const inAuthGroup = segments[0] === '(auth)';
+
+  // When auth state settles and user lands somewhere they shouldn't be, redirect.
   useEffect(() => {
     if (isLoading) return;
-    const inAuthGroup = segments[0] === '(auth)';
     if (!isAuthenticated && !inAuthGroup) {
       router.replace('/(auth)/login');
     }
-  }, [isAuthenticated, isLoading, segments, router]);
+  }, [isAuthenticated, isLoading, inAuthGroup, router]);
 
   // Apply full-screen (hide Android navigation bar) when preference is set
   useEffect(() => {
@@ -38,6 +39,26 @@ function AppShell() {
       NavigationBar.setVisibilityAsync('visible');
     }
   }, [fullScreen]);
+
+  // ── Render guard ────────────────────────────────────────────────────────────
+  // Do NOT render any navigable content until auth state is resolved.
+  // This prevents any protected screen from flashing before the redirect fires.
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={colors.primary[500]} />
+      </View>
+    );
+  }
+
+  // After loading: if not authenticated and not in the auth group, render nothing
+  // while the useEffect above fires the redirect. This closes the race window.
+  if (!isAuthenticated && !inAuthGroup) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.background }} />
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   const navTheme = {
     ...(theme.isDark ? DarkTheme : DefaultTheme),
