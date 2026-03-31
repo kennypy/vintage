@@ -1,16 +1,16 @@
-import { View, Text, StyleSheet, FlatList, RefreshControl, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
+import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { ListingCard } from '../../src/components/ListingCard';
-import { getListings, toggleFavorite as toggleFavoriteApi } from '../../src/services/listings';
+import { getListings } from '../../src/services/listings';
 import type { Listing } from '../../src/services/listings';
 import { DEMO_PHOTOS, getDemoListings } from '../../src/services/demoStore';
 
-const { width: _SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = 12;
 
-// Mock data as fallback (with photos for demo testing)
 const MOCK_LISTINGS = [
   { id: 'demo-1', title: 'Vestido Zara tamanho M', priceBrl: 89.9, sellerName: 'Maria S.', sellerVerified: true, condition: 'VERY_GOOD', size: 'M', imageUrl: DEMO_PHOTOS[0] },
   { id: 'demo-2', title: 'Tênis Nike Air Max 42', priceBrl: 199.9, sellerName: 'João P.', condition: 'GOOD', size: '42', imageUrl: DEMO_PHOTOS[3] },
@@ -30,28 +30,21 @@ function mapListingToCard(listing: Listing) {
     sellerVerified: false,
     condition: listing.condition,
     size: listing.size,
-    favorited: listing.isFavorited,
   };
 }
 
 export default function HomeScreen() {
+  const { theme } = useTheme();
+  const { isFavorited, toggleFavorite } = useFavorites();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [listings, setListings] = useState<any[]>([]);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
   const fetchListings = useCallback(async () => {
     try {
       const response = await getListings({ sortBy: 'newest', limit: 20 });
-      const mapped = response.items.map(mapListingToCard);
-      setListings(mapped);
-      const favSet = new Set<string>();
-      response.items.forEach((item) => {
-        if (item.isFavorited) favSet.add(item.id);
-      });
-      setFavorites(favSet);
-    } catch (_error) {
-      // API unavailable — show demo listings (includes user-created ones)
+      setListings(response.items.map(mapListingToCard));
+    } catch {
       const demoItems = getDemoListings().map((l) => ({
         id: l.id,
         title: l.title,
@@ -61,7 +54,6 @@ export default function HomeScreen() {
         sellerVerified: false,
         condition: l.condition,
         size: l.size,
-        favorited: l.isFavorited,
       }));
       setListings(demoItems.length > 0 ? demoItems : MOCK_LISTINGS);
     } finally {
@@ -69,7 +61,6 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // Refresh whenever the tab comes into focus (initial load + returning from sell screen)
   useFocusEffect(
     useCallback(() => {
       fetchListings();
@@ -82,37 +73,19 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [fetchListings]);
 
-  const toggleFavorite = async (id: string) => {
-    setFavorites((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-    try {
-      await toggleFavoriteApi(id);
-    } catch (_error) {
-      // Revert on failure
-      setFavorites((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id); else next.add(id);
-        return next;
-      });
-    }
-  };
-
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.logo}>Vintage.br</Text>
-        <Text style={styles.tagline}>Moda de segunda mão</Text>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+        <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
+        <Text style={[styles.tagline, { color: theme.textTertiary }]}>Moda de segunda mão</Text>
       </View>
       <FlatList
         data={listings}
@@ -122,7 +95,7 @@ export default function HomeScreen() {
         renderItem={({ item }) => (
           <ListingCard
             {...item}
-            favorited={favorites.has(item.id)}
+            favorited={isFavorited(item.id)}
             onToggleFavorite={() => toggleFavorite(item.id)}
           />
         )}
@@ -137,18 +110,16 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   header: {
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 12,
-    backgroundColor: colors.neutral[0],
     borderBottomWidth: 1,
-    borderBottomColor: colors.neutral[200],
   },
-  logo: { fontSize: 24, fontWeight: '700', color: colors.primary[600] },
-  tagline: { fontSize: 13, color: colors.neutral[400], marginTop: 2 },
+  logo: { fontSize: 24, fontWeight: '700' },
+  tagline: { fontSize: 13, marginTop: 2 },
   list: { padding: CARD_GAP },
   row: { justifyContent: 'space-between' },
 });

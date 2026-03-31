@@ -3,10 +3,13 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { Avatar } from '../../src/components/Avatar';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
   const { user, isAuthenticated, isLoading: loading, signOut, isDemoMode } = useAuth();
   const [vacationMode, setVacationMode] = useState(false);
 
@@ -30,7 +33,7 @@ export default function ProfileScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.loadingContainer]}>
+      <View style={[styles.container, styles.loadingContainer, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
@@ -38,7 +41,7 @@ export default function ProfileScreen() {
 
   if (!isAuthenticated || !user) {
     return (
-      <View style={styles.authContainer}>
+      <View style={[styles.authContainer, { backgroundColor: theme.background }]}>
         <Text style={styles.authTitle}>Entre para continuar</Text>
         <TouchableOpacity
           style={styles.authButton}
@@ -54,7 +57,7 @@ export default function ProfileScreen() {
     value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
       {/* Demo Mode Banner */}
       {isDemoMode && (
         <View style={styles.demoBanner}>
@@ -64,20 +67,18 @@ export default function ProfileScreen() {
       )}
 
       {/* Profile Header */}
-      <View style={styles.profileHeader}>
-        <View style={styles.avatarPlaceholder}>
-          <Ionicons name="person" size={36} color={colors.neutral[400]} />
-        </View>
+      <View style={[styles.profileHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+        <Avatar uri={user.avatarUrl} name={user.name} size={64} />
         <View style={styles.profileInfo}>
           <View style={styles.nameRow}>
-            <Text style={styles.name}>{user.name}</Text>
+            <Text style={[styles.name, { color: theme.text }]}>{user.name}</Text>
             {user.verified && (
               <Ionicons name="checkmark-circle" size={18} color={colors.primary[500]} />
             )}
           </View>
           <View style={styles.ratingRow}>
             <Ionicons name="star" size={14} color={colors.warning[500]} />
-            <Text style={styles.ratingText}>{user.ratingAvg} ({user.ratingCount})</Text>
+            <Text style={[styles.ratingText, { color: theme.textSecondary }]}>{user.ratingAvg} ({user.ratingCount})</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.editButton} onPress={() => router.push('/profile/edit')}>
@@ -86,20 +87,20 @@ export default function ProfileScreen() {
       </View>
 
       {/* Stats */}
-      <View style={styles.statsRow}>
+      <View style={[styles.statsRow, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{user.listingCount}</Text>
-          <Text style={styles.statLabel}>Anúncios</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{user.listingCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Anúncios</Text>
         </View>
-        <View style={styles.statDivider} />
+        <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{user.followerCount}</Text>
-          <Text style={styles.statLabel}>Seguidores</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{user.followerCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguidores</Text>
         </View>
-        <View style={styles.statDivider} />
+        <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
         <View style={styles.stat}>
-          <Text style={styles.statNumber}>{user.followingCount}</Text>
-          <Text style={styles.statLabel}>Seguindo</Text>
+          <Text style={[styles.statNumber, { color: theme.text }]}>{user.followingCount}</Text>
+          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguindo</Text>
         </View>
       </View>
 
@@ -120,8 +121,8 @@ export default function ProfileScreen() {
       </TouchableOpacity>
 
       {/* Menu Sections */}
-      <View style={styles.menuSection}>
-        <Text style={styles.menuSectionTitle}>Compras e Vendas</Text>
+      <View style={[styles.menuSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <Text style={[styles.menuSectionTitle, { color: theme.textTertiary }]}>Compras e Vendas</Text>
         <MenuItem icon="bag-outline" label="Minhas compras" onPress={() => router.push('/orders')} />
         <MenuItem icon="pricetag-outline" label="Meus anúncios" onPress={() => router.push('/my-listings')} />
         <MenuItem icon="heart-outline" label="Favoritos" onPress={() => router.push('/favorites')} />
@@ -129,18 +130,18 @@ export default function ProfileScreen() {
         <MenuItem icon="star-outline" label="Avaliações" onPress={() => router.push(`/reviews/${user?.id}`)} />
       </View>
 
-      <View style={styles.menuSection}>
-        <Text style={styles.menuSectionTitle}>Promoções</Text>
+      <View style={[styles.menuSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <Text style={[styles.menuSectionTitle, { color: theme.textTertiary }]}>Promoções</Text>
         <MenuItem icon="megaphone-outline" label="Megafone" badge="Grátis" onPress={() => router.push('/promotions/megaphone')} />
         <MenuItem icon="rocket-outline" label="Impulsionar anúncio" onPress={() => router.push('/promotions/boost')} />
         <MenuItem icon="sparkles-outline" label="Destaque da loja" onPress={() => router.push('/promotions/highlight')} />
       </View>
 
-      <View style={styles.menuSection}>
-        <Text style={styles.menuSectionTitle}>Conta</Text>
-        <View style={styles.menuItem}>
-          <Ionicons name="airplane-outline" size={22} color={colors.neutral[600]} />
-          <Text style={styles.menuLabel}>Modo férias</Text>
+      <View style={[styles.menuSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <Text style={[styles.menuSectionTitle, { color: theme.textTertiary }]}>Conta</Text>
+        <View style={[styles.menuItem, { borderBottomColor: theme.divider }]}>
+          <Ionicons name="airplane-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.menuLabel, { color: theme.text }]}>Modo férias</Text>
           <Switch
             value={vacationMode}
             onValueChange={setVacationMode}
@@ -164,16 +165,17 @@ export default function ProfileScreen() {
 }
 
 function MenuItem({ icon, label, badge, onPress }: { icon: string; label: string; badge?: string; onPress?: () => void }) {
+  const { theme } = useTheme();
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress}>
-      <Ionicons name={icon as any} size={22} color={colors.neutral[600]} />
-      <Text style={styles.menuLabel}>{label}</Text>
+    <TouchableOpacity style={[styles.menuItem, { borderBottomColor: theme.divider }]} onPress={onPress}>
+      <Ionicons name={icon as any} size={22} color={theme.textSecondary} />
+      <Text style={[styles.menuLabel, { color: theme.text }]}>{label}</Text>
       {badge && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{badge}</Text>
         </View>
       )}
-      <Ionicons name="chevron-forward" size={18} color={colors.neutral[400]} />
+      <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
     </TouchableOpacity>
   );
 }

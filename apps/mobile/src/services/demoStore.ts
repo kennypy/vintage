@@ -217,6 +217,14 @@ export async function createDemoUser(
   return user;
 }
 
+export async function updateDemoUser(data: Partial<DemoUser>): Promise<DemoUser | null> {
+  const current = await getDemoUser();
+  if (!current) return null;
+  const updated = { ...current, ...data };
+  await SecureStore.setItemAsync(DEMO_USER_KEY, JSON.stringify(updated));
+  return updated;
+}
+
 // ─── Demo Listings ────────────────────────────────────────────────────────────
 
 export function getDemoListings(): Listing[] {

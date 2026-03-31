@@ -1,12 +1,15 @@
 import {
   View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, Dimensions,
-  ActivityIndicator, Alert, TextInput, Modal,
+  ActivityIndicator, Alert, TextInput, Modal, Share, Linking,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
-import { getListing, toggleFavorite as toggleFavoriteApi } from '../../src/services/listings';
+import { useTheme } from '../../src/contexts/ThemeContext';
+import { useFavorites } from '../../src/contexts/FavoritesContext';
+import { getListing } from '../../src/services/listings';
 import { makeOffer } from '../../src/services/offers';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
@@ -25,10 +28,13 @@ const CONDITION_LABELS: Record<string, string> = {
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const APP_URL = 'https://vintage.br';
+
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [favorited, setFavorited] = useState(false);
+  const { theme } = useTheme();
+  const { isFavorited, toggleFavorite } = useFavorites();
   const [loading, setLoading] = useState(true);
   const [listing, setListing] = useState<Listing | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
@@ -36,20 +42,18 @@ export default function ListingDetailScreen() {
   const [offerLoading, setOfferLoading] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
+  const favorited = listing ? isFavorited(listing.id) : false;
+
   useEffect(() => {
     async function fetchListing() {
       try {
         const data = await getListing(id ?? '');
         setListing(data);
-        setFavorited(data.isFavorited ?? false);
-      } catch (_error) {
-        // Check demo store first (for user-created demo listings)
+      } catch {
         const demoListing = getDemoListing(id ?? '');
         if (demoListing) {
           setListing(demoListing);
-          setFavorited(demoListing.isFavorited ?? false);
         } else {
-          // Generic fallback mock with photos
           setListing({
             id: id ?? '1',
             title: 'Vestido Zara tamanho M',
@@ -80,12 +84,7 @@ export default function ListingDetailScreen() {
 
   const handleToggleFavorite = async () => {
     if (!listing) return;
-    setFavorited(!favorited);
-    try {
-      await toggleFavoriteApi(listing.id);
-    } catch (_error) {
-      setFavorited(favorited);
-    }
+    await toggleFavorite(listing.id);
   };
 
   const handleBuy = () => {
@@ -108,14 +107,13 @@ export default function ListingDetailScreen() {
       Alert.alert('Valor inválido', 'Informe um valor válido para a oferta.');
       return;
     }
-
     setOfferLoading(true);
     try {
       await makeOffer(listing.id, amount);
       setOfferModalVisible(false);
       setOfferAmount('');
       Alert.alert('Oferta enviada!', `Sua oferta de R$ ${formatBrl(amount)} foi enviada ao vendedor.`);
-    } catch (_error) {
+    } catch {
       Alert.alert('Erro', 'Não foi possível enviar a oferta. Tente novamente.');
     } finally {
       setOfferLoading(false);
@@ -127,27 +125,48 @@ export default function ListingDetailScreen() {
     const firstMsg = `Olá! Tenho interesse no "${listing.title}".`;
     try {
       const conv = await startConversation(listing.id, firstMsg);
-      router.push(
-        `/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`,
-      );
-    } catch (_error) {
-      // API unavailable — create a local demo conversation and navigate to it
-      const conv = startDemoConversation(
-        listing.id,
-        listing.title,
-        listing.seller.id,
-        listing.seller.name,
-        firstMsg,
-      );
-      router.push(
-        `/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`,
-      );
+      router.push(`/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`);
+    } catch {
+      const conv = startDemoConversation(listing.id, listing.title, listing.seller.id, listing.seller.name, firstMsg);
+      router.push(`/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`);
     }
+  };
+
+  const getShareUrl = () => `${APP_URL}/listing/${listing?.id ?? ''}`;
+
+  const handleShare = async () => {
+    if (!listing) return;
+    const url = getShareUrl();
+    const message = `${listing.title} por R$ ${formatBrl(listing.priceBrl)} no Vintage.br`;
+    try {
+      await Share.share({ message: `${message}\n${url}`, url, title: listing.title });
+    } catch {
+      // user cancelled or error
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    if (!listing) return;
+    const url = getShareUrl();
+    const text = encodeURIComponent(`${listing.title} — R$ ${formatBrl(listing.priceBrl)}\n${url}`);
+    const waUrl = `whatsapp://send?text=${text}`;
+    const canOpen = await Linking.canOpenURL(waUrl).catch(() => false);
+    if (canOpen) {
+      await Linking.openURL(waUrl);
+    } else {
+      handleShare();
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (!listing) return;
+    await Clipboard.setStringAsync(getShareUrl());
+    Alert.alert('Link copiado!', 'O link do anúncio foi copiado.');
   };
 
   if (loading || !listing) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
@@ -158,10 +177,10 @@ export default function ListingDetailScreen() {
   const total = listing.priceBrl + shippingEstimate + buyerProtectionFee;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Image Carousel */}
-        <View style={styles.imageContainer}>
+        <View style={[styles.imageContainer, { backgroundColor: theme.cardSecondary }]}>
           {listing.images.length > 0 ? (
             <>
               <ScrollView
@@ -190,99 +209,129 @@ export default function ListingDetailScreen() {
               {listing.images.length > 1 && (
                 <View style={styles.imageDots}>
                   {listing.images.map((_, i) => (
-                    <View
-                      key={i}
-                      style={[styles.dot, i === currentImageIndex && styles.dotActive]}
-                    />
+                    <View key={i} style={[styles.dot, i === currentImageIndex && styles.dotActive]} />
                   ))}
                 </View>
               )}
             </>
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
-              <Ionicons name="image-outline" size={64} color={colors.neutral[300]} />
-              <Text style={styles.placeholderText}>Sem fotos</Text>
+              <Ionicons name="image-outline" size={64} color={theme.textTertiary} />
+              <Text style={[styles.placeholderText, { color: theme.textTertiary }]}>Sem fotos</Text>
             </View>
           )}
         </View>
 
-        {/* Price + Actions */}
-        <View style={styles.priceRow}>
-          <Text style={styles.price}>R$ {formatBrl(listing.priceBrl)}</Text>
-          <TouchableOpacity onPress={handleToggleFavorite}>
-            <Ionicons
-              name={favorited ? 'heart' : 'heart-outline'}
-              size={28}
-              color={favorited ? colors.error[500] : colors.neutral[400]}
-            />
-          </TouchableOpacity>
+        {/* Price + Favorite + Share */}
+        <View style={[styles.priceRow, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+          <Text style={[styles.price, { color: theme.text }]}>R$ {formatBrl(listing.priceBrl)}</Text>
+          <View style={styles.priceActions}>
+            <TouchableOpacity onPress={handleShare} style={styles.iconButton}>
+              <Ionicons name="share-outline" size={26} color={theme.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleToggleFavorite} style={styles.iconButton}>
+              <Ionicons
+                name={favorited ? 'heart' : 'heart-outline'}
+                size={28}
+                color={favorited ? colors.error[500] : theme.textSecondary}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Title + Details */}
-        <View style={styles.section}>
-          <Text style={styles.title}>{listing.title}</Text>
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.title, { color: theme.text }]}>{listing.title}</Text>
           <View style={styles.tags}>
-            {listing.brand && <Text style={styles.tag}>{listing.brand}</Text>}
-            {listing.size && <Text style={styles.tag}>Tam. {listing.size}</Text>}
+            {listing.brand && <Text style={[styles.tag, { color: theme.textSecondary, backgroundColor: theme.cardSecondary }]}>{listing.brand}</Text>}
+            {listing.size && <Text style={[styles.tag, { color: theme.textSecondary, backgroundColor: theme.cardSecondary }]}>Tam. {listing.size}</Text>}
             {listing.condition && (
-              <Text style={styles.tag}>{CONDITION_LABELS[listing.condition]}</Text>
+              <Text style={[styles.tag, { color: theme.textSecondary, backgroundColor: theme.cardSecondary }]}>{CONDITION_LABELS[listing.condition]}</Text>
             )}
-            {listing.color && <Text style={styles.tag}>{listing.color}</Text>}
+            {listing.color && <Text style={[styles.tag, { color: theme.textSecondary, backgroundColor: theme.cardSecondary }]}>{listing.color}</Text>}
           </View>
         </View>
 
         {/* Description */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Descrição</Text>
-          <Text style={styles.description}>{listing.description}</Text>
+        <View style={[styles.section, { backgroundColor: theme.card, marginTop: 8 }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Descrição</Text>
+          <Text style={[styles.description, { color: theme.textSecondary }]}>{listing.description}</Text>
+        </View>
+
+        {/* Share Buttons */}
+        <View style={[styles.section, { backgroundColor: theme.card, marginTop: 8 }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Compartilhar</Text>
+          <View style={styles.shareRow}>
+            <TouchableOpacity
+              style={[styles.shareChip, { borderColor: theme.border }]}
+              onPress={handleCopyLink}
+            >
+              <Ionicons name="link-outline" size={18} color={colors.primary[600]} />
+              <Text style={[styles.shareChipText, { color: colors.primary[600] }]}>Copiar link</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.shareChip, { borderColor: '#25D366', backgroundColor: '#25D36610' }]}
+              onPress={handleShareWhatsApp}
+            >
+              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              <Text style={[styles.shareChipText, { color: '#25D366' }]}>WhatsApp</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.shareChip, { borderColor: theme.border }]}
+              onPress={handleShare}
+            >
+              <Ionicons name="share-social-outline" size={18} color={theme.textSecondary} />
+              <Text style={[styles.shareChipText, { color: theme.textSecondary }]}>Mais</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Cost Breakdown */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Resumo</Text>
+        <View style={[styles.section, { backgroundColor: theme.card, marginTop: 8 }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Resumo</Text>
           <View style={styles.costRow}>
-            <Text style={styles.costLabel}>Item</Text>
-            <Text style={styles.costValue}>R$ {formatBrl(listing.priceBrl)}</Text>
+            <Text style={[styles.costLabel, { color: theme.textSecondary }]}>Item</Text>
+            <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(listing.priceBrl)}</Text>
           </View>
           <View style={styles.costRow}>
-            <Text style={styles.costLabel}>Frete (estimado)</Text>
-            <Text style={styles.costValue}>R$ {formatBrl(shippingEstimate)}</Text>
+            <Text style={[styles.costLabel, { color: theme.textSecondary }]}>Frete (estimado)</Text>
+            <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(shippingEstimate)}</Text>
           </View>
           <View style={styles.costRow}>
-            <Text style={styles.costLabel}>Proteção ao comprador</Text>
-            <Text style={styles.costValue}>R$ {formatBrl(buyerProtectionFee)}</Text>
+            <Text style={[styles.costLabel, { color: theme.textSecondary }]}>Proteção ao comprador</Text>
+            <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(buyerProtectionFee)}</Text>
           </View>
-          <View style={[styles.costRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>R$ {formatBrl(total)}</Text>
+          <View style={[styles.costRow, styles.totalRow, { borderTopColor: theme.border }]}>
+            <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
+            <Text style={[styles.totalValue, { color: colors.primary[600] }]}>R$ {formatBrl(total)}</Text>
           </View>
         </View>
 
         {/* Seller */}
         <TouchableOpacity
-          style={styles.sellerCard}
+          style={[styles.sellerCard, { backgroundColor: theme.card }]}
           onPress={() => router.push(`/seller/${listing.seller.id}`)}
         >
-          <View style={styles.sellerAvatar}>
-            <Ionicons name="person" size={24} color={colors.neutral[400]} />
+          <View style={[styles.sellerAvatar, { backgroundColor: theme.cardSecondary }]}>
+            <Ionicons name="person" size={24} color={theme.textTertiary} />
           </View>
           <View style={styles.sellerInfo}>
             <View style={styles.sellerNameRow}>
-              <Text style={styles.sellerName}>{listing.seller.name}</Text>
+              <Text style={[styles.sellerName, { color: theme.text }]}>{listing.seller.name}</Text>
             </View>
             {listing.seller.rating && (
               <View style={styles.sellerRating}>
                 <Ionicons name="star" size={14} color={colors.warning[500]} />
-                <Text style={styles.ratingText}>{listing.seller.rating}</Text>
+                <Text style={[styles.ratingText, { color: theme.textSecondary }]}>{listing.seller.rating}</Text>
               </View>
             )}
           </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.neutral[400]} />
+          <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
         </TouchableOpacity>
 
         {/* Stats */}
         <View style={styles.stats}>
-          <Text style={styles.statText}>
+          <Text style={[styles.statText, { color: theme.textTertiary }]}>
             <Ionicons name="eye-outline" size={14} /> {listing.viewCount} visualizações
           </Text>
         </View>
@@ -291,13 +340,13 @@ export default function ListingDetailScreen() {
       </ScrollView>
 
       {/* Bottom Bar */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.messageButton} onPress={handleMessage}>
+      <View style={[styles.bottomBar, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
+        <TouchableOpacity style={[styles.messageButton, { borderColor: colors.primary[200] }]} onPress={handleMessage}>
           <Ionicons name="chatbubble-outline" size={22} color={colors.primary[600]} />
           <Text style={styles.messageText}>Mensagem</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.offerButton} onPress={() => setOfferModalVisible(true)}>
+        <TouchableOpacity style={[styles.offerButton, { borderColor: colors.primary[600] }]} onPress={() => setOfferModalVisible(true)}>
           <Text style={styles.offerText}>Fazer oferta</Text>
         </TouchableOpacity>
 
@@ -309,17 +358,17 @@ export default function ListingDetailScreen() {
       {/* Offer Modal */}
       <Modal visible={offerModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Fazer oferta</Text>
-            <Text style={styles.modalSubtitle}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>Fazer oferta</Text>
+            <Text style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
               Preço original: R$ {formatBrl(listing.priceBrl)}
             </Text>
             <View style={styles.offerInputRow}>
-              <Text style={styles.offerPrefix}>R$</Text>
+              <Text style={[styles.offerPrefix, { color: theme.text }]}>R$</Text>
               <TextInput
-                style={styles.offerInput}
+                style={[styles.offerInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
                 placeholder="0,00"
-                placeholderTextColor={colors.neutral[400]}
+                placeholderTextColor={theme.textTertiary}
                 value={offerAmount}
                 onChangeText={setOfferAmount}
                 keyboardType="decimal-pad"
@@ -328,22 +377,17 @@ export default function ListingDetailScreen() {
             </View>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => {
-                  setOfferModalVisible(false);
-                  setOfferAmount('');
-                }}
+                style={[styles.modalCancel, { borderColor: theme.border }]}
+                onPress={() => { setOfferModalVisible(false); setOfferAmount(''); }}
               >
-                <Text style={styles.modalCancelText}>Cancelar</Text>
+                <Text style={[styles.modalCancelText, { color: theme.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalConfirm, offerLoading && styles.modalConfirmDisabled]}
                 onPress={handleOffer}
                 disabled={offerLoading}
               >
-                <Text style={styles.modalConfirmText}>
-                  {offerLoading ? 'Enviando...' : 'Enviar oferta'}
-                </Text>
+                <Text style={styles.modalConfirmText}>{offerLoading ? 'Enviando...' : 'Enviar oferta'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -354,14 +398,14 @@ export default function ListingDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   scroll: { flex: 1 },
-  imageContainer: { backgroundColor: colors.neutral[100] },
+  imageContainer: {},
   image: { width: SCREEN_WIDTH, aspectRatio: 4 / 5 },
   zoomScroll: { width: SCREEN_WIDTH },
   imagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
-  placeholderText: { color: colors.neutral[400], marginTop: 8 },
+  placeholderText: { marginTop: 8 },
   imageDots: {
     position: 'absolute', bottom: 10, left: 0, right: 0,
     flexDirection: 'row', justifyContent: 'center', gap: 6,
@@ -371,72 +415,65 @@ const styles = StyleSheet.create({
   priceRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: colors.neutral[0],
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  price: { fontSize: 24, fontWeight: '700', color: colors.neutral[900] },
+  price: { fontSize: 24, fontWeight: '700' },
+  priceActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  iconButton: { padding: 4 },
   section: {
     paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: colors.neutral[0],
-    marginTop: 8,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: colors.neutral[900], marginBottom: 8 },
-  title: { fontSize: 18, fontWeight: '600', color: colors.neutral[900] },
+  sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
+  title: { fontSize: 18, fontWeight: '600' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   tag: {
-    fontSize: 12, color: colors.neutral[600],
-    backgroundColor: colors.neutral[100], paddingHorizontal: 10, paddingVertical: 4,
+    fontSize: 12, paddingHorizontal: 10, paddingVertical: 4,
     borderRadius: 6, overflow: 'hidden',
   },
-  description: { fontSize: 14, color: colors.neutral[600], lineHeight: 22 },
-  costRow: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    paddingVertical: 4,
+  description: { fontSize: 14, lineHeight: 22 },
+  shareRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  shareChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1,
   },
-  costLabel: { fontSize: 14, color: colors.neutral[500] },
-  costValue: { fontSize: 14, color: colors.neutral[700] },
-  totalRow: {
-    borderTopWidth: 1, borderTopColor: colors.neutral[200],
-    marginTop: 8, paddingTop: 8,
-  },
-  totalLabel: { fontSize: 16, fontWeight: '700', color: colors.neutral[900] },
-  totalValue: { fontSize: 16, fontWeight: '700', color: colors.primary[600] },
+  shareChipText: { fontSize: 13, fontWeight: '500' },
+  costRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  costLabel: { fontSize: 14 },
+  costValue: { fontSize: 14 },
+  totalRow: { borderTopWidth: 1, marginTop: 8, paddingTop: 8 },
+  totalLabel: { fontSize: 16, fontWeight: '700' },
+  totalValue: { fontSize: 16, fontWeight: '700' },
   sellerCard: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: colors.neutral[0], marginTop: 8,
+    paddingHorizontal: 16, paddingVertical: 14, marginTop: 8,
   },
   sellerAvatar: {
-    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.neutral[100],
+    width: 44, height: 44, borderRadius: 22,
     justifyContent: 'center', alignItems: 'center',
   },
   sellerInfo: { flex: 1, marginLeft: 12 },
   sellerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  sellerName: { fontSize: 15, fontWeight: '600', color: colors.neutral[900] },
+  sellerName: { fontSize: 15, fontWeight: '600' },
   sellerRating: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  ratingText: { fontSize: 13, color: colors.neutral[500] },
-  stats: {
-    flexDirection: 'row', justifyContent: 'center', gap: 24,
-    paddingVertical: 16,
-  },
-  statText: { fontSize: 13, color: colors.neutral[400] },
+  ratingText: { fontSize: 13 },
+  stats: { flexDirection: 'row', justifyContent: 'center', gap: 24, paddingVertical: 16 },
+  statText: { fontSize: 13 },
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 12,
-    paddingBottom: 28,
-    backgroundColor: colors.neutral[0],
-    borderTopWidth: 1, borderTopColor: colors.neutral[200],
+    paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 28,
+    borderTopWidth: 1,
   },
   messageButton: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingVertical: 10, paddingHorizontal: 12,
-    borderRadius: 10, borderWidth: 1, borderColor: colors.primary[200],
+    borderRadius: 10, borderWidth: 1,
   },
   messageText: { fontSize: 13, color: colors.primary[600], fontWeight: '500' },
   offerButton: {
     flex: 1, paddingVertical: 12, borderRadius: 10,
-    borderWidth: 1.5, borderColor: colors.primary[600],
-    alignItems: 'center',
+    borderWidth: 1.5, alignItems: 'center',
   },
   offerText: { fontSize: 14, fontWeight: '600', color: colors.primary[600] },
   buyButton: {
@@ -444,28 +481,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[600], alignItems: 'center',
   },
   buyText: { fontSize: 14, fontWeight: '600', color: colors.neutral[0] },
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
-    backgroundColor: colors.neutral[0], borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 24, paddingBottom: 40,
   },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: colors.neutral[900] },
-  modalSubtitle: { fontSize: 14, color: colors.neutral[500], marginTop: 4, marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: '700' },
+  modalSubtitle: { fontSize: 14, marginTop: 4, marginBottom: 20 },
   offerInputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  offerPrefix: { fontSize: 20, fontWeight: '600', color: colors.neutral[700], marginRight: 8 },
+  offerPrefix: { fontSize: 20, fontWeight: '600', marginRight: 8 },
   offerInput: {
-    flex: 1, height: 50, borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 12,
-    paddingHorizontal: 16, fontSize: 18, color: colors.neutral[900], backgroundColor: colors.neutral[50],
+    flex: 1, height: 50, borderWidth: 1, borderRadius: 12,
+    paddingHorizontal: 16, fontSize: 18,
   },
   modalButtons: { flexDirection: 'row', gap: 12 },
   modalCancel: {
-    flex: 1, height: 50, borderRadius: 12, borderWidth: 1, borderColor: colors.neutral[200],
+    flex: 1, height: 50, borderRadius: 12, borderWidth: 1,
     justifyContent: 'center', alignItems: 'center',
   },
-  modalCancelText: { fontSize: 15, color: colors.neutral[600], fontWeight: '500' },
+  modalCancelText: { fontSize: 15, fontWeight: '500' },
   modalConfirm: {
     flex: 1, height: 50, borderRadius: 12, backgroundColor: colors.primary[600],
     justifyContent: 'center', alignItems: 'center',
