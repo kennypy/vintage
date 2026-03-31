@@ -22,17 +22,19 @@ module.exports = function (api) {
               if (
                 t.isMemberExpression(nodePath.node.object) &&
                 t.isIdentifier(nodePath.node.object.object, { name: 'process' }) &&
-                t.isIdentifier(nodePath.node.object.property, { name: 'env' }) &&
-                t.isIdentifier(nodePath.node.property, { name: 'EXPO_ROUTER_APP_ROOT' })
+                t.isIdentifier(nodePath.node.object.property, { name: 'env' })
               ) {
-                const filename = state.filename || state.file.opts.filename;
-                if (filename) {
-                  // Compute path relative to the file being transformed, then
-                  // normalise to forward slashes so require.context works on Windows.
-                  const rel = path
-                    .relative(path.dirname(filename), APP_DIR)
-                    .replace(/\\/g, '/');
-                  nodePath.replaceWith(t.stringLiteral(rel));
+                const propName = nodePath.node.property.name;
+                if (propName === 'EXPO_ROUTER_APP_ROOT') {
+                  const filename = state.filename || state.file.opts.filename;
+                  if (filename) {
+                    const rel = path
+                      .relative(path.dirname(filename), APP_DIR)
+                      .replace(/\\/g, '/');
+                    nodePath.replaceWith(t.stringLiteral(rel));
+                  }
+                } else if (propName === 'EXPO_ROUTER_IMPORT_MODE') {
+                  nodePath.replaceWith(t.stringLiteral('sync'));
                 }
               }
             },
