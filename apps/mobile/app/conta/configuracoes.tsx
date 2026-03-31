@@ -32,7 +32,7 @@ async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
 }
 
 export default function ConfiguracoesScreen() {
-  const { theme, mode, setMode } = useTheme();
+  const { theme, mode, setMode, fullScreen, setFullScreen } = useTheme();
 
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -119,6 +119,19 @@ export default function ConfiguracoesScreen() {
             onValueChange={handleToggleDark}
             trackColor={{ true: colors.primary[500] }}
             thumbColor={darkMode ? '#fff' : '#fff'}
+          />
+        </View>
+        <View style={[styles.row, { borderBottomColor: theme.divider }]}>
+          <Ionicons name="expand-outline" size={22} color={theme.textSecondary} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.rowLabel, { color: theme.text, flex: 0 }]}>Tela cheia</Text>
+            <Text style={{ fontSize: 12, color: theme.textTertiary }}>Oculta a barra de navegação do Android</Text>
+          </View>
+          <Switch
+            value={fullScreen}
+            onValueChange={setFullScreen}
+            trackColor={{ true: colors.primary[500] }}
+            thumbColor={fullScreen ? '#fff' : '#fff'}
           />
         </View>
       </View>

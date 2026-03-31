@@ -2,14 +2,13 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert,
   Image, ActivityIndicator,
 } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
-import { createListing, getCategories } from '../../src/services/listings';
-import type { Category } from '../../src/services/listings';
+import { createListing } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
 
@@ -22,6 +21,41 @@ const CONDITIONS = [
 ];
 
 const SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
+
+const CATEGORIES: { id: string; label: string; icon: string; sub: string[] }[] = [
+  {
+    id: 'feminino', label: 'Feminino', icon: 'woman-outline',
+    sub: ['Tops e blusas', 'Vestidos', 'Calças', 'Saias', 'Casacos', 'Calçados', 'Bolsas', 'Acessórios', 'Moda praia', 'Lingerie'],
+  },
+  {
+    id: 'masculino', label: 'Masculino', icon: 'man-outline',
+    sub: ['Camisetas', 'Camisas', 'Calças', 'Casacos', 'Ternos', 'Calçados', 'Bolsas', 'Acessórios', 'Esportivo'],
+  },
+  {
+    id: 'kids', label: 'Infantil', icon: 'happy-outline',
+    sub: ['Bebê (0-2 anos)', 'Criança pequena (2-5)', 'Criança (5-12)', 'Calçados', 'Acessórios'],
+  },
+  {
+    id: 'casa', label: 'Casa', icon: 'home-outline',
+    sub: ['Móveis', 'Decoração', 'Cozinha', 'Banheiro', 'Jardim', 'Iluminação', 'Arte'],
+  },
+  {
+    id: 'eletronicos', label: 'Eletrônicos', icon: 'phone-portrait-outline',
+    sub: ['Celulares', 'Computadores', 'Tablets', 'Áudio', 'Games', 'Câmeras', 'Acessórios'],
+  },
+  {
+    id: 'entretenimento', label: 'Entretenimento', icon: 'musical-notes-outline',
+    sub: ['Livros', 'Música', 'Filmes', 'Jogos', 'Instrumentos'],
+  },
+  {
+    id: 'hobbies', label: 'Hobbies & Colecionáveis', icon: 'color-palette-outline',
+    sub: ['Material artístico', 'Artesanato', 'Colecionáveis', 'Miniaturas', 'Vintage', 'Cards'],
+  },
+  {
+    id: 'esportes', label: 'Esportes', icon: 'bicycle-outline',
+    sub: ['Fitness', 'Corrida', 'Natação', 'Ciclismo', 'Esportes coletivos', 'Outdoor', 'Yoga'],
+  },
+];
 
 export default function SellScreen() {
   const router = useRouter();
@@ -36,20 +70,8 @@ export default function SellScreen() {
   const [brand, setBrand] = useState('');
   const [weight, setWeight] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedSubCategory, setSelectedSubCategory] = useState('');
   const [publishing, setPublishing] = useState(false);
-
-  useEffect(() => {
-    async function loadCategories() {
-      try {
-        const cats = await getCategories();
-        setCategories(cats);
-      } catch (_error) {
-        // Fallback - categories will be empty
-      }
-    }
-    loadCategories();
-  }, []);
 
   const handleAddPhoto = async () => {
     if (photos.length >= 20) {
@@ -105,7 +127,7 @@ export default function SellScreen() {
           condition,
           size,
           brand: brand || undefined,
-          category: selectedCategory,
+          category: selectedSubCategory || selectedCategory,
           imageIds: [],
         });
         listingId = listing.id;
@@ -120,7 +142,7 @@ export default function SellScreen() {
           condition,
           size,
           brand: brand || undefined,
-          category: selectedCategory || 'Outros',
+          category: selectedSubCategory || selectedCategory || 'Outros',
           color: undefined,
           images: photoUrls.map((url, i) => ({ id: `img-${i}`, url, order: i })),
           seller: { id: user?.id ?? 'demo-user', name: user?.name ?? 'Você (Demo)' },
@@ -141,6 +163,7 @@ export default function SellScreen() {
       setBrand('');
       setWeight('');
       setSelectedCategory('');
+      setSelectedSubCategory('');
 
       Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.', [
         {
@@ -206,24 +229,70 @@ export default function SellScreen() {
       </View>
 
       {/* Category */}
-      {categories.length > 0 && (
-        <View style={[styles.section, { backgroundColor: theme.card }]}>
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Categoria</Text>
-          <View style={styles.chipGroup}>
-            {categories.map((cat) => (
-              <TouchableOpacity
-                key={cat.id}
-                style={[styles.chip, { borderColor: theme.border, backgroundColor: theme.inputBg }, selectedCategory === cat.id && styles.chipSelected]}
-                onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
-              >
-                <Text style={[styles.chipText, { color: theme.textSecondary }, selectedCategory === cat.id && styles.chipTextSelected]}>
-                  {cat.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Categoria</Text>
+        <View style={styles.categoryGrid}>
+          {CATEGORIES.map((cat) => (
+            <TouchableOpacity
+              key={cat.id}
+              style={[
+                styles.categoryCard,
+                { borderColor: theme.border, backgroundColor: theme.inputBg },
+                selectedCategory === cat.id && { borderColor: colors.primary[500], backgroundColor: theme.isDark ? colors.primary[900] + '40' : colors.primary[50] },
+              ]}
+              onPress={() => {
+                if (selectedCategory === cat.id) {
+                  setSelectedCategory('');
+                  setSelectedSubCategory('');
+                } else {
+                  setSelectedCategory(cat.id);
+                  setSelectedSubCategory('');
+                }
+              }}
+            >
+              <Ionicons
+                name={cat.icon as 'home-outline'}
+                size={22}
+                color={selectedCategory === cat.id ? colors.primary[600] : theme.textSecondary}
+              />
+              <Text style={[
+                styles.categoryCardText,
+                { color: selectedCategory === cat.id ? colors.primary[600] : theme.text },
+              ]}>
+                {cat.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      )}
+
+        {/* Sub-categories — shown only after a top-level category is selected */}
+        {selectedCategory !== '' && (
+          <View style={styles.subSection}>
+            <Text style={[styles.subLabel, { color: theme.textSecondary }]}>Sub-categoria</Text>
+            <View style={styles.chipGroup}>
+              {CATEGORIES.find((c) => c.id === selectedCategory)?.sub.map((sub) => (
+                <TouchableOpacity
+                  key={sub}
+                  style={[
+                    styles.chip,
+                    { borderColor: theme.border, backgroundColor: theme.inputBg },
+                    selectedSubCategory === sub && styles.chipSelected,
+                  ]}
+                  onPress={() => setSelectedSubCategory(selectedSubCategory === sub ? '' : sub)}
+                >
+                  <Text style={[
+                    styles.chipText,
+                    { color: theme.textSecondary },
+                    selectedSubCategory === sub && styles.chipTextSelected,
+                  ]}>
+                    {sub}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
 
       {/* Condition */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
@@ -344,6 +413,15 @@ const styles = StyleSheet.create({
   removePhoto: {
     position: 'absolute', top: 2, right: 2, borderRadius: 11,
   },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryCard: {
+    width: '47%', paddingVertical: 12, paddingHorizontal: 10,
+    borderRadius: 10, borderWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  categoryCardText: { fontSize: 13, fontWeight: '500', flex: 1 },
+  subSection: { marginTop: 14 },
+  subLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8 },
   chipGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,

@@ -1,17 +1,31 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider as NavThemeProvider,
 } from '@react-navigation/native';
+import * as NavigationBar from 'expo-navigation-bar';
 import { AuthProvider } from '../src/contexts/AuthContext';
 import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
-  const { theme } = useTheme();
+  const { theme, fullScreen } = useTheme();
+
+  // Apply full-screen (hide Android navigation bar) when preference is set
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (fullScreen) {
+      NavigationBar.setVisibilityAsync('hidden');
+      NavigationBar.setBehaviorAsync('inset-swipe');
+    } else {
+      NavigationBar.setVisibilityAsync('visible');
+    }
+  }, [fullScreen]);
 
   const navTheme = {
     ...(theme.isDark ? DarkTheme : DefaultTheme),
