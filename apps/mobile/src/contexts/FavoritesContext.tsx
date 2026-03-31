@@ -47,7 +47,9 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
         try {
           const cached = await SecureStore.getItemAsync(FAVORITES_CACHE_KEY);
           if (cached) setFavorites(new Set(JSON.parse(cached) as string[]));
-        } catch {}
+        } catch (_cacheError) {
+          // Cache unavailable — start with empty favorites
+        }
       }
     })();
   }, []);

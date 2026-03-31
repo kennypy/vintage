@@ -15,6 +15,7 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { io, Socket } from 'socket.io-client';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getToken } from '../../src/services/api';
 import { getMessages, sendMessage, Message } from '../../src/services/messages';
@@ -27,6 +28,7 @@ export default function ConversationScreen() {
     id: string;
     participantName?: string;
   }>();
+  const { theme } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -273,7 +275,7 @@ export default function ConversationScreen() {
       <View>
         {shouldShowDateSeparator(index) && (
           <View style={styles.dateSeparator}>
-            <Text style={styles.dateSeparatorText}>
+            <Text style={[styles.dateSeparatorText, { backgroundColor: theme.cardSecondary, color: theme.textSecondary }]}>
               {formatDateSeparator(item.createdAt)}
             </Text>
           </View>
@@ -287,13 +289,13 @@ export default function ConversationScreen() {
           <View
             style={[
               styles.bubble,
-              isMine ? styles.bubbleMine : styles.bubbleTheirs,
+              isMine ? styles.bubbleMine : [styles.bubbleTheirs, { backgroundColor: theme.cardSecondary }],
             ]}
           >
             <Text
               style={[
                 styles.bubbleText,
-                isMine ? styles.bubbleTextMine : styles.bubbleTextTheirs,
+                isMine ? styles.bubbleTextMine : [styles.bubbleTextTheirs, { color: theme.text }],
               ]}
             >
               {item.body}
@@ -302,7 +304,7 @@ export default function ConversationScreen() {
               <Text
                 style={[
                   styles.timeText,
-                  isMine ? styles.timeTextMine : styles.timeTextTheirs,
+                  isMine ? styles.timeTextMine : [styles.timeTextTheirs, { color: theme.textSecondary }],
                 ]}
               >
                 {formatTime(item.createdAt)}
@@ -317,7 +319,7 @@ export default function ConversationScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
         <Stack.Screen options={{ title: participantName ?? 'Conversa' }} />
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
@@ -326,7 +328,7 @@ export default function ConversationScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: theme.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
@@ -341,7 +343,7 @@ export default function ConversationScreen() {
                   otherUserOnline ? styles.online : styles.offline,
                 ]}
               />
-              <Text style={styles.statusText}>
+              <Text style={[styles.statusText, { color: theme.textSecondary }]}>
                 {otherUserOnline ? 'Online' : 'Offline'}
               </Text>
             </View>
@@ -359,24 +361,24 @@ export default function ConversationScreen() {
         onEndReachedThreshold={0.3}
       />
       {isTyping && (
-        <View style={styles.typingContainer}>
-          <Text style={styles.typingText}>Digitando...</Text>
+        <View style={[styles.typingContainer, { backgroundColor: theme.background }]}>
+          <Text style={[styles.typingText, { color: theme.textSecondary }]}>Digitando...</Text>
         </View>
       )}
-      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.card, borderTopColor: theme.border }]}>
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, { backgroundColor: theme.inputBg, color: theme.text }]}
           value={text}
           onChangeText={handleTextChange}
           placeholder="Escreva uma mensagem..."
-          placeholderTextColor={colors.neutral[400]}
+          placeholderTextColor={theme.textSecondary}
           multiline
           maxLength={2000}
         />
         <TouchableOpacity
           style={[
             styles.sendButton,
-            !text.trim() && styles.sendButtonDisabled,
+            !text.trim() && { backgroundColor: theme.cardSecondary },
           ]}
           onPress={handleSend}
           disabled={!text.trim() || sending}
@@ -395,13 +397,11 @@ export default function ConversationScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.neutral[50],
   },
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.neutral[50],
   },
   headerRight: {
     flexDirection: 'row',
@@ -422,7 +422,6 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    color: colors.neutral[600],
   },
   messagesList: {
     paddingHorizontal: 16,
@@ -434,8 +433,6 @@ const styles = StyleSheet.create({
   },
   dateSeparatorText: {
     fontSize: 12,
-    color: colors.neutral[500],
-    backgroundColor: colors.neutral[100],
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 10,
@@ -461,7 +458,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
   },
   bubbleTheirs: {
-    backgroundColor: colors.neutral[200],
     borderBottomLeftRadius: 4,
   },
   bubbleText: {
@@ -471,9 +467,7 @@ const styles = StyleSheet.create({
   bubbleTextMine: {
     color: '#ffffff',
   },
-  bubbleTextTheirs: {
-    color: colors.neutral[900],
-  },
+  bubbleTextTheirs: {},
   messageFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -486,9 +480,7 @@ const styles = StyleSheet.create({
   timeTextMine: {
     color: 'rgba(255,255,255,0.7)',
   },
-  timeTextTheirs: {
-    color: colors.neutral[500],
-  },
+  timeTextTheirs: {},
   readReceipt: {
     marginLeft: 4,
   },
@@ -498,7 +490,6 @@ const styles = StyleSheet.create({
   },
   typingText: {
     fontSize: 12,
-    color: colors.neutral[500],
     fontStyle: 'italic',
   },
   inputBar: {
@@ -506,19 +497,15 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: colors.neutral[200],
   },
   textInput: {
     flex: 1,
-    backgroundColor: colors.neutral[100],
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
     fontSize: 15,
     maxHeight: 100,
-    color: colors.neutral[900],
   },
   sendButton: {
     marginLeft: 8,
@@ -529,7 +516,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    backgroundColor: colors.neutral[200],
-  },
+  sendButtonDisabled: {},
 });
