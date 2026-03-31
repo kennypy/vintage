@@ -15,12 +15,25 @@ import { useAuth } from '../../src/contexts/AuthContext';
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
   { value: 'NEW_WITHOUT_TAGS', label: 'Novo sem etiqueta' },
-  { value: 'VERY_GOOD', label: 'Muito bom' },
+  { value: 'VERY_GOOD', label: 'Excelente' },
   { value: 'GOOD', label: 'Bom' },
   { value: 'SATISFACTORY', label: 'Satisfatório' },
 ];
 
-const SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
+const CLOTHING_SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
+const SHOE_SIZES = ['33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'];
+const KIDS_CLOTHING_SIZES = ['0-3m', '3-6m', '6-12m', '1A', '2A', '3A', '4A', '5A', '6A', '8A', '10A', '12A'];
+
+// Categories that require size selection and which size type they use
+const SIZE_CATEGORY_MAP: Record<string, 'clothing' | 'shoes' | 'kids'> = {
+  feminino: 'clothing',
+  masculino: 'clothing',
+  kids: 'kids',
+  esportes: 'clothing',
+};
+
+// Sub-categories that switch to shoe sizes
+const SHOE_SUBCATEGORIES = new Set(['Calçados']);
 
 const CATEGORIES: { id: string; label: string; icon: string; sub: string[] }[] = [
   {
@@ -72,6 +85,15 @@ export default function SellScreen() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSubCategory, setSelectedSubCategory] = useState('');
   const [publishing, setPublishing] = useState(false);
+
+  const showSizeSelector = selectedCategory !== '' && SIZE_CATEGORY_MAP[selectedCategory] !== undefined;
+  const currentSizes = showSizeSelector
+    ? SHOE_SUBCATEGORIES.has(selectedSubCategory)
+      ? SHOE_SIZES
+      : SIZE_CATEGORY_MAP[selectedCategory] === 'kids'
+        ? KIDS_CLOTHING_SIZES
+        : CLOTHING_SIZES
+    : [];
 
   const handleAddPhoto = async () => {
     if (photos.length >= 20) {
@@ -244,9 +266,11 @@ export default function SellScreen() {
                 if (selectedCategory === cat.id) {
                   setSelectedCategory('');
                   setSelectedSubCategory('');
+                  setSize('');
                 } else {
                   setSelectedCategory(cat.id);
                   setSelectedSubCategory('');
+                  setSize('');
                 }
               }}
             >
@@ -312,21 +336,23 @@ export default function SellScreen() {
         </View>
       </View>
 
-      {/* Size */}
-      <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
-        <View style={styles.chipGroup}>
-          {SIZES.map((s) => (
-            <TouchableOpacity
-              key={s}
-              style={[styles.sizeChip, { borderColor: theme.border, backgroundColor: theme.inputBg }, size === s && styles.chipSelected]}
-              onPress={() => setSize(size === s ? '' : s)}
-            >
-              <Text style={[styles.chipText, { color: theme.textSecondary }, size === s && styles.chipTextSelected]}>{s}</Text>
-            </TouchableOpacity>
-          ))}
+      {/* Size — only for clothing/shoes/kids categories */}
+      {showSizeSelector && (
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
+          <View style={styles.chipGroup}>
+            {currentSizes.map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.sizeChip, { borderColor: theme.border, backgroundColor: theme.inputBg }, size === s && styles.chipSelected]}
+                onPress={() => setSize(size === s ? '' : s)}
+              >
+                <Text style={[styles.chipText, { color: theme.textSecondary }, size === s && styles.chipTextSelected]}>{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Brand */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
@@ -430,8 +456,8 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 13 },
   chipTextSelected: { color: colors.primary[600], fontWeight: '600' },
   sizeChip: {
-    width: 44, height: 44, borderRadius: 22, borderWidth: 1,
-    justifyContent: 'center', alignItems: 'center',
+    minWidth: 44, height: 36, borderRadius: 18, borderWidth: 1,
+    justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10,
   },
   priceRow: { flexDirection: 'row', alignItems: 'center' },
   pricePrefix: { fontSize: 18, fontWeight: '600', marginRight: 8 },

@@ -33,7 +33,7 @@ const formatBrl = (value: number) =>
 export default function OrdersScreen() {
   const router = useRouter();
   const { theme } = useTheme();
-  const [activeTab, setActiveTab] = useState<'purchases' | 'sales'>('purchases');
+  const [activeTab] = useState<'purchases' | 'sales'>('purchases');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -99,26 +99,6 @@ export default function OrdersScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Tabs */}
-      <View style={[styles.tabs, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'purchases' && styles.tabActive]}
-          onPress={() => setActiveTab('purchases')}
-        >
-          <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'purchases' && styles.tabTextActive]}>
-            Compras
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'sales' && styles.tabActive]}
-          onPress={() => setActiveTab('sales')}
-        >
-          <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'sales' && styles.tabTextActive]}>
-            Vendas
-          </Text>
-        </TouchableOpacity>
-      </View>
-
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary[500]} />
@@ -135,13 +115,9 @@ export default function OrdersScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="bag-outline" size={64} color={theme.textTertiary} />
-              <Text style={[styles.emptyTitle, { color: theme.text }]}>
-                {activeTab === 'purchases' ? 'Nenhuma compra' : 'Nenhuma venda'}
-              </Text>
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma compra</Text>
               <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-                {activeTab === 'purchases'
-                  ? 'Seus pedidos aparecerão aqui.'
-                  : 'Suas vendas aparecerão aqui.'}
+                Seus pedidos aparecerão aqui.
               </Text>
             </View>
           }

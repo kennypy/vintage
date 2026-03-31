@@ -1,6 +1,7 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, ActivityIndicator, Alert, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -10,8 +11,18 @@ import { Avatar } from '../../src/components/Avatar';
 export default function ProfileScreen() {
   const router = useRouter();
   const { theme } = useTheme();
-  const { user, isAuthenticated, isLoading: loading, signOut, isDemoMode } = useAuth();
+  const { user, isAuthenticated, isLoading: loading, signOut, isDemoMode, refreshUser } = useAuth();
   const [vacationMode, setVacationMode] = useState(false);
+  const [vacationInfoVisible, setVacationInfoVisible] = useState(false);
+
+  // Refresh user data (including listing count) each time profile tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) {
+        refreshUser().catch(() => {});
+      }
+    }, [isAuthenticated, refreshUser]),
+  );
 
   const handleLogout = async () => {
     Alert.alert('Sair da conta', 'Tem certeza que deseja sair?', [
@@ -80,6 +91,9 @@ export default function ProfileScreen() {
             <Ionicons name="star" size={14} color={colors.warning[500]} />
             <Text style={[styles.ratingText, { color: theme.textSecondary }]}>{user.ratingAvg} ({user.ratingCount})</Text>
           </View>
+          {(user as any).bio ? (
+            <Text style={[styles.bio, { color: theme.textSecondary }]} numberOfLines={2}>{(user as any).bio}</Text>
+          ) : null}
         </View>
         <TouchableOpacity style={styles.editButton} onPress={() => router.push('/profile/edit')}>
           <Ionicons name="create-outline" size={20} color={colors.primary[600]} />
@@ -129,7 +143,6 @@ export default function ProfileScreen() {
         <MenuItem icon="bag-outline" label="Minhas compras" onPress={() => router.push('/orders')} />
         <MenuItem icon="pricetag-outline" label="Meus anúncios" onPress={() => router.push('/my-listings')} />
         <MenuItem icon="heart-outline" label="Favoritos" onPress={() => router.push('/favorites')} />
-        <MenuItem icon="chatbubble-outline" label="Ofertas recebidas" onPress={() => router.push('/offers')} />
         <MenuItem icon="star-outline" label="Avaliações" onPress={() => router.push(`/reviews/${user?.id}`)} />
       </View>
 
@@ -145,12 +158,30 @@ export default function ProfileScreen() {
         <View style={[styles.menuItem, { borderBottomColor: theme.divider }]}>
           <Ionicons name="airplane-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.menuLabel, { color: theme.text }]}>Modo férias</Text>
+          <TouchableOpacity onPress={() => setVacationInfoVisible(true)} style={styles.infoButton}>
+            <Ionicons name="information-circle-outline" size={18} color={theme.textTertiary} />
+          </TouchableOpacity>
           <Switch
             value={vacationMode}
             onValueChange={setVacationMode}
             trackColor={{ true: colors.primary[500] }}
           />
         </View>
+
+        {/* Holiday Mode Info Modal */}
+        <Modal visible={vacationInfoVisible} transparent animationType="fade">
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setVacationInfoVisible(false)}>
+            <View style={[styles.infoModal, { backgroundColor: theme.card }]}>
+              <Text style={[styles.infoModalTitle, { color: theme.text }]}>Modo férias</Text>
+              <Text style={[styles.infoModalText, { color: theme.textSecondary }]}>
+                Quando o Modo férias está ativo, seus anúncios ficam ocultos temporariamente. Os compradores não conseguem visualizá-los nem entrar em contato durante esse período.{'\n\n'}Seus anúncios voltam automaticamente quando você desativar o modo.
+              </Text>
+              <TouchableOpacity style={styles.infoModalClose} onPress={() => setVacationInfoVisible(false)}>
+                <Text style={styles.infoModalCloseText}>Entendi</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
         <MenuItem icon="notifications-outline" label="Notificações" onPress={() => router.push('/notifications')} />
         <MenuItem icon="location-outline" label="Endereços" onPress={() => router.push('/addresses')} />
         <MenuItem icon="shield-checkmark-outline" label="Verificação" onPress={() => router.push('/conta/verificacao')} />
@@ -210,6 +241,14 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   ratingText: { fontSize: 13, color: colors.neutral[500] },
   editButton: { padding: 8 },
+  bio: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  infoButton: { padding: 4 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 32 },
+  infoModal: { borderRadius: 16, padding: 20, width: '100%' },
+  infoModalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  infoModalText: { fontSize: 14, lineHeight: 22 },
+  infoModalClose: { marginTop: 20, alignItems: 'center', backgroundColor: colors.primary[600], paddingVertical: 12, borderRadius: 10 },
+  infoModalCloseText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   statsRow: {
     flexDirection: 'row', backgroundColor: colors.neutral[0], paddingVertical: 14,
     borderBottomWidth: 1, borderBottomColor: colors.neutral[200],

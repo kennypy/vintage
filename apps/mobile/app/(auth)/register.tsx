@@ -4,16 +4,49 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
+
+type Step = 'account' | 'address' | 'interests';
+
+const INTEREST_OPTIONS = [
+  'Moda Feminina', 'Moda Masculina', 'Moda Infantil', 'Calçados',
+  'Bolsas e Acessórios', 'Roupas de Academia', 'Roupas de Festa',
+  'Jeans', 'Vestidos', 'Casacos', 'Vintage', 'Streetwear',
+  'Praia e Verão', 'Lingerie', 'Ternos e Blazers',
+];
+
+const STATES_BR = [
+  'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
+  'MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO',
+];
 
 export default function RegisterScreen() {
   const router = useRouter();
   const { signUp } = useAuth();
+
+  // Step tracking
+  const [step, setStep] = useState<Step>('account');
+
+  // Account fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
   const [password, setPassword] = useState('');
+
+  // Address fields
+  const [cep, setCep] = useState('');
+  const [street, setStreet] = useState('');
+  const [number, setNumber] = useState('');
+  const [complement, setComplement] = useState('');
+  const [neighborhood, setNeighborhood] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+
+  // Interests
+  const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(false);
 
   const formatCpf = (text: string) => {
@@ -24,16 +57,45 @@ export default function RegisterScreen() {
       .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
   };
 
-  const handleRegister = async () => {
+  const formatCep = (text: string) => {
+    const digits = text.replace(/\D/g, '').slice(0, 8);
+    return digits.replace(/(\d{5})(\d)/, '$1-$2');
+  };
+
+  const validateAccount = () => {
     if (!name || !email || !cpf || !password) {
       Alert.alert('Campos obrigatórios', 'Preencha todos os campos.');
-      return;
+      return false;
     }
     if (password.length < 8) {
       Alert.alert('Senha fraca', 'A senha deve ter no mínimo 8 caracteres.');
-      return;
+      return false;
     }
+    return true;
+  };
 
+  const validateAddress = () => {
+    if (!cep || !street || !number || !neighborhood || !city || !state) {
+      Alert.alert('Campos obrigatórios', 'Preencha todos os campos de endereço (exceto complemento).');
+      return false;
+    }
+    const rawCep = cep.replace(/\D/g, '');
+    if (rawCep.length !== 8) {
+      Alert.alert('CEP inválido', 'Informe um CEP válido no formato 00000-000.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleNextFromAccount = () => {
+    if (validateAccount()) setStep('address');
+  };
+
+  const handleNextFromAddress = () => {
+    if (validateAddress()) setStep('interests');
+  };
+
+  const handleRegister = async () => {
     setLoading(true);
     try {
       const rawCpf = cpf.replace(/\D/g, '');
@@ -46,6 +108,15 @@ export default function RegisterScreen() {
     }
   };
 
+  const toggleInterest = (interest: string) => {
+    setSelectedInterests((prev) =>
+      prev.includes(interest) ? prev.filter((i) => i !== interest) : [...prev, interest],
+    );
+  };
+
+  const stepTitle = step === 'account' ? 'Criar conta' : step === 'address' ? 'Seu endereço' : 'Seus interesses';
+  const stepNumber = step === 'account' ? 1 : step === 'address' ? 2 : 3;
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -53,56 +124,176 @@ export default function RegisterScreen() {
     >
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.logo}>Vintage.br</Text>
-        <Text style={styles.subtitle}>Crie sua conta</Text>
 
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Nome completo"
-            placeholderTextColor={colors.neutral[400]}
-            value={name}
-            onChangeText={setName}
-            autoComplete="name"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={colors.neutral[400]}
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="CPF"
-            placeholderTextColor={colors.neutral[400]}
-            value={cpf}
-            onChangeText={(t) => setCpf(formatCpf(t))}
-            keyboardType="numeric"
-            maxLength={14}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Senha (mín. 8 caracteres)"
-            placeholderTextColor={colors.neutral[400]}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete="new-password"
-          />
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? 'Criando conta...' : 'Criar conta'}
-            </Text>
-          </TouchableOpacity>
+        {/* Progress indicator */}
+        <View style={styles.progressRow}>
+          {[1, 2, 3].map((n) => (
+            <View key={n} style={[styles.progressDot, n <= stepNumber && styles.progressDotActive]} />
+          ))}
         </View>
+
+        <Text style={styles.subtitle}>{stepTitle}</Text>
+
+        {step === 'account' && (
+          <View style={styles.form}>
+            <TextInput
+              style={styles.input}
+              placeholder="Nome completo"
+              placeholderTextColor={colors.neutral[400]}
+              value={name}
+              onChangeText={setName}
+              autoComplete="name"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor={colors.neutral[400]}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="CPF"
+              placeholderTextColor={colors.neutral[400]}
+              value={cpf}
+              onChangeText={(t) => setCpf(formatCpf(t))}
+              keyboardType="numeric"
+              maxLength={14}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Senha (mín. 8 caracteres)"
+              placeholderTextColor={colors.neutral[400]}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete="new-password"
+            />
+            <TouchableOpacity style={styles.button} onPress={handleNextFromAccount}>
+              <Text style={styles.buttonText}>Continuar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {step === 'address' && (
+          <View style={styles.form}>
+            <TextInput
+              style={styles.input}
+              placeholder="CEP (ex: 01310-100)"
+              placeholderTextColor={colors.neutral[400]}
+              value={cep}
+              onChangeText={(t) => setCep(formatCep(t))}
+              keyboardType="numeric"
+              maxLength={9}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Rua / Avenida"
+              placeholderTextColor={colors.neutral[400]}
+              value={street}
+              onChangeText={setStreet}
+            />
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, styles.inputSmall]}
+                placeholder="Número"
+                placeholderTextColor={colors.neutral[400]}
+                value={number}
+                onChangeText={setNumber}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={[styles.input, styles.inputFlex]}
+                placeholder="Complemento (opcional)"
+                placeholderTextColor={colors.neutral[400]}
+                value={complement}
+                onChangeText={setComplement}
+              />
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Bairro"
+              placeholderTextColor={colors.neutral[400]}
+              value={neighborhood}
+              onChangeText={setNeighborhood}
+            />
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, styles.inputFlex]}
+                placeholder="Cidade"
+                placeholderTextColor={colors.neutral[400]}
+                value={city}
+                onChangeText={setCity}
+              />
+              <View style={[styles.input, styles.inputSmall, styles.pickerWrapper]}>
+                <ScrollView style={styles.stateScroll} nestedScrollEnabled>
+                  {STATES_BR.map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      onPress={() => setState(s)}
+                      style={[styles.stateOption, state === s && styles.stateOptionSelected]}
+                    >
+                      <Text style={[styles.stateText, state === s && styles.stateTextSelected]}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                {state === '' && <Text style={styles.statePlaceholder}>UF</Text>}
+              </View>
+            </View>
+            <TouchableOpacity style={styles.button} onPress={handleNextFromAddress}>
+              <Text style={styles.buttonText}>Continuar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep('account')}>
+              <Ionicons name="arrow-back" size={16} color={colors.neutral[500]} />
+              <Text style={styles.backText}>Voltar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {step === 'interests' && (
+          <View style={styles.form}>
+            <Text style={styles.interestsHint}>Escolha o que você mais gosta (opcional):</Text>
+            <View style={styles.interestsGrid}>
+              {INTEREST_OPTIONS.map((interest) => {
+                const selected = selectedInterests.includes(interest);
+                return (
+                  <TouchableOpacity
+                    key={interest}
+                    style={[styles.interestChip, selected && styles.interestChipSelected]}
+                    onPress={() => toggleInterest(interest)}
+                  >
+                    <Text style={[styles.interestText, selected && styles.interestTextSelected]}>
+                      {interest}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleRegister}
+              disabled={loading}
+            >
+              <Text style={styles.buttonText}>
+                {loading ? 'Criando conta...' : 'Criar conta'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.skipButton]}
+              onPress={handleRegister}
+              disabled={loading}
+            >
+              <Text style={styles.skipText}>Pular e criar conta</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep('address')}>
+              <Ionicons name="arrow-back" size={16} color={colors.neutral[500]} />
+              <Text style={styles.backText}>Voltar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.terms}>
           Ao criar conta, você concorda com os{' '}
@@ -123,21 +314,49 @@ export default function RegisterScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral[0] },
-  content: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40 },
+  content: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 40 },
   logo: { fontSize: 32, fontWeight: '700', color: colors.primary[600], textAlign: 'center' },
-  subtitle: { fontSize: 16, color: colors.neutral[500], textAlign: 'center', marginTop: 8, marginBottom: 32 },
+  progressRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 12, marginBottom: 4 },
+  progressDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.neutral[200] },
+  progressDotActive: { backgroundColor: colors.primary[500], width: 24 },
+  subtitle: { fontSize: 16, color: colors.neutral[500], textAlign: 'center', marginTop: 8, marginBottom: 24 },
   form: { gap: 12 },
   input: {
     height: 50, borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 12,
     paddingHorizontal: 16, fontSize: 16, color: colors.neutral[900],
     backgroundColor: colors.neutral[50],
   },
+  row: { flexDirection: 'row', gap: 8 },
+  inputSmall: { width: 80 },
+  inputFlex: { flex: 1 },
+  pickerWrapper: {
+    position: 'relative', overflow: 'hidden', justifyContent: 'center', padding: 0,
+  },
+  stateScroll: { maxHeight: 50 },
+  stateOption: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  stateOptionSelected: { backgroundColor: colors.primary[50] },
+  stateText: { fontSize: 14, color: colors.neutral[700] },
+  stateTextSelected: { color: colors.primary[600], fontWeight: '600' },
+  statePlaceholder: { position: 'absolute', left: 16, color: colors.neutral[400], fontSize: 16 },
   button: {
     height: 50, backgroundColor: colors.primary[600], borderRadius: 12,
     justifyContent: 'center', alignItems: 'center', marginTop: 4,
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
+  backButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 8 },
+  backText: { color: colors.neutral[500], fontSize: 14 },
+  skipButton: { alignItems: 'center', paddingVertical: 8 },
+  skipText: { color: colors.neutral[400], fontSize: 14, textDecorationLine: 'underline' },
+  interestsHint: { fontSize: 14, color: colors.neutral[500], marginBottom: 4 },
+  interestsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  interestChip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.neutral[200], backgroundColor: colors.neutral[50],
+  },
+  interestChipSelected: { borderColor: colors.primary[500], backgroundColor: colors.primary[50] },
+  interestText: { fontSize: 13, color: colors.neutral[600] },
+  interestTextSelected: { color: colors.primary[600], fontWeight: '600' },
   terms: {
     textAlign: 'center', color: colors.neutral[400], fontSize: 12, lineHeight: 18,
     marginTop: 20, paddingHorizontal: 16,

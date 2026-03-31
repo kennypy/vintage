@@ -1,8 +1,7 @@
 import {
   View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, Dimensions,
-  ActivityIndicator, Alert, TextInput, Modal, Share, Linking,
+  ActivityIndicator, Alert, TextInput, Modal, Share,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +9,6 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getListing } from '../../src/services/listings';
-import { makeOffer } from '../../src/services/offers';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
 import { getDemoListing, DEMO_PHOTOS, startDemoConversation } from '../../src/services/demoStore';
@@ -20,7 +18,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONDITION_LABELS: Record<string, string> = {
   NEW_WITH_TAGS: 'Novo com etiqueta',
   NEW_WITHOUT_TAGS: 'Novo sem etiqueta',
-  VERY_GOOD: 'Muito bom',
+  VERY_GOOD: 'Excelente',
   GOOD: 'Bom',
   SATISFACTORY: 'Satisfatório',
 };
@@ -109,10 +107,18 @@ export default function ListingDetailScreen() {
     }
     setOfferLoading(true);
     try {
-      await makeOffer(listing.id, amount);
+      // Start (or continue) a conversation thread and send offer as a special message
+      let conv;
+      const offerBody = `💰 Oferta: R$ ${formatBrl(amount)}\n\nOlá! Gostaria de comprar "${listing.title}" por R$ ${formatBrl(amount)}.`;
+      try {
+        conv = await startConversation(listing.id, offerBody);
+      } catch {
+        conv = startDemoConversation(listing.id, listing.title, listing.seller.id, listing.seller.name, offerBody);
+      }
       setOfferModalVisible(false);
       setOfferAmount('');
-      Alert.alert('Oferta enviada!', `Sua oferta de R$ ${formatBrl(amount)} foi enviada ao vendedor.`);
+      // Navigate to the conversation so the user sees the offer thread
+      router.push(`/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}&isOffer=1&offerAmount=${amount}&listingId=${listing.id}`);
     } catch {
       Alert.alert('Erro', 'Não foi possível enviar a oferta. Tente novamente.');
     } finally {
@@ -145,25 +151,6 @@ export default function ListingDetailScreen() {
     }
   };
 
-  const handleShareWhatsApp = async () => {
-    if (!listing) return;
-    const url = getShareUrl();
-    const text = encodeURIComponent(`${listing.title} — R$ ${formatBrl(listing.priceBrl)}\n${url}`);
-    const waUrl = `whatsapp://send?text=${text}`;
-    const canOpen = await Linking.canOpenURL(waUrl).catch(() => false);
-    if (canOpen) {
-      await Linking.openURL(waUrl);
-    } else {
-      handleShare();
-    }
-  };
-
-  const handleCopyLink = async () => {
-    if (!listing) return;
-    await Clipboard.setStringAsync(getShareUrl());
-    Alert.alert('Link copiado!', 'O link do anúncio foi copiado.');
-  };
-
   if (loading || !listing) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
@@ -173,8 +160,7 @@ export default function ListingDetailScreen() {
   }
 
   const buyerProtectionFee = 3.5 + listing.priceBrl * 0.05;
-  const shippingEstimate = 18.9;
-  const total = listing.priceBrl + shippingEstimate + buyerProtectionFee;
+  const subtotal = listing.priceBrl + buyerProtectionFee;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -258,35 +244,7 @@ export default function ListingDetailScreen() {
           <Text style={[styles.description, { color: theme.textSecondary }]}>{listing.description}</Text>
         </View>
 
-        {/* Share Buttons */}
-        <View style={[styles.section, { backgroundColor: theme.card, marginTop: 8 }]}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>Compartilhar</Text>
-          <View style={styles.shareRow}>
-            <TouchableOpacity
-              style={[styles.shareChip, { borderColor: theme.border }]}
-              onPress={handleCopyLink}
-            >
-              <Ionicons name="link-outline" size={18} color={colors.primary[600]} />
-              <Text style={[styles.shareChipText, { color: colors.primary[600] }]}>Copiar link</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.shareChip, { borderColor: '#25D366', backgroundColor: '#25D36610' }]}
-              onPress={handleShareWhatsApp}
-            >
-              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-              <Text style={[styles.shareChipText, { color: '#25D366' }]}>WhatsApp</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.shareChip, { borderColor: theme.border }]}
-              onPress={handleShare}
-            >
-              <Ionicons name="share-social-outline" size={18} color={theme.textSecondary} />
-              <Text style={[styles.shareChipText, { color: theme.textSecondary }]}>Mais</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Cost Breakdown */}
+        {/* Cost Breakdown — postage calculated at checkout */}
         <View style={[styles.section, { backgroundColor: theme.card, marginTop: 8 }]}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Resumo</Text>
           <View style={styles.costRow}>
@@ -294,17 +252,14 @@ export default function ListingDetailScreen() {
             <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(listing.priceBrl)}</Text>
           </View>
           <View style={styles.costRow}>
-            <Text style={[styles.costLabel, { color: theme.textSecondary }]}>Frete (estimado)</Text>
-            <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(shippingEstimate)}</Text>
-          </View>
-          <View style={styles.costRow}>
             <Text style={[styles.costLabel, { color: theme.textSecondary }]}>Proteção ao comprador</Text>
             <Text style={[styles.costValue, { color: theme.textSecondary }]}>R$ {formatBrl(buyerProtectionFee)}</Text>
           </View>
           <View style={[styles.costRow, styles.totalRow, { borderTopColor: theme.border }]}>
-            <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
-            <Text style={[styles.totalValue, { color: colors.primary[600] }]}>R$ {formatBrl(total)}</Text>
+            <Text style={[styles.totalLabel, { color: theme.text }]}>Subtotal</Text>
+            <Text style={[styles.totalValue, { color: colors.primary[600] }]}>R$ {formatBrl(subtotal)}</Text>
           </View>
+          <Text style={[styles.shippingNote, { color: theme.textTertiary }]}>Frete calculado no checkout</Text>
         </View>
 
         {/* Seller */}
@@ -431,13 +386,7 @@ const styles = StyleSheet.create({
     borderRadius: 6, overflow: 'hidden',
   },
   description: { fontSize: 14, lineHeight: 22 },
-  shareRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  shareChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1,
-  },
-  shareChipText: { fontSize: 13, fontWeight: '500' },
+  shippingNote: { fontSize: 12, marginTop: 6 },
   costRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
   costLabel: { fontSize: 14 },
   costValue: { fontSize: 14 },
