@@ -13,7 +13,7 @@ import {
   Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { io, Socket } from 'socket.io-client';
 import { colors } from '../../src/theme/colors';
@@ -28,15 +28,17 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
 const formatBrl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ConversationScreen() {
-  const { id, participantName, isOffer, offerAmount, listingId } = useLocalSearchParams<{
+  const { id, participantName, isOffer, offerAmount, listingId, listingTitle } = useLocalSearchParams<{
     id: string;
     participantName?: string;
     isOffer?: string;
     offerAmount?: string;
     listingId?: string;
+    listingTitle?: string;
   }>();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
 
   // Offer state (local, for demo purposes)
@@ -478,7 +480,20 @@ export default function ConversationScreen() {
           {offerStatus === 'accepted' && (
             <TouchableOpacity
               style={styles.buyNowBtn}
-              onPress={() => Alert.alert('Comprar agora', `Finalize a compra por R$ ${formatBrl(pendingOfferAmount)}. Redirecionando para o checkout...`)}
+              onPress={() => {
+                if (!listingId) {
+                  Alert.alert('Erro', 'Dados do anúncio não encontrados.');
+                  return;
+                }
+                router.push({
+                  pathname: '/checkout',
+                  params: {
+                    listingId,
+                    title: listingTitle ?? 'Oferta aceita',
+                    priceBrl: String(pendingOfferAmount ?? 0),
+                  },
+                });
+              }}
             >
               <Text style={styles.buyNowText}>Comprar agora</Text>
             </TouchableOpacity>
