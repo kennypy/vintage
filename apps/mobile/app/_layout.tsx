@@ -40,9 +40,8 @@ function AppShell() {
     }
   }, [fullScreen]);
 
-  // ── Render guard ────────────────────────────────────────────────────────────
-  // Do NOT render any navigable content until auth state is resolved.
-  // This prevents any protected screen from flashing before the redirect fires.
+  // Show a spinner while auth state is determined.
+  // The Stack is NOT rendered during this window so there is nothing to flash.
   if (isLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
@@ -51,15 +50,10 @@ function AppShell() {
     );
   }
 
-  // After loading: if not authenticated and not in the auth group, render nothing
-  // while the useEffect above fires the redirect. This closes the race window.
-  if (!isAuthenticated && !inAuthGroup) {
-    return (
-      <View style={{ flex: 1, backgroundColor: theme.background }} />
-    );
-  }
-  // ────────────────────────────────────────────────────────────────────────────
-
+  // After loading, always render the Stack so every route is registered in the
+  // navigator. Hiding the Stack causes "route not found" errors when router.replace
+  // fires (e.g. on logout). The (tabs) layout guards against showing tab content
+  // while unauthenticated — see app/(tabs)/_layout.tsx.
   const navTheme = {
     ...(theme.isDark ? DarkTheme : DefaultTheme),
     colors: {
