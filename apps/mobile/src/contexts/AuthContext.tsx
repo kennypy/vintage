@@ -62,9 +62,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const profile = await getProfile();
       setUser(profile as AuthUser & Partial<UserProfile>);
-    } catch (_error) {
-      setUser(null);
-      await clearTokens();
+    } catch (error) {
+      // Only sign out for authentication errors (expired/invalid token).
+      // Network/connection errors should keep the existing session intact —
+      // this prevents demo-mode users from being silently logged out when
+      // the API is unreachable.
+      if (!isNetworkError(error)) {
+        setUser(null);
+        await clearTokens();
+      }
     }
   }, []);
 

@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
@@ -36,6 +37,7 @@ function mapListingToCard(listing: Listing) {
 export default function HomeScreen() {
   const { theme } = useTheme();
   const { isFavorited, toggleFavorite } = useFavorites();
+  const insets = useSafeAreaInsets();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [listings, setListings] = useState<any[]>([]);
@@ -83,7 +85,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border, paddingTop: insets.top + 8 }]}>
         <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
       </View>
       <FlatList
