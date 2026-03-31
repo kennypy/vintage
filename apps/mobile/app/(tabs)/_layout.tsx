@@ -1,10 +1,26 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { View, ActivityIndicator } from 'react-native';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function TabLayout() {
   const { theme } = useTheme();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // While auth is loading or user is not authenticated, render nothing.
+  // The root layout's useEffect will redirect to login once auth resolves.
+  // Returning null here prevents any tab screen from rendering before the
+  // redirect fires, closing the content-flash race condition.
+  if (isLoading || !isAuthenticated) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
+        {isLoading && <ActivityIndicator color={colors.primary[500]} />}
+      </View>
+    );
+  }
+
   return (
     <Tabs
       screenOptions={{

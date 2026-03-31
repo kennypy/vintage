@@ -30,10 +30,9 @@ export default function ProfileScreen() {
       {
         text: 'Sair',
         style: 'destructive',
-        onPress: async () => {
-          await signOut();
-          router.replace('/(auth)/login');
-        },
+        // Just call signOut — the root layout's useEffect watches isAuthenticated
+        // and fires router.replace('/(auth)/login') automatically.
+        onPress: () => signOut(),
       },
     ]);
   };
