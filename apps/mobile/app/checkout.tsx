@@ -3,8 +3,10 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useEffect } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../src/theme/colors';
+import { useTheme } from '../src/contexts/ThemeContext';
 import { createOrder } from '../src/services/orders';
 import { getAddresses, Address } from '../src/services/addresses';
 
@@ -15,6 +17,8 @@ const formatBrl = (value: number) =>
 
 export default function CheckoutScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
   const params = useLocalSearchParams<{
     listingId: string;
     title: string;
@@ -87,125 +91,131 @@ export default function CheckoutScreen() {
     }
   };
 
+  const paymentSelectedStyle = { borderColor: colors.primary[400], backgroundColor: theme.isDark ? colors.primary[900] + '40' : colors.primary[50] };
+  const installmentSelectedStyle = { backgroundColor: theme.isDark ? colors.primary[900] + '40' : colors.primary[50] };
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Item Info */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Item</Text>
-          <Text style={styles.itemTitle}>{listingTitle}</Text>
-          <Text style={styles.itemPrice}>R$ {formatBrl(itemPrice)}</Text>
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Item</Text>
+          <Text style={[styles.itemTitle, { color: theme.textSecondary }]}>{listingTitle}</Text>
+          <Text style={[styles.itemPrice, { color: theme.text }]}>R$ {formatBrl(itemPrice)}</Text>
         </View>
 
         {/* Address */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Endereço de entrega</Text>
-          <TouchableOpacity style={styles.addressCard} onPress={() => router.push('/addresses')}>
-            <Ionicons name="location-outline" size={20} color={colors.neutral[600]} />
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Endereço de entrega</Text>
+          <TouchableOpacity
+            style={[styles.addressCard, { backgroundColor: theme.inputBg }]}
+            onPress={() => router.push('/addresses')}
+          >
+            <Ionicons name="location-outline" size={20} color={theme.textSecondary} />
             <View style={styles.addressInfo}>
               {selectedAddress ? (
                 <>
-                  <Text style={styles.addressLabel}>{selectedAddress.label}</Text>
-                  <Text style={styles.addressText}>
+                  <Text style={[styles.addressLabel, { color: theme.text }]}>{selectedAddress.label}</Text>
+                  <Text style={[styles.addressText, { color: theme.textSecondary }]}>
                     {selectedAddress.street}, {selectedAddress.number}
                     {selectedAddress.complement ? ` - ${selectedAddress.complement}` : ''}
                   </Text>
-                  <Text style={styles.addressText}>
+                  <Text style={[styles.addressText, { color: theme.textSecondary }]}>
                     {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.cep}
                   </Text>
                 </>
               ) : (
-                <Text style={styles.addressText}>Adicionar endereço de entrega</Text>
+                <Text style={[styles.addressText, { color: theme.textSecondary }]}>Adicionar endereço de entrega</Text>
               )}
             </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.neutral[400]} />
+            <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
           </TouchableOpacity>
         </View>
 
         {/* Payment Method */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Forma de pagamento</Text>
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Forma de pagamento</Text>
 
           {/* PIX */}
           <TouchableOpacity
-            style={[styles.paymentOption, paymentMethod === 'pix' && styles.paymentSelected]}
+            style={[styles.paymentOption, { borderColor: theme.border }, paymentMethod === 'pix' && paymentSelectedStyle]}
             onPress={() => setPaymentMethod('pix')}
           >
             <View style={styles.paymentLeft}>
-              <View style={[styles.pixBadge]}>
+              <View style={styles.pixBadge}>
                 <Text style={styles.pixText}>PIX</Text>
               </View>
               <View>
-                <Text style={styles.paymentLabel}>PIX</Text>
-                <Text style={styles.paymentDesc}>Aprovação instantânea</Text>
+                <Text style={[styles.paymentLabel, { color: theme.text }]}>PIX</Text>
+                <Text style={[styles.paymentDesc, { color: theme.textSecondary }]}>Aprovação instantânea</Text>
               </View>
             </View>
             <Ionicons
               name={paymentMethod === 'pix' ? 'radio-button-on' : 'radio-button-off'}
               size={22}
-              color={paymentMethod === 'pix' ? colors.pix : colors.neutral[300]}
+              color={paymentMethod === 'pix' ? colors.pix : theme.textTertiary}
             />
           </TouchableOpacity>
 
           {/* Credit Card */}
           <TouchableOpacity
-            style={[styles.paymentOption, paymentMethod === 'credit_card' && styles.paymentSelected]}
+            style={[styles.paymentOption, { borderColor: theme.border }, paymentMethod === 'credit_card' && paymentSelectedStyle]}
             onPress={() => setPaymentMethod('credit_card')}
           >
             <View style={styles.paymentLeft}>
-              <Ionicons name="card-outline" size={24} color={colors.neutral[600]} />
+              <Ionicons name="card-outline" size={24} color={theme.textSecondary} />
               <View>
-                <Text style={styles.paymentLabel}>Cartão de crédito</Text>
-                <Text style={styles.paymentDesc}>Parcele em até 12x</Text>
+                <Text style={[styles.paymentLabel, { color: theme.text }]}>Cartão de crédito</Text>
+                <Text style={[styles.paymentDesc, { color: theme.textSecondary }]}>Parcele em até 12x</Text>
               </View>
             </View>
             <Ionicons
               name={paymentMethod === 'credit_card' ? 'radio-button-on' : 'radio-button-off'}
               size={22}
-              color={paymentMethod === 'credit_card' ? colors.primary[600] : colors.neutral[300]}
+              color={paymentMethod === 'credit_card' ? colors.primary[600] : theme.textTertiary}
             />
           </TouchableOpacity>
 
           {/* Boleto */}
           <TouchableOpacity
-            style={[styles.paymentOption, paymentMethod === 'boleto' && styles.paymentSelected]}
+            style={[styles.paymentOption, { borderColor: theme.border }, paymentMethod === 'boleto' && paymentSelectedStyle]}
             onPress={() => setPaymentMethod('boleto')}
           >
             <View style={styles.paymentLeft}>
-              <Ionicons name="barcode-outline" size={24} color={colors.neutral[600]} />
+              <Ionicons name="barcode-outline" size={24} color={theme.textSecondary} />
               <View>
-                <Text style={styles.paymentLabel}>Boleto bancário</Text>
-                <Text style={styles.paymentDesc}>Aprovação em 1-3 dias úteis</Text>
+                <Text style={[styles.paymentLabel, { color: theme.text }]}>Boleto bancário</Text>
+                <Text style={[styles.paymentDesc, { color: theme.textSecondary }]}>Aprovação em 1-3 dias úteis</Text>
               </View>
             </View>
             <Ionicons
               name={paymentMethod === 'boleto' ? 'radio-button-on' : 'radio-button-off'}
               size={22}
-              color={paymentMethod === 'boleto' ? colors.primary[600] : colors.neutral[300]}
+              color={paymentMethod === 'boleto' ? colors.primary[600] : theme.textTertiary}
             />
           </TouchableOpacity>
         </View>
 
         {/* Installments (if credit card) */}
         {paymentMethod === 'credit_card' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Parcelas</Text>
+          <View style={[styles.section, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Parcelas</Text>
             {installmentOptions.map((n) => {
               const installmentAmount = total / n;
               return (
                 <TouchableOpacity
                   key={n}
-                  style={[styles.installmentOption, installments === n && styles.installmentSelected]}
+                  style={[styles.installmentOption, installments === n && installmentSelectedStyle]}
                   onPress={() => setInstallments(n)}
                 >
-                  <Text style={styles.installmentLabel}>
+                  <Text style={[styles.installmentLabel, { color: theme.text }]}>
                     {n}x de R$ {formatBrl(installmentAmount)}
                   </Text>
                   {n === 1 && <Text style={styles.installmentHint}>sem juros</Text>}
                   <Ionicons
                     name={installments === n ? 'radio-button-on' : 'radio-button-off'}
                     size={20}
-                    color={installments === n ? colors.primary[600] : colors.neutral[300]}
+                    color={installments === n ? colors.primary[600] : theme.textTertiary}
                   />
                 </TouchableOpacity>
               );
@@ -214,32 +224,32 @@ export default function CheckoutScreen() {
         )}
 
         {/* Summary */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Resumo do pedido</Text>
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Resumo do pedido</Text>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Item</Text>
-            <Text style={styles.summaryValue}>R$ {formatBrl(itemPrice)}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Item</Text>
+            <Text style={[styles.summaryValue, { color: theme.textSecondary }]}>R$ {formatBrl(itemPrice)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Frete</Text>
-            <Text style={styles.summaryValue}>R$ {formatBrl(shippingCost)}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Frete</Text>
+            <Text style={[styles.summaryValue, { color: theme.textSecondary }]}>R$ {formatBrl(shippingCost)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Proteção ao comprador</Text>
-            <Text style={styles.summaryValue}>R$ {formatBrl(buyerProtectionFee)}</Text>
+            <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Proteção ao comprador</Text>
+            <Text style={[styles.summaryValue, { color: theme.textSecondary }]}>R$ {formatBrl(buyerProtectionFee)}</Text>
           </View>
-          <View style={[styles.summaryRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>R$ {formatBrl(total)}</Text>
+          <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: theme.border }]}>
+            <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
+            <Text style={[styles.totalValue, { color: colors.primary[600] }]}>R$ {formatBrl(total)}</Text>
           </View>
         </View>
 
         {/* Buyer Protection Info */}
-        <View style={styles.protectionBanner}>
+        <View style={[styles.protectionBanner, { backgroundColor: colors.success[500] + '15' }]}>
           <Ionicons name="shield-checkmark" size={20} color={colors.success[600]} />
           <View style={styles.protectionInfo}>
-            <Text style={styles.protectionTitle}>Proteção ao comprador</Text>
-            <Text style={styles.protectionDesc}>
+            <Text style={[styles.protectionTitle, { color: colors.success[600] }]}>Proteção ao comprador</Text>
+            <Text style={[styles.protectionDesc, { color: theme.textSecondary }]}>
               Seu pagamento fica protegido. Se o item não chegar ou não for como descrito,
               você recebe o reembolso.
             </Text>
@@ -250,10 +260,13 @@ export default function CheckoutScreen() {
       </ScrollView>
 
       {/* Bottom Bar */}
-      <View style={styles.bottomBar}>
+      <View style={[
+        styles.bottomBar,
+        { backgroundColor: theme.card, borderTopColor: theme.border, paddingBottom: Math.max(insets.bottom, 12) },
+      ]}>
         <View style={styles.bottomTotal}>
-          <Text style={styles.bottomTotalLabel}>Total</Text>
-          <Text style={styles.bottomTotalValue}>
+          <Text style={[styles.bottomTotalLabel, { color: theme.textSecondary }]}>Total</Text>
+          <Text style={[styles.bottomTotalValue, { color: theme.text }]}>
             R$ {formatBrl(total)}
           </Text>
         </View>
@@ -277,34 +290,32 @@ export default function CheckoutScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   scroll: { flex: 1 },
   section: {
-    backgroundColor: colors.neutral[0],
     paddingHorizontal: 16, paddingVertical: 14,
     marginTop: 8,
   },
   sectionTitle: {
-    fontSize: 16, fontWeight: '600', color: colors.neutral[900], marginBottom: 12,
+    fontSize: 16, fontWeight: '600', marginBottom: 12,
   },
-  itemTitle: { fontSize: 15, color: colors.neutral[700] },
-  itemPrice: { fontSize: 18, fontWeight: '700', color: colors.neutral[900], marginTop: 4 },
+  itemTitle: { fontSize: 15 },
+  itemPrice: { fontSize: 18, fontWeight: '700', marginTop: 4 },
   addressCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 12, backgroundColor: colors.neutral[50], borderRadius: 10,
+    padding: 12, borderRadius: 10,
   },
   addressInfo: { flex: 1 },
-  addressLabel: { fontSize: 14, fontWeight: '600', color: colors.neutral[800] },
-  addressText: { fontSize: 13, color: colors.neutral[500], marginTop: 2 },
+  addressLabel: { fontSize: 14, fontWeight: '600' },
+  addressText: { fontSize: 13, marginTop: 2 },
   paymentOption: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 14, borderRadius: 10, borderWidth: 1, borderColor: colors.neutral[200],
+    padding: 14, borderRadius: 10, borderWidth: 1,
     marginBottom: 8,
   },
-  paymentSelected: { borderColor: colors.primary[400], backgroundColor: colors.primary[50] },
   paymentLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  paymentLabel: { fontSize: 15, fontWeight: '500', color: colors.neutral[800] },
-  paymentDesc: { fontSize: 12, color: colors.neutral[500], marginTop: 1 },
+  paymentLabel: { fontSize: 15, fontWeight: '500' },
+  paymentDesc: { fontSize: 12, marginTop: 1 },
   pixBadge: {
     backgroundColor: colors.pix, paddingHorizontal: 8, paddingVertical: 4,
     borderRadius: 6,
@@ -315,38 +326,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10, paddingHorizontal: 12,
     borderRadius: 8, marginBottom: 4,
   },
-  installmentSelected: { backgroundColor: colors.primary[50] },
-  installmentLabel: { fontSize: 14, color: colors.neutral[800] },
+  installmentLabel: { fontSize: 14 },
   installmentHint: { fontSize: 12, color: colors.success[600], fontWeight: '500' },
   summaryRow: {
     flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4,
   },
-  summaryLabel: { fontSize: 14, color: colors.neutral[500] },
-  summaryValue: { fontSize: 14, color: colors.neutral[700] },
+  summaryLabel: { fontSize: 14 },
+  summaryValue: { fontSize: 14 },
   totalRow: {
-    borderTopWidth: 1, borderTopColor: colors.neutral[200],
+    borderTopWidth: 1,
     marginTop: 8, paddingTop: 8,
   },
-  totalLabel: { fontSize: 16, fontWeight: '700', color: colors.neutral[900] },
-  totalValue: { fontSize: 16, fontWeight: '700', color: colors.primary[600] },
+  totalLabel: { fontSize: 16, fontWeight: '700' },
+  totalValue: { fontSize: 16, fontWeight: '700' },
   protectionBanner: {
     flexDirection: 'row', gap: 12, marginTop: 8,
-    backgroundColor: colors.success[500] + '10',
-    padding: 14, marginHorizontal: 0,
+    padding: 14,
   },
   protectionInfo: { flex: 1 },
-  protectionTitle: { fontSize: 14, fontWeight: '600', color: colors.success[600] },
-  protectionDesc: { fontSize: 12, color: colors.neutral[600], marginTop: 4, lineHeight: 18 },
+  protectionTitle: { fontSize: 14, fontWeight: '600' },
+  protectionDesc: { fontSize: 12, marginTop: 4, lineHeight: 18 },
   bottomBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12, paddingBottom: 28,
-    backgroundColor: colors.neutral[0],
-    borderTopWidth: 1, borderTopColor: colors.neutral[200],
+    paddingHorizontal: 16, paddingTop: 12,
+    borderTopWidth: 1,
   },
   bottomTotal: {},
-  bottomTotalLabel: { fontSize: 12, color: colors.neutral[500] },
-  bottomTotalValue: { fontSize: 18, fontWeight: '700', color: colors.neutral[900] },
+  bottomTotalLabel: { fontSize: 12 },
+  bottomTotalValue: { fontSize: 18, fontWeight: '700' },
   payButton: {
     backgroundColor: colors.primary[600], paddingHorizontal: 24, paddingVertical: 14,
     borderRadius: 12,
