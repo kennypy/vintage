@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 
 const PLANS = [
   { name: '1 dia', price: 'R$ 4,90', highlight: false },
@@ -9,27 +10,33 @@ const PLANS = [
 ];
 
 export default function BoostScreen() {
+  const { theme } = useTheme();
+
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.hero}>
+    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
+      <View style={[styles.hero, { backgroundColor: theme.card }]}>
         <View style={styles.iconCircle}>
           <Ionicons name="rocket" size={48} color={colors.primary[600]} />
         </View>
-        <Text style={styles.title}>Impulsionar anúncio</Text>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.title, { color: theme.text }]}>Impulsionar anúncio</Text>
+        <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
           Apareça no topo das buscas e receba muito mais visitas
         </Text>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Escolha o plano</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Escolha o plano</Text>
         {PLANS.map((plan) => (
           <TouchableOpacity
             key={plan.name}
-            style={[styles.planCard, plan.highlight && styles.planCardHighlight]}
+            style={[
+              styles.planCard,
+              { borderColor: theme.border, backgroundColor: theme.card },
+              plan.highlight && styles.planCardHighlight,
+            ]}
           >
             <View style={styles.planLeft}>
-              <Text style={[styles.planName, plan.highlight && styles.planNameHighlight]}>
+              <Text style={[styles.planName, { color: theme.text }, plan.highlight && styles.planNameHighlight]}>
                 {plan.name}
               </Text>
               {plan.tag && (
@@ -38,15 +45,15 @@ export default function BoostScreen() {
                 </View>
               )}
             </View>
-            <Text style={[styles.planPrice, plan.highlight && styles.planPriceHighlight]}>
+            <Text style={[styles.planPrice, { color: theme.text }, plan.highlight && styles.planPriceHighlight]}>
               {plan.price}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>O que você ganha</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>O que você ganha</Text>
         {[
           'Posição de destaque nas buscas',
           'Selo "Impulsionado" no anúncio',
@@ -55,7 +62,7 @@ export default function BoostScreen() {
         ].map((benefit) => (
           <View key={benefit} style={styles.benefit}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success[500]} />
-            <Text style={styles.benefitText}>{benefit}</Text>
+            <Text style={[styles.benefitText, { color: theme.textSecondary }]}>{benefit}</Text>
           </View>
         ))}
       </View>
@@ -69,36 +76,34 @@ export default function BoostScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
-  hero: { alignItems: 'center', padding: 32, backgroundColor: colors.neutral[0] },
+  container: { flex: 1 },
+  hero: { alignItems: 'center', padding: 32 },
   iconCircle: {
     width: 96, height: 96, borderRadius: 48,
     backgroundColor: colors.primary[50], justifyContent: 'center', alignItems: 'center',
     marginBottom: 16,
   },
-  title: { fontSize: 26, fontWeight: '700', color: colors.neutral[900] },
-  subtitle: { fontSize: 15, color: colors.neutral[500], textAlign: 'center', marginTop: 12, lineHeight: 22 },
-  section: { backgroundColor: colors.neutral[0], marginTop: 12, padding: 20 },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: colors.neutral[900], marginBottom: 16 },
+  title: { fontSize: 26, fontWeight: '700' },
+  subtitle: { fontSize: 15, textAlign: 'center', marginTop: 12, lineHeight: 22 },
+  section: { marginTop: 12, padding: 20 },
+  sectionTitle: { fontSize: 17, fontWeight: '700', marginBottom: 16 },
   planCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    borderWidth: 1.5, borderColor: colors.neutral[200], borderRadius: 12,
-    padding: 16, marginBottom: 10, backgroundColor: colors.neutral[0],
+    borderWidth: 1.5, borderRadius: 12,
+    padding: 16, marginBottom: 10,
   },
-  planCardHighlight: {
-    borderColor: colors.primary[500], backgroundColor: colors.primary[50],
-  },
+  planCardHighlight: { borderColor: colors.primary[500], backgroundColor: colors.primary[50] },
   planLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  planName: { fontSize: 16, fontWeight: '600', color: colors.neutral[800] },
+  planName: { fontSize: 16, fontWeight: '600' },
   planNameHighlight: { color: colors.primary[700] },
   planTag: {
     backgroundColor: colors.primary[500], paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
   },
   planTagText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  planPrice: { fontSize: 16, fontWeight: '700', color: colors.neutral[900] },
+  planPrice: { fontSize: 16, fontWeight: '700' },
   planPriceHighlight: { color: colors.primary[600] },
   benefit: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  benefitText: { fontSize: 14, color: colors.neutral[700] },
+  benefitText: { fontSize: 14 },
   ctaButton: {
     margin: 20, backgroundColor: colors.primary[600],
     paddingVertical: 16, borderRadius: 12, alignItems: 'center',

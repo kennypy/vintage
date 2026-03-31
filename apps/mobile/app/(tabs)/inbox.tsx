@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
 import { getAllDemoConversations } from '../../src/services/demoStore';
@@ -23,6 +24,7 @@ function formatTimeAgo(dateString: string): string {
 
 export default function InboxScreen() {
   const router = useRouter();
+  const { theme } = useTheme();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,7 +34,6 @@ export default function InboxScreen() {
       const response = await getConversations();
       setConversations(response.items);
     } catch (_error) {
-      // API unavailable — show demo conversations
       setConversations(getAllDemoConversations());
     } finally {
       setLoading(false);
@@ -43,7 +44,6 @@ export default function InboxScreen() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Refresh when tab focused so new conversations from listing detail appear
   useFocusEffect(
     useCallback(() => {
       fetchConversations();
@@ -62,32 +62,26 @@ export default function InboxScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={styles.conversationItem}
+            style={[styles.conversationItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
             onPress={() => handleConversationPress(item)}
           >
             <View style={styles.avatar}>
-              {item.participant.avatarUrl ? (
-                <View style={styles.avatarPlaceholder}>
-                  <Ionicons name="person" size={20} color={colors.neutral[400]} />
-                </View>
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Ionicons name="person" size={20} color={colors.neutral[400]} />
-                </View>
-              )}
+              <View style={[styles.avatarPlaceholder, { backgroundColor: theme.inputBg }]}>
+                <Ionicons name="person" size={20} color={theme.textTertiary} />
+              </View>
               {item.unreadCount > 0 && (
                 <View style={styles.unreadBadge}>
                   <Text style={styles.unreadText}>{item.unreadCount}</Text>
@@ -96,16 +90,16 @@ export default function InboxScreen() {
             </View>
             <View style={styles.conversationContent}>
               <View style={styles.conversationHeader}>
-                <Text style={[styles.participantName, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
+                <Text style={[styles.participantName, { color: theme.text }, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
                   {item.participant.name}
                 </Text>
-                <Text style={styles.timeText}>{formatTimeAgo(item.lastMessageAt)}</Text>
+                <Text style={[styles.timeText, { color: theme.textTertiary }]}>{formatTimeAgo(item.lastMessageAt)}</Text>
               </View>
               <Text style={styles.listingTitle} numberOfLines={1}>
                 {item.listingTitle}
               </Text>
               <Text
-                style={[styles.lastMessage, item.unreadCount > 0 && styles.unreadMessage]}
+                style={[styles.lastMessage, { color: theme.textSecondary }, item.unreadCount > 0 && styles.unreadMessage]}
                 numberOfLines={1}
               >
                 {item.lastMessage}
@@ -118,9 +112,9 @@ export default function InboxScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={64} color={colors.neutral[300]} />
-            <Text style={styles.emptyTitle}>Nenhuma mensagem</Text>
-            <Text style={styles.emptyText}>
+            <Ionicons name="chatbubbles-outline" size={64} color={theme.textTertiary} />
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma mensagem</Text>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
               Suas conversas com compradores e vendedores aparecerão aqui.
             </Text>
           </View>
@@ -131,17 +125,15 @@ export default function InboxScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   conversationItem: {
     flexDirection: 'row', alignItems: 'center', padding: 14,
-    backgroundColor: colors.neutral[0],
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.neutral[200],
   },
   avatar: { position: 'relative', marginRight: 12 },
   avatarPlaceholder: {
-    width: 48, height: 48, borderRadius: 24, backgroundColor: colors.neutral[100],
+    width: 48, height: 48, borderRadius: 24,
     justifyContent: 'center', alignItems: 'center',
   },
   unreadBadge: {
@@ -153,29 +145,16 @@ const styles = StyleSheet.create({
   unreadText: { color: colors.neutral[0], fontSize: 11, fontWeight: '700' },
   conversationContent: { flex: 1 },
   conversationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  participantName: { fontSize: 15, fontWeight: '500', color: colors.neutral[800], flex: 1 },
+  participantName: { fontSize: 15, fontWeight: '500', flex: 1 },
   unreadName: { fontWeight: '700' },
-  timeText: { fontSize: 12, color: colors.neutral[400], marginLeft: 8 },
+  timeText: { fontSize: 12, marginLeft: 8 },
   listingTitle: { fontSize: 12, color: colors.primary[600], marginTop: 2 },
-  lastMessage: { fontSize: 13, color: colors.neutral[500], marginTop: 2 },
-  unreadMessage: { fontWeight: '600', color: colors.neutral[700] },
+  lastMessage: { fontSize: 13, marginTop: 2 },
+  unreadMessage: { fontWeight: '600' },
   empty: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingTop: 120,
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 32, paddingTop: 120,
   },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.neutral[900],
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.neutral[400],
-    textAlign: 'center',
-  },
+  emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16, marginBottom: 8 },
+  emptyText: { fontSize: 14, textAlign: 'center' },
 });

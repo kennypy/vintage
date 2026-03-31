@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { getOffers, acceptOffer, rejectOffer } from '../../src/services/offers';
 import type { Offer } from '../../src/services/offers';
 
@@ -23,6 +24,7 @@ const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function OffersScreen() {
+  const { theme } = useTheme();
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,20 +97,20 @@ export default function OffersScreen() {
   };
 
   const renderOffer = ({ item }: { item: Offer }) => (
-    <View style={styles.offerCard}>
+    <View style={[styles.offerCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.offerHeader}>
         <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] ?? colors.neutral[400]) + '20' }]}>
           <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] ?? colors.neutral[400] }]}>
             {STATUS_LABELS[item.status] ?? item.status}
           </Text>
         </View>
-        <Text style={styles.offerDate}>
+        <Text style={[styles.offerDate, { color: theme.textTertiary }]}>
           {new Date(item.createdAt).toLocaleDateString('pt-BR')}
         </Text>
       </View>
-      <Text style={styles.offerListing} numberOfLines={1}>{item.listingTitle}</Text>
+      <Text style={[styles.offerListing, { color: theme.text }]} numberOfLines={1}>{item.listingTitle}</Text>
       <Text style={styles.offerAmount}>R$ {formatBrl(item.amountBrl)}</Text>
-      <Text style={styles.offerFrom}>
+      <Text style={[styles.offerFrom, { color: theme.textSecondary }]}>
         {activeTab === 'received'
           ? `De: ${item.buyer.name}`
           : `Para: ${item.seller.name}`}
@@ -134,14 +136,14 @@ export default function OffersScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Tabs */}
-      <View style={styles.tabs}>
+      <View style={[styles.tabs, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'received' && styles.tabActive]}
           onPress={() => setActiveTab('received')}
         >
-          <Text style={[styles.tabText, activeTab === 'received' && styles.tabTextActive]}>
+          <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'received' && styles.tabTextActive]}>
             Recebidas
           </Text>
         </TouchableOpacity>
@@ -149,7 +151,7 @@ export default function OffersScreen() {
           style={[styles.tab, activeTab === 'sent' && styles.tabActive]}
           onPress={() => setActiveTab('sent')}
         >
-          <Text style={[styles.tabText, activeTab === 'sent' && styles.tabTextActive]}>
+          <Text style={[styles.tabText, { color: theme.textSecondary }, activeTab === 'sent' && styles.tabTextActive]}>
             Enviadas
           </Text>
         </TouchableOpacity>
@@ -170,9 +172,9 @@ export default function OffersScreen() {
           }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="pricetags-outline" size={64} color={colors.neutral[300]} />
-              <Text style={styles.emptyTitle}>Nenhuma oferta</Text>
-              <Text style={styles.emptyText}>
+              <Ionicons name="pricetags-outline" size={64} color={theme.textTertiary} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma oferta</Text>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
                 {activeTab === 'received'
                   ? 'Ofertas recebidas aparecerão aqui.'
                   : 'Ofertas enviadas aparecerão aqui.'}
@@ -186,23 +188,23 @@ export default function OffersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabs: {
-    flexDirection: 'row', backgroundColor: colors.neutral[0],
-    borderBottomWidth: 1, borderBottomColor: colors.neutral[200],
+    flexDirection: 'row',
+    borderBottomWidth: 1,
   },
   tab: {
     flex: 1, paddingVertical: 14, alignItems: 'center',
     borderBottomWidth: 2, borderBottomColor: 'transparent',
   },
   tabActive: { borderBottomColor: colors.primary[600] },
-  tabText: { fontSize: 15, fontWeight: '500', color: colors.neutral[500] },
+  tabText: { fontSize: 15, fontWeight: '500' },
   tabTextActive: { color: colors.primary[600], fontWeight: '600' },
   list: { padding: 12 },
   offerCard: {
-    backgroundColor: colors.neutral[0], borderRadius: 12, padding: 14,
-    marginBottom: 10, borderWidth: 1, borderColor: colors.neutral[200],
+    borderRadius: 12, padding: 14,
+    marginBottom: 10, borderWidth: 1,
   },
   offerHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -210,10 +212,10 @@ const styles = StyleSheet.create({
   },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   statusText: { fontSize: 12, fontWeight: '600' },
-  offerDate: { fontSize: 12, color: colors.neutral[400] },
-  offerListing: { fontSize: 14, fontWeight: '500', color: colors.neutral[800] },
+  offerDate: { fontSize: 12 },
+  offerListing: { fontSize: 14, fontWeight: '500' },
   offerAmount: { fontSize: 18, fontWeight: '700', color: colors.primary[600], marginTop: 4 },
-  offerFrom: { fontSize: 13, color: colors.neutral[500], marginTop: 4 },
+  offerFrom: { fontSize: 13, marginTop: 4 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   rejectButton: {
     flex: 1, paddingVertical: 10, borderRadius: 10,
@@ -226,6 +228,6 @@ const styles = StyleSheet.create({
   },
   acceptText: { fontSize: 14, fontWeight: '600', color: colors.neutral[0] },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginTop: 16 },
-  emptyText: { fontSize: 14, color: colors.neutral[400], marginTop: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptyText: { fontSize: 14, marginTop: 4 },
 });

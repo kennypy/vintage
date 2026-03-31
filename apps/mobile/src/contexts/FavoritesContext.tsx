@@ -52,7 +52,7 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const isFavorited = useCallback((id: string) => favRef.current.has(id), []);
+  const isFavorited = useCallback((id: string) => favorites.has(id), [favorites]);
 
   const toggleFavorite = useCallback(async (id: string) => {
     const wasFaved = favRef.current.has(id);

@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { getNotifications, markRead, markAllRead } from '../../src/services/notifications';
 import type { AppNotification } from '../../src/services/notifications';
 
@@ -29,6 +30,7 @@ function formatTimeAgo(dateString: string): string {
 }
 
 export default function NotificationsScreen() {
+  const { theme } = useTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,17 +84,19 @@ export default function NotificationsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header Actions */}
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       {unreadCount > 0 && (
-        <TouchableOpacity style={styles.markAllButton} onPress={handleMarkAllRead}>
+        <TouchableOpacity
+          style={[styles.markAllButton, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
+          onPress={handleMarkAllRead}
+        >
           <Text style={styles.markAllText}>Marcar todas como lidas</Text>
         </TouchableOpacity>
       )}
@@ -102,24 +106,30 @@ export default function NotificationsScreen() {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={[styles.notificationItem, !item.read && styles.notificationUnread]}
+            style={[
+              styles.notificationItem,
+              { backgroundColor: item.read ? theme.card : colors.primary[50] + '50', borderBottomColor: theme.border },
+            ]}
             onPress={() => handleNotificationPress(item)}
           >
-            <View style={[styles.iconContainer, !item.read && styles.iconContainerUnread]}>
+            <View style={[
+              styles.iconContainer,
+              { backgroundColor: !item.read ? colors.primary[100] : theme.inputBg },
+            ]}>
               <Ionicons
                 name={(NOTIFICATION_ICONS[item.type] ?? 'notifications-outline') as any}
                 size={22}
-                color={!item.read ? colors.primary[600] : colors.neutral[400]}
+                color={!item.read ? colors.primary[600] : theme.textTertiary}
               />
             </View>
             <View style={styles.notificationContent}>
-              <Text style={[styles.notificationTitle, !item.read && styles.notificationTitleUnread]}>
+              <Text style={[styles.notificationTitle, { color: theme.text }, !item.read && styles.notificationTitleUnread]}>
                 {item.title}
               </Text>
-              <Text style={styles.notificationBody} numberOfLines={2}>
+              <Text style={[styles.notificationBody, { color: theme.textSecondary }]} numberOfLines={2}>
                 {item.body}
               </Text>
-              <Text style={styles.notificationTime}>{formatTimeAgo(item.createdAt)}</Text>
+              <Text style={[styles.notificationTime, { color: theme.textTertiary }]}>{formatTimeAgo(item.createdAt)}</Text>
             </View>
             {!item.read && <View style={styles.unreadDot} />}
           </TouchableOpacity>
@@ -129,9 +139,9 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="notifications-off-outline" size={64} color={colors.neutral[300]} />
-            <Text style={styles.emptyTitle}>Nenhuma notificação</Text>
-            <Text style={styles.emptyText}>
+            <Ionicons name="notifications-off-outline" size={64} color={theme.textTertiary} />
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma notificação</Text>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
               Suas notificações aparecerão aqui.
             </Text>
           </View>
@@ -142,37 +152,31 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   markAllButton: {
     paddingVertical: 10, paddingHorizontal: 16,
-    backgroundColor: colors.neutral[0],
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.neutral[200],
-    alignItems: 'flex-end',
+    borderBottomWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end',
   },
   markAllText: { fontSize: 14, color: colors.primary[600], fontWeight: '500' },
   notificationItem: {
     flexDirection: 'row', alignItems: 'center', padding: 14,
-    backgroundColor: colors.neutral[0],
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.neutral[200],
   },
-  notificationUnread: { backgroundColor: colors.primary[50] + '50' },
   iconContainer: {
-    width: 44, height: 44, borderRadius: 22, backgroundColor: colors.neutral[100],
+    width: 44, height: 44, borderRadius: 22,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
-  iconContainerUnread: { backgroundColor: colors.primary[100] },
   notificationContent: { flex: 1 },
-  notificationTitle: { fontSize: 14, fontWeight: '500', color: colors.neutral[800] },
+  notificationTitle: { fontSize: 14, fontWeight: '500' },
   notificationTitleUnread: { fontWeight: '700' },
-  notificationBody: { fontSize: 13, color: colors.neutral[500], marginTop: 2, lineHeight: 18 },
-  notificationTime: { fontSize: 12, color: colors.neutral[400], marginTop: 4 },
+  notificationBody: { fontSize: 13, marginTop: 2, lineHeight: 18 },
+  notificationTime: { fontSize: 12, marginTop: 4 },
   unreadDot: {
     width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary[600],
     marginLeft: 8,
   },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginTop: 16 },
-  emptyText: { fontSize: 14, color: colors.neutral[400], marginTop: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptyText: { fontSize: 14, marginTop: 4 },
 });

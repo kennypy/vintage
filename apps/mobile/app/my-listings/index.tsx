@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { EmptyState } from '../../src/components/EmptyState';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getUserListings } from '../../src/services/users';
@@ -51,6 +52,7 @@ const FILTER_TABS: { key: StatusFilter; label: string }[] = [
 export default function MyListingsScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [listings, setListings] = useState<MyListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -62,7 +64,6 @@ export default function MyListingsScreen() {
       const data = await getUserListings(user.id);
       setListings(data.items as unknown as MyListing[]);
     } catch (_error) {
-      // API unavailable — fall back to demo store listings for this user
       const demoItems = getUserDemoListings(user.id).map((l) => ({
         id: l.id,
         title: l.title,
@@ -125,26 +126,26 @@ export default function MyListingsScreen() {
     const imageUrl = item.images?.sort((a, b) => a.position - b.position)[0]?.url;
 
     return (
-      <View style={styles.listingCard}>
+      <View style={[styles.listingCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <View style={styles.listingRow}>
           {imageUrl ? (
             <Image source={{ uri: imageUrl }} style={styles.thumbnail} />
           ) : (
-            <View style={[styles.thumbnail, styles.thumbnailPlaceholder]}>
-              <Ionicons name="image-outline" size={24} color={colors.neutral[400]} />
+            <View style={[styles.thumbnail, styles.thumbnailPlaceholder, { backgroundColor: theme.inputBg }]}>
+              <Ionicons name="image-outline" size={24} color={theme.textTertiary} />
             </View>
           )}
           <View style={styles.listingInfo}>
-            <Text style={styles.listingTitle} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.listingPrice}>{formatPrice(item.priceBrl)}</Text>
+            <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={2}>{item.title}</Text>
+            <Text style={[styles.listingPrice, { color: theme.text }]}>{formatPrice(item.priceBrl)}</Text>
             <View style={styles.statsRow}>
               <View style={styles.stat}>
-                <Ionicons name="eye-outline" size={14} color={colors.neutral[500]} />
-                <Text style={styles.statText}>{item.viewCount}</Text>
+                <Ionicons name="eye-outline" size={14} color={theme.textSecondary} />
+                <Text style={[styles.statText, { color: theme.textSecondary }]}>{item.viewCount}</Text>
               </View>
               <View style={styles.stat}>
-                <Ionicons name="heart-outline" size={14} color={colors.neutral[500]} />
-                <Text style={styles.statText}>{item.favoriteCount}</Text>
+                <Ionicons name="heart-outline" size={14} color={theme.textSecondary} />
+                <Text style={[styles.statText, { color: theme.textSecondary }]}>{item.favoriteCount}</Text>
               </View>
             </View>
           </View>
@@ -176,22 +177,22 @@ export default function MyListingsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.filterBar}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.filterBar, { borderBottomColor: theme.border }]}>
         {FILTER_TABS.map((tab) => (
           <TouchableOpacity
             key={tab.key}
-            style={[styles.filterTab, filter === tab.key && styles.filterTabActive]}
+            style={[styles.filterTab, { backgroundColor: theme.inputBg }, filter === tab.key && styles.filterTabActive]}
             onPress={() => setFilter(tab.key)}
           >
-            <Text style={[styles.filterTabText, filter === tab.key && styles.filterTabTextActive]}>
+            <Text style={[styles.filterTabText, { color: theme.textSecondary }, filter === tab.key && styles.filterTabTextActive]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -222,114 +223,37 @@ export default function MyListingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   filterBar: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12, gap: 8,
     borderBottomWidth: 1,
-    borderBottomColor: colors.neutral[200],
   },
   filterTab: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: colors.neutral[100],
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
   },
-  filterTabActive: {
-    backgroundColor: colors.primary[500],
-  },
-  filterTabText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.neutral[600],
-  },
-  filterTabTextActive: {
-    color: '#ffffff',
-  },
-  list: {
-    padding: 16,
-  },
+  filterTabActive: { backgroundColor: colors.primary[500] },
+  filterTabText: { fontSize: 13, fontWeight: '500' },
+  filterTabTextActive: { color: '#ffffff' },
+  list: { padding: 16 },
   listingCard: {
-    backgroundColor: colors.neutral[50],
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: colors.neutral[200],
+    borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1,
   },
-  listingRow: {
-    flexDirection: 'row',
-  },
+  listingRow: { flexDirection: 'row' },
   thumbnail: {
-    width: 72,
-    height: 90,
-    borderRadius: 8,
-    backgroundColor: colors.neutral[200],
+    width: 72, height: 90, borderRadius: 8,
   },
-  thumbnailPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listingInfo: {
-    flex: 1,
-    marginLeft: 12,
-    justifyContent: 'center',
-  },
-  listingTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.neutral[800],
-    lineHeight: 18,
-  },
-  listingPrice: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.neutral[900],
-    marginTop: 4,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 6,
-  },
-  stat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  statText: {
-    fontSize: 12,
-    color: colors.neutral[500],
-  },
-  rightColumn: {
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginLeft: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    padding: 6,
-  },
+  thumbnailPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  listingInfo: { flex: 1, marginLeft: 12, justifyContent: 'center' },
+  listingTitle: { fontSize: 14, fontWeight: '500', lineHeight: 18 },
+  listingPrice: { fontSize: 16, fontWeight: '700', marginTop: 4 },
+  statsRow: { flexDirection: 'row', gap: 12, marginTop: 6 },
+  stat: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  statText: { fontSize: 12 },
+  rightColumn: { alignItems: 'flex-end', justifyContent: 'space-between', marginLeft: 8 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusText: { fontSize: 12, fontWeight: '600' },
+  actions: { flexDirection: 'row', gap: 8 },
+  actionButton: { padding: 6 },
 });
