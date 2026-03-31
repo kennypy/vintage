@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -79,17 +79,24 @@ export default function SellerProfileScreen() {
 
   const handleFollowToggle = async () => {
     if (!profile) return;
+    // Optimistic update — flip state immediately so the button responds instantly
+    const wasFollowing = profile.isFollowing;
+    const optimisticProfile = {
+      ...profile,
+      isFollowing: !wasFollowing,
+      followerCount: wasFollowing ? profile.followerCount - 1 : profile.followerCount + 1,
+    };
+    setProfile(optimisticProfile);
     setFollowLoading(true);
     try {
-      if (profile.isFollowing) {
+      if (wasFollowing) {
         await unfollowUser(profile.id);
-        setProfile({ ...profile, isFollowing: false, followerCount: profile.followerCount - 1 });
       } else {
         await followUser(profile.id);
-        setProfile({ ...profile, isFollowing: true, followerCount: profile.followerCount + 1 });
       }
     } catch (_error) {
-      // Silently fail
+      // API failed — revert to original state
+      setProfile(profile);
     } finally {
       setFollowLoading(false);
     }
@@ -136,15 +143,21 @@ export default function SellerProfileScreen() {
           <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Anúncios</Text>
         </View>
         <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-        <View style={styles.stat}>
+        <TouchableOpacity
+          style={styles.stat}
+          onPress={() => Alert.alert('Seguidores', `${profile.name} tem ${profile.followerCount} seguidores.`)}
+        >
           <Text style={[styles.statNumber, { color: theme.text }]}>{profile.followerCount}</Text>
           <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguidores</Text>
-        </View>
+        </TouchableOpacity>
         <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-        <View style={styles.stat}>
+        <TouchableOpacity
+          style={styles.stat}
+          onPress={() => Alert.alert('Seguindo', `${profile.name} segue ${profile.followingCount} pessoas.`)}
+        >
           <Text style={[styles.statNumber, { color: theme.text }]}>{profile.followingCount}</Text>
           <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Seguindo</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Follow Button */}

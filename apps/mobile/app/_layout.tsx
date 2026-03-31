@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
@@ -8,13 +8,25 @@ import {
   ThemeProvider as NavThemeProvider,
 } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
-import { AuthProvider } from '../src/contexts/AuthContext';
+import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
   const { theme, fullScreen } = useTheme();
+  const { isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+  const segments = useSegments();
+
+  // Global auth guard — redirect to login whenever a non-auth screen is accessed without a session
+  useEffect(() => {
+    if (isLoading) return;
+    const inAuthGroup = segments[0] === '(auth)';
+    if (!isAuthenticated && !inAuthGroup) {
+      router.replace('/(auth)/login');
+    }
+  }, [isAuthenticated, isLoading, segments, router]);
 
   // Apply full-screen (hide Android navigation bar) when preference is set
   useEffect(() => {

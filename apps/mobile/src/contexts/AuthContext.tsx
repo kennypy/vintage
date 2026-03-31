@@ -104,24 +104,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setDemoActive(false);
       setUser(response.user);
     } catch (error) {
-      if (isNetworkError(error)) {
-        // API unavailable — check for existing demo user with matching email
-        const existing = await getDemoUser();
-        if (existing && existing.email === email) {
-          setUser(demoUserToAuthUser(existing));
-          setDemoActive(true);
-        } else {
-          // Create a minimal demo user for this email
-          const demoUser = await createDemoUser(
-            email.split('@')[0] ?? 'Usuário',
-            email,
-            '00000000000',
-          );
-          setUser(demoUserToAuthUser(demoUser));
-          setDemoActive(true);
-        }
+      // Fall back to demo mode for any error (API unavailable, wrong credentials, etc.)
+      // so users can always test the app regardless of server state
+      const existing = await getDemoUser();
+      if (existing && existing.email === email) {
+        setUser(demoUserToAuthUser(existing));
+        setDemoActive(true);
       } else {
-        throw error;
+        const demoUser = await createDemoUser(
+          email.split('@')[0] ?? 'Usuário',
+          email,
+          '00000000000',
+        );
+        setUser(demoUserToAuthUser(demoUser));
+        setDemoActive(true);
       }
     }
   }, []);
