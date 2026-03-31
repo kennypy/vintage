@@ -75,6 +75,30 @@ export default function RootLayout() {
           name="reviews/write"
           options={{ title: 'Escrever avaliação', presentation: 'modal' }}
         />
+        <Stack.Screen
+          name="promotions/megaphone"
+          options={{ title: 'Megafone' }}
+        />
+        <Stack.Screen
+          name="promotions/boost"
+          options={{ title: 'Impulsionar anúncio' }}
+        />
+        <Stack.Screen
+          name="promotions/highlight"
+          options={{ title: 'Destaque da loja' }}
+        />
+        <Stack.Screen
+          name="conta/verificacao"
+          options={{ title: 'Verificação' }}
+        />
+        <Stack.Screen
+          name="conta/configuracoes"
+          options={{ title: 'Configurações' }}
+        />
+        <Stack.Screen
+          name="conta/ajuda"
+          options={{ title: 'Ajuda' }}
+        />
       </Stack>
     </AuthProvider>
   );

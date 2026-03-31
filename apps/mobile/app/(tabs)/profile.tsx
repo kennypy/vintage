@@ -131,9 +131,9 @@ export default function ProfileScreen() {
 
       <View style={styles.menuSection}>
         <Text style={styles.menuSectionTitle}>Promoções</Text>
-        <MenuItem icon="megaphone-outline" label="Megafone" badge="Grátis" />
-        <MenuItem icon="rocket-outline" label="Impulsionar anúncio" />
-        <MenuItem icon="sparkles-outline" label="Destaque da loja" />
+        <MenuItem icon="megaphone-outline" label="Megafone" badge="Grátis" onPress={() => router.push('/promotions/megaphone')} />
+        <MenuItem icon="rocket-outline" label="Impulsionar anúncio" onPress={() => router.push('/promotions/boost')} />
+        <MenuItem icon="sparkles-outline" label="Destaque da loja" onPress={() => router.push('/promotions/highlight')} />
       </View>
 
       <View style={styles.menuSection}>
@@ -149,9 +149,9 @@ export default function ProfileScreen() {
         </View>
         <MenuItem icon="notifications-outline" label="Notificações" onPress={() => router.push('/notifications')} />
         <MenuItem icon="location-outline" label="Endereços" onPress={() => router.push('/addresses')} />
-        <MenuItem icon="shield-checkmark-outline" label="Verificação" />
-        <MenuItem icon="settings-outline" label="Configurações" />
-        <MenuItem icon="help-circle-outline" label="Ajuda" />
+        <MenuItem icon="shield-checkmark-outline" label="Verificação" onPress={() => router.push('/conta/verificacao')} />
+        <MenuItem icon="settings-outline" label="Configurações" onPress={() => router.push('/conta/configuracoes')} />
+        <MenuItem icon="help-circle-outline" label="Ajuda" onPress={() => router.push('/conta/ajuda')} />
       </View>
 
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>

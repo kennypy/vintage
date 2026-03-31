@@ -10,6 +10,7 @@ import { colors } from '../../src/theme/colors';
 import { createListing, getCategories } from '../../src/services/listings';
 import type { Category } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
@@ -23,6 +24,7 @@ const SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
 
 export default function SellScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [photos, setPhotos] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -120,7 +122,7 @@ export default function SellScreen() {
           category: selectedCategory || 'Outros',
           color: undefined,
           images: photoUrls.map((url, i) => ({ id: `img-${i}`, url, order: i })),
-          seller: { id: 'demo-user', name: 'Você (Demo)' },
+          seller: { id: user?.id ?? 'demo-user', name: user?.name ?? 'Você (Demo)' },
           isFavorited: false,
           viewCount: 0,
           createdAt: new Date().toISOString(),

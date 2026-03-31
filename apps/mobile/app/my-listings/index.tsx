@@ -17,6 +17,7 @@ import { EmptyState } from '../../src/components/EmptyState';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getUserListings } from '../../src/services/users';
 import { deleteListing } from '../../src/services/listings';
+import { getUserDemoListings } from '../../src/services/demoStore';
 
 type StatusFilter = 'all' | 'ACTIVE' | 'PAUSED' | 'SOLD';
 
@@ -61,7 +62,20 @@ export default function MyListingsScreen() {
       const data = await getUserListings(user.id);
       setListings(data.items as unknown as MyListing[]);
     } catch (_error) {
-      // silently fail
+      // API unavailable — fall back to demo store listings for this user
+      const demoItems = getUserDemoListings(user.id).map((l) => ({
+        id: l.id,
+        title: l.title,
+        priceBrl: l.priceBrl,
+        status: 'ACTIVE',
+        images: l.images.map((img) => ({ url: img.url, position: img.order })),
+        condition: l.condition,
+        size: l.size,
+        createdAt: l.createdAt,
+        favoriteCount: 0,
+        viewCount: l.viewCount,
+      }));
+      setListings(demoItems);
     } finally {
       setLoading(false);
       setRefreshing(false);
