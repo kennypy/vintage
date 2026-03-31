@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Linking } from 'react-native';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
@@ -121,22 +121,34 @@ export default function ConfiguracoesScreen() {
 
       <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Privacidade</Text>
-        <TouchableOpacity style={[styles.row, { borderBottomColor: theme.divider }]}>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => Alert.alert('Alterar senha', 'Em breve você poderá alterar sua senha por aqui.')}
+        >
           <Ionicons name="lock-closed-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Alterar senha</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.row, { borderBottomColor: theme.divider }]}>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => Alert.alert('Perfil privado', 'Em breve você poderá tornar seu perfil privado.')}
+        >
           <Ionicons name="eye-off-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Perfil privado</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.row, { borderBottomColor: theme.divider }]}>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => Linking.openURL('https://vintage.br/termos')}
+        >
           <Ionicons name="document-text-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Termos de uso</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.row, { borderBottomColor: theme.divider }]}>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => Linking.openURL('https://vintage.br/privacidade')}
+        >
           <Ionicons name="shield-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Política de privacidade</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />

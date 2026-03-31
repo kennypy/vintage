@@ -2,6 +2,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { getBalance, getTransactions, requestPayout } from '../../src/services/wallet';
 import type { WalletBalance, WalletTransaction } from '../../src/services/wallet';
 
@@ -37,6 +38,7 @@ const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function WalletScreen() {
+  const { theme } = useTheme();
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,14 +121,14 @@ export default function WalletScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Balance Card */}
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>Saldo disponivel</Text>
@@ -138,22 +140,19 @@ export default function WalletScreen() {
             R$ {formatBrl(balance?.pendingBrl ?? 0)} pendente
           </Text>
         )}
-        <TouchableOpacity
-          style={styles.payoutButton}
-          onPress={openPayoutModal}
-        >
+        <TouchableOpacity style={styles.payoutButton} onPress={openPayoutModal}>
           <Ionicons name="arrow-up-circle-outline" size={20} color={colors.neutral[0]} />
           <Text style={styles.payoutText}>Sacar via PIX</Text>
         </TouchableOpacity>
       </View>
 
       {/* Transactions */}
-      <Text style={styles.sectionTitle}>Historico</Text>
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>Historico</Text>
       <FlatList
         data={transactions}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <View style={styles.transactionItem}>
+          <View style={[styles.transactionItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
             <View style={[styles.transactionIcon, { backgroundColor: (TRANSACTION_COLORS[item.type] ?? colors.neutral[400]) + '15' }]}>
               <Ionicons
                 name={(TRANSACTION_ICONS[item.type] ?? 'cash-outline') as any}
@@ -162,8 +161,8 @@ export default function WalletScreen() {
               />
             </View>
             <View style={styles.transactionInfo}>
-              <Text style={styles.transactionDesc} numberOfLines={1}>{item.description}</Text>
-              <Text style={styles.transactionMeta}>
+              <Text style={[styles.transactionDesc, { color: theme.text }]} numberOfLines={1}>{item.description}</Text>
+              <Text style={[styles.transactionMeta, { color: theme.textSecondary }]}>
                 {STATUS_LABELS[item.status] ?? item.status} - {new Date(item.createdAt).toLocaleDateString('pt-BR')}
               </Text>
             </View>
@@ -180,9 +179,9 @@ export default function WalletScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="wallet-outline" size={64} color={colors.neutral[300]} />
-            <Text style={styles.emptyTitle}>Nenhuma transacao</Text>
-            <Text style={styles.emptyText}>
+            <Ionicons name="wallet-outline" size={64} color={theme.textTertiary} />
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma transacao</Text>
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
               Seu historico de transacoes aparecera aqui.
             </Text>
           </View>
@@ -197,28 +196,29 @@ export default function WalletScreen() {
         onRequestClose={() => setPayoutModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Sacar via PIX</Text>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Sacar via PIX</Text>
               <TouchableOpacity onPress={() => setPayoutModalVisible(false)}>
-                <Ionicons name="close" size={24} color={colors.neutral[600]} />
+                <Ionicons name="close" size={24} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            {/* PIX Key Type Selector */}
-            <Text style={styles.inputLabel}>Tipo de chave PIX</Text>
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Tipo de chave PIX</Text>
             <View style={styles.pixTypeRow}>
               {PIX_KEY_TYPES.map((type) => (
                 <TouchableOpacity
                   key={type.value}
                   style={[
                     styles.pixTypeChip,
+                    { borderColor: theme.border, backgroundColor: theme.card },
                     pixKeyType === type.value && styles.pixTypeChipActive,
                   ]}
                   onPress={() => setPixKeyType(type.value)}
                 >
                   <Text style={[
                     styles.pixTypeText,
+                    { color: theme.textSecondary },
                     pixKeyType === type.value && styles.pixTypeTextActive,
                   ]}>
                     {type.label}
@@ -227,33 +227,30 @@ export default function WalletScreen() {
               ))}
             </View>
 
-            {/* PIX Key Input */}
-            <Text style={styles.inputLabel}>Chave PIX</Text>
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Chave PIX</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
               value={pixKey}
               onChangeText={setPixKey}
               placeholder="Informe sua chave PIX"
-              placeholderTextColor={colors.neutral[400]}
+              placeholderTextColor={theme.textTertiary}
               autoCapitalize="none"
               autoCorrect={false}
             />
 
-            {/* Amount Input */}
-            <Text style={styles.inputLabel}>Valor (R$)</Text>
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Valor (R$)</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
               value={payoutAmount}
               onChangeText={setPayoutAmount}
               placeholder="0,00"
-              placeholderTextColor={colors.neutral[400]}
+              placeholderTextColor={theme.textTertiary}
               keyboardType="numeric"
             />
-            <Text style={styles.availableHint}>
+            <Text style={[styles.availableHint, { color: theme.textTertiary }]}>
               Disponivel: R$ {formatBrl(balance?.availableBrl ?? 0)}
             </Text>
 
-            {/* Submit Button */}
             <TouchableOpacity
               style={[styles.submitButton, payoutLoading && styles.submitDisabled]}
               onPress={handlePayout}
@@ -276,7 +273,7 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
   balanceCard: {
     backgroundColor: colors.primary[600], padding: 24, margin: 16, borderRadius: 16,
@@ -292,62 +289,50 @@ const styles = StyleSheet.create({
   },
   payoutText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
   sectionTitle: {
-    fontSize: 16, fontWeight: '600', color: colors.neutral[900],
+    fontSize: 16, fontWeight: '600',
     paddingHorizontal: 16, paddingVertical: 12,
   },
   transactionItem: {
     flexDirection: 'row', alignItems: 'center', padding: 14,
-    backgroundColor: colors.neutral[0],
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.neutral[200],
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   transactionIcon: {
     width: 40, height: 40, borderRadius: 20,
     justifyContent: 'center', alignItems: 'center', marginRight: 12,
   },
   transactionInfo: { flex: 1 },
-  transactionDesc: { fontSize: 14, fontWeight: '500', color: colors.neutral[800] },
-  transactionMeta: { fontSize: 12, color: colors.neutral[400], marginTop: 2 },
+  transactionDesc: { fontSize: 14, fontWeight: '500' },
+  transactionMeta: { fontSize: 12, marginTop: 2 },
   transactionAmount: { fontSize: 15, fontWeight: '600' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginTop: 16 },
-  emptyText: { fontSize: 14, color: colors.neutral[400], marginTop: 4 },
-  // Modal styles
+  emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptyText: { fontSize: 14, marginTop: 4 },
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: colors.neutral[0], borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
     padding: 24, paddingBottom: 40,
   },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginBottom: 20,
   },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: colors.neutral[900] },
-  inputLabel: {
-    fontSize: 14, fontWeight: '600', color: colors.neutral[700],
-    marginTop: 16, marginBottom: 8,
-  },
+  modalTitle: { fontSize: 20, fontWeight: '700' },
+  inputLabel: { fontSize: 14, fontWeight: '600', marginTop: 16, marginBottom: 8 },
   pixTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pixTypeChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    borderWidth: 1, borderColor: colors.neutral[300],
-    backgroundColor: colors.neutral[0],
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
   },
-  pixTypeChipActive: {
-    borderColor: colors.pix, backgroundColor: colors.pix + '15',
-  },
-  pixTypeText: { fontSize: 13, fontWeight: '500', color: colors.neutral[600] },
+  pixTypeChipActive: { borderColor: colors.pix, backgroundColor: colors.pix + '15' },
+  pixTypeText: { fontSize: 13, fontWeight: '500' },
   pixTypeTextActive: { color: colors.pix, fontWeight: '600' },
   textInput: {
-    borderWidth: 1, borderColor: colors.neutral[300], borderRadius: 10,
+    borderWidth: 1, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
-    color: colors.neutral[900], backgroundColor: colors.neutral[50],
   },
-  availableHint: {
-    fontSize: 12, color: colors.neutral[400], marginTop: 4,
-  },
+  availableHint: { fontSize: 12, marginTop: 4 },
   submitButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.pix, paddingVertical: 14, borderRadius: 10,

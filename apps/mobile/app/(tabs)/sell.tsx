@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { createListing, getCategories } from '../../src/services/listings';
 import type { Category } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
@@ -25,6 +26,7 @@ const SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
 export default function SellScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { theme } = useTheme();
   const [photos, setPhotos] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -108,7 +110,6 @@ export default function SellScreen() {
         });
         listingId = listing.id;
       } catch (_apiError) {
-        // API unavailable — create listing in local demo store
         const demoId = `demo-user-listing-${Date.now()}`;
         const photoUrls = photos.length > 0 ? photos : DEMO_PHOTOS.slice(0, 3);
         addDemoListing({
@@ -131,7 +132,6 @@ export default function SellScreen() {
         listingId = demoId;
       }
 
-      // Reset form
       setPhotos([]);
       setTitle('');
       setDescription('');
@@ -157,19 +157,19 @@ export default function SellScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
       {/* Photos */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Fotos (até 20)</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Fotos (até 20)</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
           <TouchableOpacity style={styles.addPhoto} onPress={handleAddPhoto}>
             <Ionicons name="camera" size={32} color={colors.primary[500]} />
             <Text style={styles.addPhotoText}>Adicionar</Text>
           </TouchableOpacity>
           {photos.map((uri, i) => (
-            <View key={i} style={styles.photoThumb}>
+            <View key={i} style={[styles.photoThumb, { backgroundColor: theme.inputBg }]}>
               <Image source={{ uri }} style={styles.photoImage} />
-              <TouchableOpacity style={styles.removePhoto} onPress={() => removePhoto(i)}>
+              <TouchableOpacity style={[styles.removePhoto, { backgroundColor: theme.card }]} onPress={() => removePhoto(i)}>
                 <Ionicons name="close-circle" size={22} color={colors.error[500]} />
               </TouchableOpacity>
             </View>
@@ -178,12 +178,12 @@ export default function SellScreen() {
       </View>
 
       {/* Title */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Título *</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Título *</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Ex: Vestido Zara preto tamanho M"
-          placeholderTextColor={colors.neutral[400]}
+          placeholderTextColor={theme.textTertiary}
           value={title}
           onChangeText={setTitle}
           maxLength={200}
@@ -191,12 +191,12 @@ export default function SellScreen() {
       </View>
 
       {/* Description */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Descrição *</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Descrição *</Text>
         <TextInput
-          style={[styles.input, styles.textArea]}
+          style={[styles.input, styles.textArea, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Descreva o item, defeitos, medidas..."
-          placeholderTextColor={colors.neutral[400]}
+          placeholderTextColor={theme.textTertiary}
           value={description}
           onChangeText={setDescription}
           multiline
@@ -207,16 +207,16 @@ export default function SellScreen() {
 
       {/* Category */}
       {categories.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.label}>Categoria</Text>
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Categoria</Text>
           <View style={styles.chipGroup}>
             {categories.map((cat) => (
               <TouchableOpacity
                 key={cat.id}
-                style={[styles.chip, selectedCategory === cat.id && styles.chipSelected]}
+                style={[styles.chip, { borderColor: theme.border, backgroundColor: theme.inputBg }, selectedCategory === cat.id && styles.chipSelected]}
                 onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
               >
-                <Text style={[styles.chipText, selectedCategory === cat.id && styles.chipTextSelected]}>
+                <Text style={[styles.chipText, { color: theme.textSecondary }, selectedCategory === cat.id && styles.chipTextSelected]}>
                   {cat.name}
                 </Text>
               </TouchableOpacity>
@@ -226,16 +226,16 @@ export default function SellScreen() {
       )}
 
       {/* Condition */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Condição *</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Condição *</Text>
         <View style={styles.chipGroup}>
           {CONDITIONS.map((c) => (
             <TouchableOpacity
               key={c.value}
-              style={[styles.chip, condition === c.value && styles.chipSelected]}
+              style={[styles.chip, { borderColor: theme.border, backgroundColor: theme.inputBg }, condition === c.value && styles.chipSelected]}
               onPress={() => setCondition(c.value)}
             >
-              <Text style={[styles.chipText, condition === c.value && styles.chipTextSelected]}>
+              <Text style={[styles.chipText, { color: theme.textSecondary }, condition === c.value && styles.chipTextSelected]}>
                 {c.label}
               </Text>
             </TouchableOpacity>
@@ -244,42 +244,42 @@ export default function SellScreen() {
       </View>
 
       {/* Size */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Tamanho</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
         <View style={styles.chipGroup}>
           {SIZES.map((s) => (
             <TouchableOpacity
               key={s}
-              style={[styles.sizeChip, size === s && styles.chipSelected]}
+              style={[styles.sizeChip, { borderColor: theme.border, backgroundColor: theme.inputBg }, size === s && styles.chipSelected]}
               onPress={() => setSize(size === s ? '' : s)}
             >
-              <Text style={[styles.chipText, size === s && styles.chipTextSelected]}>{s}</Text>
+              <Text style={[styles.chipText, { color: theme.textSecondary }, size === s && styles.chipTextSelected]}>{s}</Text>
             </TouchableOpacity>
           ))}
         </View>
       </View>
 
       {/* Brand */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Marca</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Marca</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Ex: Zara, Farm, Nike..."
-          placeholderTextColor={colors.neutral[400]}
+          placeholderTextColor={theme.textTertiary}
           value={brand}
           onChangeText={setBrand}
         />
       </View>
 
       {/* Price */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Preço (R$) *</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Preço (R$) *</Text>
         <View style={styles.priceRow}>
-          <Text style={styles.pricePrefix}>R$</Text>
+          <Text style={[styles.pricePrefix, { color: theme.textSecondary }]}>R$</Text>
           <TextInput
-            style={[styles.input, styles.priceInput]}
+            style={[styles.input, styles.priceInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
             placeholder="0,00"
-            placeholderTextColor={colors.neutral[400]}
+            placeholderTextColor={theme.textTertiary}
             value={price}
             onChangeText={setPrice}
             keyboardType="decimal-pad"
@@ -289,12 +289,12 @@ export default function SellScreen() {
       </View>
 
       {/* Weight */}
-      <View style={styles.section}>
-        <Text style={styles.label}>Peso estimado (gramas)</Text>
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.label, { color: theme.textSecondary }]}>Peso estimado (gramas)</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Ex: 300"
-          placeholderTextColor={colors.neutral[400]}
+          placeholderTextColor={theme.textTertiary}
           value={weight}
           onChangeText={setWeight}
           keyboardType="numeric"
@@ -321,14 +321,13 @@ export default function SellScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
-  section: { backgroundColor: colors.neutral[0], padding: 16, marginTop: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: colors.neutral[900], marginBottom: 12 },
-  label: { fontSize: 14, fontWeight: '600', color: colors.neutral[700], marginBottom: 8 },
+  container: { flex: 1 },
+  section: { padding: 16, marginTop: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
   input: {
-    borderWidth: 1, borderColor: colors.neutral[200], borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.neutral[900],
-    backgroundColor: colors.neutral[50],
+    borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
   },
   textArea: { height: 100, textAlignVertical: 'top' },
   photoRow: { flexDirection: 'row' },
@@ -338,29 +337,26 @@ const styles = StyleSheet.create({
   },
   addPhotoText: { fontSize: 11, color: colors.primary[500], marginTop: 4 },
   photoThumb: {
-    width: 90, height: 90, borderRadius: 10, backgroundColor: colors.neutral[100],
+    width: 90, height: 90, borderRadius: 10,
     marginRight: 10, position: 'relative', overflow: 'hidden',
   },
-  photoImage: {
-    width: 90, height: 90, borderRadius: 10,
-  },
+  photoImage: { width: 90, height: 90, borderRadius: 10 },
   removePhoto: {
-    position: 'absolute', top: 2, right: 2, backgroundColor: colors.neutral[0], borderRadius: 11,
+    position: 'absolute', top: 2, right: 2, borderRadius: 11,
   },
   chipGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    borderWidth: 1, borderColor: colors.neutral[200], backgroundColor: colors.neutral[50],
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
   },
   chipSelected: { borderColor: colors.primary[500], backgroundColor: colors.primary[50] },
-  chipText: { fontSize: 13, color: colors.neutral[600] },
+  chipText: { fontSize: 13 },
   chipTextSelected: { color: colors.primary[600], fontWeight: '600' },
   sizeChip: {
-    width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: colors.neutral[200],
-    justifyContent: 'center', alignItems: 'center', backgroundColor: colors.neutral[50],
+    width: 44, height: 44, borderRadius: 22, borderWidth: 1,
+    justifyContent: 'center', alignItems: 'center',
   },
   priceRow: { flexDirection: 'row', alignItems: 'center' },
-  pricePrefix: { fontSize: 18, fontWeight: '600', color: colors.neutral[700], marginRight: 8 },
+  pricePrefix: { fontSize: 18, fontWeight: '600', marginRight: 8 },
   priceInput: { flex: 1 },
   hint: { fontSize: 12, color: colors.success[600], marginTop: 6 },
   publishButton: {

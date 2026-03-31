@@ -105,7 +105,10 @@ export default function ProfileScreen() {
       </View>
 
       {/* Wallet Card */}
-      <TouchableOpacity style={styles.walletCard} onPress={() => router.push('/wallet')}>
+      <TouchableOpacity
+        style={[styles.walletCard, { backgroundColor: theme.isDark ? theme.card : colors.primary[50], borderColor: theme.isDark ? theme.border : colors.primary[200] }]}
+        onPress={() => router.push('/wallet')}
+      >
         <View style={styles.walletLeft}>
           <Ionicons name="wallet-outline" size={24} color={colors.primary[600]} />
           <View>
@@ -217,8 +220,8 @@ const styles = StyleSheet.create({
   statDivider: { width: 1, backgroundColor: colors.neutral[200] },
   walletCard: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    margin: 12, padding: 16, backgroundColor: colors.primary[50],
-    borderRadius: 14, borderWidth: 1, borderColor: colors.primary[200],
+    margin: 12, padding: 16,
+    borderRadius: 14, borderWidth: 1,
   },
   walletLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   walletLabel: { fontSize: 12, color: colors.neutral[500] },

@@ -4,6 +4,7 @@ import {
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
+import { useTheme } from '../../src/contexts/ThemeContext';
 import { ListingCard } from '../../src/components/ListingCard';
 import { getListings } from '../../src/services/listings';
 import { searchDemoListings } from '../../src/services/demoStore';
@@ -43,6 +44,7 @@ function mapListingToCard(listing: Listing) {
 }
 
 export default function SearchScreen() {
+  const { theme } = useTheme();
   const [query, setQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -77,7 +79,6 @@ export default function SearchScreen() {
       const response = await getListings(params);
       setResults(response.items.map(mapListingToCard));
     } catch (_error) {
-      // API unavailable — search demo listings
       const demoResults = searchDemoListings({
         search: searchQuery || undefined,
         category: category || undefined,
@@ -127,33 +128,33 @@ export default function SearchScreen() {
   const activeConditionLabel = CONDITIONS.find((c) => c.value === selectedCondition)?.label;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Search Bar */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color={colors.neutral[400]} />
+      <View style={[styles.searchRow, { backgroundColor: theme.card }]}>
+        <View style={[styles.searchBar, { backgroundColor: theme.inputBg }]}>
+          <Ionicons name="search" size={20} color={theme.textTertiary} />
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: theme.text }]}
             placeholder="Buscar roupas, marcas, estilos..."
-            placeholderTextColor={colors.neutral[400]}
+            placeholderTextColor={theme.textTertiary}
             value={query}
             onChangeText={setQuery}
             returnKeyType="search"
           />
           {query.length > 0 && (
             <TouchableOpacity onPress={() => setQuery('')}>
-              <Ionicons name="close-circle" size={20} color={colors.neutral[400]} />
+              <Ionicons name="close-circle" size={20} color={theme.textTertiary} />
             </TouchableOpacity>
           )}
         </View>
         <TouchableOpacity
-          style={[styles.filterButton, showFilters && styles.filterActive]}
+          style={[styles.filterButton, { backgroundColor: theme.inputBg }, showFilters && styles.filterActive]}
           onPress={() => setShowFilters(!showFilters)}
         >
           <Ionicons
             name="options-outline"
             size={20}
-            color={showFilters ? colors.primary[600] : colors.neutral[600]}
+            color={showFilters ? colors.primary[600] : theme.textSecondary}
           />
           {hasActiveFilters && <View style={styles.filterDot} />}
         </TouchableOpacity>
@@ -161,71 +162,62 @@ export default function SearchScreen() {
 
       {/* Filter Panel */}
       {showFilters && (
-        <View style={styles.filters}>
-          <Text style={styles.filterLabel}>Condição</Text>
+        <View style={[styles.filters, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>Condição</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {CONDITIONS.map((c) => (
               <TouchableOpacity
                 key={c.value}
-                style={[styles.chip, selectedCondition === c.value && styles.chipSelected]}
+                style={[styles.chip, { backgroundColor: theme.inputBg }, selectedCondition === c.value && styles.chipSelected]}
                 onPress={() => handleConditionSelect(c.value)}
               >
-                <Text style={[styles.chipText, selectedCondition === c.value && styles.chipTextSelected]}>
+                <Text style={[styles.chipText, { color: theme.textSecondary }, selectedCondition === c.value && styles.chipTextSelected]}>
                   {c.label}
                 </Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
 
-          <Text style={styles.filterLabel}>Tamanho</Text>
+          <Text style={[styles.filterLabel, { color: theme.textSecondary }]}>Tamanho</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {SIZES.map((s) => (
               <TouchableOpacity
                 key={s}
-                style={[styles.chip, selectedSize === s && styles.chipSelected]}
+                style={[styles.chip, { backgroundColor: theme.inputBg }, selectedSize === s && styles.chipSelected]}
                 onPress={() => handleSizeSelect(s)}
               >
-                <Text style={[styles.chipText, selectedSize === s && styles.chipTextSelected]}>{s}</Text>
+                <Text style={[styles.chipText, { color: theme.textSecondary }, selectedSize === s && styles.chipTextSelected]}>{s}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
       )}
 
-      {/* Active Filters Bar — shown whenever any filter/category is active */}
+      {/* Active Filters Bar */}
       {hasActiveFilters && (
-        <View style={styles.activeFiltersBar}>
+        <View style={[styles.activeFiltersBar, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
             {selectedCategory && (
-              <TouchableOpacity
-                style={styles.activeChip}
-                onPress={() => setSelectedCategory(null)}
-              >
+              <TouchableOpacity style={styles.activeChip} onPress={() => setSelectedCategory(null)}>
                 <Text style={styles.activeChipText}>{selectedCategory}</Text>
                 <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
               </TouchableOpacity>
             )}
             {selectedCondition && (
-              <TouchableOpacity
-                style={styles.activeChip}
-                onPress={() => setSelectedCondition(null)}
-              >
+              <TouchableOpacity style={styles.activeChip} onPress={() => setSelectedCondition(null)}>
                 <Text style={styles.activeChipText}>{activeConditionLabel}</Text>
                 <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
               </TouchableOpacity>
             )}
             {selectedSize && (
-              <TouchableOpacity
-                style={styles.activeChip}
-                onPress={() => setSelectedSize(null)}
-              >
+              <TouchableOpacity style={styles.activeChip} onPress={() => setSelectedSize(null)}>
                 <Text style={styles.activeChipText}>Tam. {selectedSize}</Text>
                 <Ionicons name="close" size={14} color={colors.primary[600]} style={styles.activeChipIcon} />
               </TouchableOpacity>
             )}
           </ScrollView>
           <TouchableOpacity style={styles.clearAllButton} onPress={clearAllFilters}>
-            <Text style={styles.clearAllText}>Limpar</Text>
+            <Text style={[styles.clearAllText, { color: theme.textSecondary }]}>Limpar</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -233,16 +225,16 @@ export default function SearchScreen() {
       {/* Categories Grid or Results */}
       {!isInSearchMode ? (
         <ScrollView style={styles.categoriesContainer} showsVerticalScrollIndicator={false}>
-          <Text style={styles.sectionTitle}>Categorias</Text>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Categorias</Text>
           <View style={styles.categoriesGrid}>
             {CATEGORIES.map((cat) => (
               <TouchableOpacity
                 key={cat.id}
-                style={styles.categoryCard}
+                style={[styles.categoryCard, { backgroundColor: theme.card, borderColor: theme.border }]}
                 onPress={() => handleCategorySelect(cat.id)}
               >
                 <Text style={styles.categoryIcon}>{cat.icon}</Text>
-                <Text style={styles.categoryName}>{cat.name}</Text>
+                <Text style={[styles.categoryName, { color: theme.textSecondary }]}>{cat.name}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -261,8 +253,8 @@ export default function SearchScreen() {
           contentContainerStyle={styles.list}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Ionicons name="search-outline" size={48} color={colors.neutral[300]} />
-              <Text style={styles.emptyText}>Nenhum resultado encontrado</Text>
+              <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum resultado encontrado</Text>
             </View>
           }
         />
@@ -272,44 +264,40 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.neutral[50] },
+  container: { flex: 1 },
   searchRow: {
     flexDirection: 'row', alignItems: 'center', padding: 12, gap: 8,
-    backgroundColor: colors.neutral[0],
   },
   searchBar: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.neutral[100], paddingHorizontal: 12, borderRadius: 12, height: 44,
+    paddingHorizontal: 12, borderRadius: 12, height: 44,
   },
-  input: { flex: 1, marginLeft: 8, fontSize: 16, color: colors.neutral[900] },
+  input: { flex: 1, marginLeft: 8, fontSize: 16 },
   filterButton: {
-    width: 44, height: 44, borderRadius: 12, backgroundColor: colors.neutral[100],
+    width: 44, height: 44, borderRadius: 12,
     justifyContent: 'center', alignItems: 'center', position: 'relative',
   },
-  filterActive: { backgroundColor: colors.primary[50] },
+  filterActive: { backgroundColor: colors.primary[50] + '80' },
   filterDot: {
     position: 'absolute', top: 8, right: 8,
     width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary[500],
   },
   filters: {
-    backgroundColor: colors.neutral[0], paddingHorizontal: 12, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: colors.neutral[200],
+    paddingHorizontal: 12, paddingBottom: 12,
+    borderBottomWidth: 1,
   },
-  filterLabel: { fontSize: 13, fontWeight: '600', color: colors.neutral[700], marginTop: 8, marginBottom: 6 },
+  filterLabel: { fontSize: 13, fontWeight: '600', marginTop: 8, marginBottom: 6 },
   chipRow: { flexDirection: 'row' },
   chip: {
-    backgroundColor: colors.neutral[100], paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 6,
     borderRadius: 20, marginRight: 8,
   },
   chipSelected: { backgroundColor: colors.primary[50], borderWidth: 1, borderColor: colors.primary[400] },
-  chipText: { fontSize: 13, color: colors.neutral[700] },
+  chipText: { fontSize: 13 },
   chipTextSelected: { color: colors.primary[600], fontWeight: '600' },
-  // Active filters bar
   activeFiltersBar: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colors.neutral[0],
-    borderBottomWidth: 1, borderBottomColor: colors.neutral[100],
-    paddingLeft: 12, paddingVertical: 8,
+    borderBottomWidth: 1, paddingLeft: 12, paddingVertical: 8,
   },
   activeFiltersContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   activeChip: {
@@ -320,20 +308,19 @@ const styles = StyleSheet.create({
   activeChipText: { fontSize: 13, color: colors.primary[700], fontWeight: '500' },
   activeChipIcon: { marginLeft: 2 },
   clearAllButton: { paddingHorizontal: 12, paddingVertical: 8 },
-  clearAllText: { fontSize: 13, color: colors.neutral[500], fontWeight: '500' },
-  // Categories
+  clearAllText: { fontSize: 13, fontWeight: '500' },
   categoriesContainer: { flex: 1, padding: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.neutral[900], marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   categoriesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   categoryCard: {
-    width: '31%', paddingVertical: 16, backgroundColor: colors.neutral[0],
-    borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.neutral[200],
+    width: '31%', paddingVertical: 16,
+    borderRadius: 12, alignItems: 'center', borderWidth: 1,
   },
   categoryIcon: { fontSize: 28, marginBottom: 6 },
-  categoryName: { fontSize: 12, color: colors.neutral[700], textAlign: 'center' },
+  categoryName: { fontSize: 12, textAlign: 'center' },
   list: { padding: 12 },
   row: { justifyContent: 'space-between' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyText: { fontSize: 16, color: colors.neutral[400], marginTop: 12 },
+  emptyText: { fontSize: 16, marginTop: 12 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });
