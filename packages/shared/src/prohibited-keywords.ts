@@ -3,51 +3,52 @@
  * Covers drug-related slang, weapons, counterfeit indicators,
  * adult content, and common scam phrases in Brazilian Portuguese.
  *
- * Matching is case-insensitive and accent-insensitive.
+ * Matching is case-insensitive, accent-insensitive, space-insensitive,
+ * leet-speak-resistant, and punctuation-insensitive.
  */
 
 export const PROHIBITED_KEYWORDS: string[] = [
   // --- Drugs (BR slang & formal terms) ---
   'cocaina',
   'cocaine',
+  'cokaine',   // common misspelling
+  'kokaine',   // phonetic variant
+  'coacine',   // transposition evasion
   'maconha',
   'cannabis',
   'marijuana',
+  'marihuana',
   'crack',
   'heroina',
   'heroin',
+  'heroina',
   'metanfetamina',
+  'metanfetamine',
   'anfetamina',
+  'anfetamine',
   'lsd',
   'ecstasy',
   'mdma',
   'ketamina',
+  'ketamine',
   'oxi',
   'baseado',
   'skunk',
   'haxixe',
   'hashish',
-  'loló',
   'lolo',
-  'nóz moscada',
   'noz moscada entorpecente',
   'psilocibina',
   'cogumelo magico',
-  'cogumelo mágico',
   'salvia divinorum',
   'bolinha',
   'rebite',
-  'pó branco',
   'po branco',
-  'cheira',
-  'cheirar',
-  'cheirinho da loló',
   'cheirinho da lolo',
 
   // --- Weapons ---
   'arma de fogo',
   'pistola',
-  'revólver',
   'revolver',
   'espingarda',
   'fuzil',
@@ -55,7 +56,6 @@ export const PROHIBITED_KEYWORDS: string[] = [
   'submetralhadora',
   'rifle',
   'carabina',
-  'munição',
   'municao',
   'bala calibre',
   'silenciador',
@@ -64,33 +64,25 @@ export const PROHIBITED_KEYWORDS: string[] = [
   'cano de arma',
   'gatilho de arma',
   'faca de combate',
-  'soco inglês',
   'soco ingles',
   'taser ilegal',
   'bomba caseira',
   'explosivo',
   'detonador',
-  'pólvora',
   'polvora',
   'dinamite',
   'granada',
-  'colete à prova de balas',
   'colete a prova de balas',
 
   // --- Counterfeit / Piracy ---
-  'réplica',
   'replica',
   'falsificado',
   'falsificada',
-  'falso',
-  'falsa',
-  'imitação',
   'imitacao',
-  'cópia pirata',
   'copia pirata',
   'grade a fake',
   'grade b fake',
-  '1:1 fake',
+  '11 fake',   // "1:1 fake" after stripping punctuation
   'super fake',
   'primeira linha falso',
   'imposto zero',
@@ -98,40 +90,46 @@ export const PROHIBITED_KEYWORDS: string[] = [
   'lacre violado',
 
   // --- Adult / Explicit content ---
-  'conteúdo adulto',
   'conteudo adulto',
   'pornografia',
-  'material sexual explícito',
   'material sexual explicito',
   'filme adulto',
-  'fotos íntimas',
   'fotos intimas',
   'nudes',
-  'sexo explícito',
   'sexo explicito',
 
   // --- Scam / Fraud phrases ---
   'pague e receba depois',
-  'envio após pagamento fora da plataforma',
   'envio apos pagamento fora da plataforma',
   'pix fora do aplicativo',
   'deposito direto na conta',
-  'depósito direto na conta',
   'negocio fora do app',
-  'negócio fora do app',
   'contato pelo whatsapp para fechar',
   'venda fora da plataforma',
 ];
 
 /**
- * Normalise a string: lowercase + remove accents so matching is
- * accent-insensitive (e.g. "réplica" matches "replica").
+ * Normalise a string for matching:
+ * 1. Lowercase
+ * 2. Strip accents (NFD + remove combining marks)
+ * 3. Leet-speak substitution (0→o, 1→i, 3→e, 4→a, 5→s, @→a, $→s)
+ * 4. Strip ALL non-alphanumeric characters (spaces, punctuation, hyphens…)
+ *
+ * This catches: "Co Caine", "c-o-c-a-i-n-e", "c0caine", "réplica", etc.
  */
 function normalise(text: string): string {
   return text
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/0/g, 'o')
+    .replace(/1/g, 'i')
+    .replace(/3/g, 'e')
+    .replace(/4/g, 'a')
+    .replace(/5/g, 's')
+    .replace(/@/g, 'a')
+    .replace(/\$/g, 's')
+    .replace(/[^a-z0-9]/g, '');
 }
 
 /**
@@ -147,3 +145,4 @@ export function containsProhibitedContent(text: string): { matched: boolean; ter
   }
   return { matched: false };
 }
+
