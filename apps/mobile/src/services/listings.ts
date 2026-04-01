@@ -243,6 +243,7 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
 
   const token = await getToken();
+  console.log('[upload] token present:', !!token, '| csrf present:', !!csrfToken);
 
   const filename = uri.split('/').pop() ?? 'photo.jpg';
   const ext = filename.split('.').pop()?.toLowerCase() ?? 'jpg';
@@ -272,8 +273,11 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   }
 
   if (!response.ok) {
-    const err = await response.json().catch(() => ({ message: 'Upload falhou' })) as { message?: string };
-    throw new Error(err.message ?? 'Upload falhou');
+    const body = await response.text().catch(() => '');
+    console.log('[upload] error status:', response.status, '| body:', body);
+    let message = 'Upload falhou';
+    try { message = (JSON.parse(body) as { message?: string }).message ?? message; } catch { /* ignore */ }
+    throw new Error(message);
   }
 
   return response.json() as Promise<UploadImageResponse>;
