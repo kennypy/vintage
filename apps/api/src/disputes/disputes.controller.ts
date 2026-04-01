@@ -17,6 +17,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { DisputesService } from './disputes.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
@@ -49,6 +50,7 @@ export class DisputesController {
   }
 
   @Post(':id/resolve')
+  @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Resolver disputa (administrador)' })
   @ApiResponse({ status: 200, description: 'Disputa resolvida' })
   resolve(

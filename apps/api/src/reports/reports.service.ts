@@ -48,22 +48,31 @@ export class ReportsService {
       },
     });
 
-    // Create a notification for admin about the new report
+    // Create a notification for each admin user about the new report
     try {
-      await this.prisma.notification.create({
-        data: {
-          userId: reporterId,
-          type: 'ADMIN_REPORT',
-          title: `Nova denúncia: ${dto.reason}`,
-          body: `Denúncia de ${dto.targetType} (${dto.targetId}): ${(dto.description || 'Sem descrição').slice(0, 200)}`,
-          data: JSON.stringify({
-            reportId: report.id,
-            targetType: dto.targetType,
-            targetId: dto.targetId,
-            reason: dto.reason,
-          }),
-        },
+      const admins = await this.prisma.user.findMany({
+        where: { role: 'ADMIN' },
+        select: { id: true },
       });
+      const notificationData = JSON.stringify({
+        reportId: report.id,
+        targetType: dto.targetType,
+        targetId: dto.targetId,
+        reason: dto.reason,
+      });
+      await Promise.all(
+        admins.map((admin) =>
+          this.prisma.notification.create({
+            data: {
+              userId: admin.id,
+              type: 'ADMIN_REPORT',
+              title: `Nova denúncia: ${dto.reason}`,
+              body: `Denúncia de ${dto.targetType} (${dto.targetId}): ${(dto.description || 'Sem descrição').slice(0, 200)}`,
+              data: notificationData,
+            },
+          }),
+        ),
+      );
     } catch {
       // Non-critical: notification creation failure should not block report
     }

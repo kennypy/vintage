@@ -31,6 +31,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { AudienceModule } from './audience/audience.module';
 import { AdPartnersModule } from './ad-partners/ad-partners.module';
 import { AdsModule } from './ads/ads.module';
+import { ModerationModule } from './moderation/moderation.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { AdsModule } from './ads/ads.module';
     AudienceModule,
     AdPartnersModule,
     AdsModule,
+    ModerationModule,
   ],
   providers: [
     {

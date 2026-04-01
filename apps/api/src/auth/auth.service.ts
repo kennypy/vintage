@@ -78,6 +78,10 @@ export class AuthService {
       throw new UnauthorizedException('Email ou senha inválidos');
     }
 
+    if (user.isBanned) {
+      throw new UnauthorizedException('Sua conta foi suspensa. Entre em contato com o suporte.');
+    }
+
     return this.generateTokens(user.id);
   }
 
