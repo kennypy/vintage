@@ -62,15 +62,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const profile = await getProfile();
       setUser(profile as AuthUser & Partial<UserProfile>);
-    } catch (error) {
-      // Only sign out for authentication errors (expired/invalid token).
-      // Network/connection errors should keep the existing session intact —
-      // this prevents demo-mode users from being silently logged out when
-      // the API is unreachable.
-      if (!isNetworkError(error)) {
-        setUser(null);
-        await clearTokens();
-      }
+    } catch (_error) {
+      // Do not sign out on refresh failure — keep the existing session.
+      // Transient 401s (e.g., right after login while token propagates) should
+      // not evict the user. The session will be invalidated naturally on the
+      // next explicit API call that returns 401 via apiFetch's retry logic.
     }
   }, []);
 
