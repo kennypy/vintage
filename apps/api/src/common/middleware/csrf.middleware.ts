@@ -32,10 +32,7 @@ export class CsrfMiddleware implements NestMiddleware {
   private readonly secret: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.secret =
-      this.configService.get<string>('CSRF_SECRET') ??
-      this.configService.get<string>('JWT_SECRET') ??
-      '';
+    this.secret = this.configService.get<string>('CSRF_SECRET') ?? '';
 
     if (!this.secret) {
       this.logger.warn(
