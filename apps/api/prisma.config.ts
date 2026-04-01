@@ -20,9 +20,11 @@ export default defineConfig({
     url: process.env.DATABASE_URL,
   },
 
-  migrate: {
+  migrations: {
     seed: 'ts-node prisma/seed.ts',
+  },
 
+  migrate: {
     async adapter() {
       const { PrismaPg } = await import('@prisma/adapter-pg');
 
