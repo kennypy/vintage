@@ -10,16 +10,16 @@ jest.mock('@aws-sdk/client-s3', () => {
     S3Client: jest.fn().mockImplementation(() => ({
       send: mockSend,
     })),
-    PutObjectCommand: jest.fn().mockImplementation((params) => ({
-      ...params,
+    PutObjectCommand: jest.fn().mockImplementation((params: unknown) => ({
+      ...(params as object),
       _type: 'PutObjectCommand',
     })),
-    DeleteObjectCommand: jest.fn().mockImplementation((params) => ({
-      ...params,
+    DeleteObjectCommand: jest.fn().mockImplementation((params: unknown) => ({
+      ...(params as object),
       _type: 'DeleteObjectCommand',
     })),
-    GetObjectCommand: jest.fn().mockImplementation((params) => ({
-      ...params,
+    GetObjectCommand: jest.fn().mockImplementation((params: unknown) => ({
+      ...(params as object),
       _type: 'GetObjectCommand',
     })),
   };
