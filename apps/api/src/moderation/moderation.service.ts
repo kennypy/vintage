@@ -85,7 +85,7 @@ export class ModerationService {
       'LISTING_SUSPENDED',
       'Anúncio suspenso',
       `Seu anúncio "${listing.title.slice(0, 60)}" foi suspenso por violação das políticas da plataforma.`,
-      JSON.stringify({ listingId, reason: String(reason).slice(0, 200), adminId }),
+      { listingId, reason: String(reason).slice(0, 200), adminId },
     ).catch(() => {/* non-critical */});
 
     return { suspended: true, listingId };

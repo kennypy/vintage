@@ -24,7 +24,7 @@ import { ModerationService, ReviewAction } from './moderation.service';
 
 class ReviewReportDto {
   @IsIn(['SUSPEND_LISTING', 'BAN_USER', 'DISMISS'])
-  action: ReviewAction;
+  action!: ReviewAction;
 
   @IsOptional()
   @IsString()
@@ -35,13 +35,13 @@ class ReviewReportDto {
 class SuspendListingDto {
   @IsString()
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 class BanUserDto {
   @IsString()
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 @ApiTags('moderation')
