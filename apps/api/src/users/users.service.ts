@@ -7,6 +7,39 @@ import { CreateAddressDto } from './dto/create-address.dto';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
+  /** Full profile for the authenticated user — includes wallet balance and listing count. */
+  async getMyProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        avatarUrl: true,
+        bio: true,
+        verified: true,
+        vacationMode: true,
+        ratingAvg: true,
+        ratingCount: true,
+        followerCount: true,
+        followingCount: true,
+        createdAt: true,
+        wallet: { select: { balanceBrl: true } },
+        _count: { select: { listings: { where: { status: 'ACTIVE' } } } },
+      },
+    });
+
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const { wallet, _count, ...rest } = user;
+    return {
+      ...rest,
+      walletBalance: Number(wallet?.balanceBrl ?? 0),
+      listingCount: _count.listings,
+    };
+  }
+
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

@@ -10,19 +10,21 @@ export class NotificationsService {
   ) {}
 
   async getNotifications(userId: string, page: number = 1, pageSize: number = 20) {
-    const skip = (page - 1) * pageSize;
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.max(1, Number(pageSize) || 20);
+    const skip = (p - 1) * ps;
     const [items, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: pageSize,
+        take: ps,
       }),
       this.prisma.notification.count({ where: { userId } }),
       this.prisma.notification.count({ where: { userId, readAt: null } }),
     ]);
 
-    return { items, total, unreadCount, page, pageSize, hasMore: skip + items.length < total };
+    return { items, total, unreadCount, page: p, pageSize: ps, hasMore: skip + items.length < total };
   }
 
   async markAsRead(notificationId: string, userId: string) {

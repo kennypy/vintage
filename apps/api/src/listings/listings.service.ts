@@ -161,6 +161,8 @@ export class ListingsService {
     if (dto.size) where.size = dto.size;
     if (dto.color) where.color = { contains: dto.color, mode: 'insensitive' };
 
+    if (dto.sellerId) where.sellerId = dto.sellerId;
+
     if (dto.minPrice !== undefined || dto.maxPrice !== undefined) {
       where.priceBrl = {};
       if (dto.minPrice !== undefined) where.priceBrl.gte = dto.minPrice;
@@ -277,7 +279,9 @@ export class ListingsService {
   }
 
   async getUserFavorites(userId: string, page: number = 1, pageSize: number = 20) {
-    const skip = (page - 1) * pageSize;
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.max(1, Number(pageSize) || 20);
+    const skip = (p - 1) * ps;
     const [items, total] = await Promise.all([
       this.prisma.favorite.findMany({
         where: { userId },
@@ -292,14 +296,14 @@ export class ListingsService {
         },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: pageSize,
+        take: ps,
       }),
       this.prisma.favorite.count({ where: { userId } }),
     ]);
 
     return {
       items: items.map((f) => f.listing),
-      total, page, pageSize, hasMore: skip + items.length < total,
+      total, page: p, pageSize: ps, hasMore: skip + items.length < total,
     };
   }
 
@@ -312,7 +316,9 @@ export class ListingsService {
   }
 
   async getFollowingFeed(userId: string, page: number = 1, pageSize: number = 20) {
-    const skip = (page - 1) * pageSize;
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.max(1, Number(pageSize) || 20);
+    const skip = (p - 1) * ps;
 
     // Get all users that the current user follows
     const follows = await this.prisma.follow.findMany({
@@ -323,7 +329,7 @@ export class ListingsService {
     const followingIds = follows.map((f) => f.followingId);
 
     if (followingIds.length === 0) {
-      return { items: [], total: 0, page, pageSize, hasMore: false };
+      return { items: [], total: 0, page: p, pageSize: ps, hasMore: false };
     }
 
     const where: Prisma.ListingWhereInput = {
@@ -344,12 +350,12 @@ export class ListingsService {
         },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: pageSize,
+        take: ps,
       }),
       this.prisma.listing.count({ where }),
     ]);
 
-    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+    return { items, total, page: p, pageSize: ps, hasMore: skip + items.length < total };
   }
 
   async searchBrands(query: string) {

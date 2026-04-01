@@ -60,7 +60,7 @@ export class AuthService {
       },
     });
 
-    const tokens = this.generateTokens(user.id);
+    const tokens = await this.generateTokensWithUser(user.id);
 
     // Send welcome email (non-blocking, non-critical)
     this.emailService.sendWelcomeEmail(user.email, user.name);
@@ -106,7 +106,7 @@ export class AuthService {
       return { requiresTwoFa: true, tempToken };
     }
 
-    return this.generateTokens(user.id);
+    return this.generateTokensWithUser(user.id);
   }
 
   /** Called after login to log the event and alert on new device (fire-and-forget) */
@@ -328,5 +328,15 @@ export class AuthService {
     const refreshToken = this.jwtService.sign({ sub: userId, type: 'refresh' }, { expiresIn: refreshExpiry });
 
     return { accessToken, refreshToken };
+  }
+
+  /** Returns tokens + the user object expected by the mobile client. */
+  private async generateTokensWithUser(userId: string) {
+    const tokens = this.generateTokens(userId);
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true, cpf: true, avatarUrl: true, createdAt: true },
+    });
+    return { ...tokens, user };
   }
 }

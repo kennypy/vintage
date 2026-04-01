@@ -3,13 +3,34 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { execSync } from 'child_process';
+import * as path from 'path';
 import { AppModule } from './app.module';
+
+function runMigrations() {
+  try {
+    const schemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma');
+    execSync(`npx prisma migrate deploy --schema="${schemaPath}"`, {
+      stdio: 'inherit',
+      timeout: 60_000,
+    });
+  } catch (e) {
+    console.error('[migrations] prisma migrate deploy failed:', String(e).slice(0, 300));
+    // Non-fatal in development — server still starts, stale columns cause runtime errors
+  }
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
   const nodeEnv = config.get<string>('NODE_ENV', 'development');
+
+  // Auto-apply pending migrations in development so devs don't need to run
+  // `prisma migrate deploy` manually after pulling new code.
+  if (nodeEnv !== 'production') {
+    runMigrations();
+  }
 
   // Security: fail if critical secrets use defaults in production
   if (nodeEnv === 'production') {

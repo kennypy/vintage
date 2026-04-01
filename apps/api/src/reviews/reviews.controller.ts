@@ -37,6 +37,16 @@ export class ReviewsController {
     return this.reviewsService.getUserReviews(id, page);
   }
 
+  // Alias used by the mobile client
+  @Get('reviews/:userId')
+  @ApiOperation({ summary: 'Ver avaliações do usuário (alias mobile)' })
+  getUserReviewsAlias(
+    @Param('userId') userId: string,
+    @Query('page') page: number = 1,
+  ) {
+    return this.reviewsService.getUserReviews(userId, page);
+  }
+
   @Patch('reviews/:id/reply')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
