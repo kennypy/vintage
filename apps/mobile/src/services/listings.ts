@@ -97,6 +97,23 @@ export interface SavedSearch {
   createdAt: string;
 }
 
+/** Suggestions returned by the Vision API after an image upload. */
+export interface ListingSuggestions {
+  title?: string;
+  categoryId?: string;
+  color?: string;
+  brandId?: string;
+}
+
+/** Response from POST /uploads/listing-image */
+export interface UploadImageResponse {
+  url: string;
+  key: string;
+  width: number;
+  height: number;
+  suggestions: ListingSuggestions;
+}
+
 function buildQueryString(params: Record<string, unknown>): string {
   const searchParams = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

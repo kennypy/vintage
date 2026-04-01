@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UploadsService } from './uploads.service';
+import { UploadImageResponse } from './dto/upload-response.dto';
 
 /** Subset of Multer.File used in this controller. */
 interface UploadedFileInfo {
@@ -42,7 +43,7 @@ export class UploadsController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido' })
   async uploadListingImage(
     @UploadedFile() file: UploadedFileInfo,
-  ) {
+  ): Promise<UploadImageResponse> {
     if (!file || !file.buffer) {
       throw new BadRequestException('Nenhum arquivo enviado.');
     }

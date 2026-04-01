@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
 import { UploadsService } from './uploads.service';
+import { ImageAnalysisService } from './image-analysis.service';
 
 // Mock S3 client
 const mockSend = jest.fn().mockResolvedValue({});
@@ -72,10 +73,15 @@ describe('UploadsService', () => {
     mockSharpInstance.metadata.mockResolvedValue({ width: 800, height: 600 });
     mockSend.mockResolvedValue({});
 
+    const mockImageAnalysisService = {
+      analyze: jest.fn().mockResolvedValue({}),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UploadsService,
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: ImageAnalysisService, useValue: mockImageAnalysisService },
       ],
     }).compile();
 
