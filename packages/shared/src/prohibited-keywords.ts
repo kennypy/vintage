@@ -8,88 +8,270 @@
  */
 
 export const PROHIBITED_KEYWORDS: string[] = [
-  // --- Drugs (BR slang & formal terms) ---
+
+  // =====================================================================
+  // COCAINE
+  // =====================================================================
+  // English — formal & slang
+  'cocaine', 'cocaine', 'cokaine', 'kokaine', 'coacine',
+  'coke',
+  'snow',        // most common EN slang
+  'blow',
+  'white',       // as in "selling white"
+  'powder',      // as in "selling powder"
+  'nose candy',
+  'charlie',     // UK/international slang
+  'marching powder',
+  'peruvian flake',
+  'peruvian',    // "selling peruvian"
+  'yeyo', 'yayo',
+  'booger sugar',
+  'white girl',  // drug slang
+  'white horse', // also heroin
+  'white lady',
+  'flake',       // cocaine cut
+  'stardust',
+  'toot',
+  // Portuguese / BR
   'cocaina',
-  'cocaine',
-  'cokaine',   // common misspelling
-  'kokaine',   // phonetic variant
-  'coacine',   // transposition evasion
-  'maconha',
+  'neve',        // snow in PT — #1 BR cocaine slang
+  'farinha',     // flour — common BR slang
+  'talco',       // talcum — BR slang
+  'parica',      // BR indigenous-origin slang
+  'branquinha',  // "little white one"
+  'po da lua',   // moon dust
+
+  // =====================================================================
+  // MARIJUANA / CANNABIS
+  // =====================================================================
+  // English
+  'marijuana', 'marihuana',
   'cannabis',
-  'marijuana',
-  'marihuana',
-  'crack',
-  'heroina',
+  'weed',
+  'pot',
+  'grass',
+  'herb',
+  'ganja',
+  'reefer',
+  'joint',
+  'bud',
+  'chronic',
+  'dank',
+  'mary jane',
+  'loud',        // "loud pack" = strong weed
+  'kush',
+  'hash',
+  'hashish',
+  'haxixe',
+  'skunk',
+  // Portuguese / BR
+  'maconha',
+  'erva',        // herb — #1 BR marijuana slang
+  'fumo',        // smoke
+  'liamba',      // BR/African-origin slang
+  'diamba',
+  'mato',        // weed/bush
+  'baseado',     // joint (BR)
+  'lolo',
+  'cheirinho da lolo',
+
+  // =====================================================================
+  // CRACK COCAINE
+  // =====================================================================
+  // English
+  'crack cocaine',
+  'crack rock',
+  'freebase',
+  'ready rock',
+  // Portuguese / BR
+  'pedra',       // rock — #1 BR crack slang (contextual but high risk)
+  'pedrinha',
+  'oxi',         // oxidised cocaine paste — BR specific
+  'pasta base',
+
+  // =====================================================================
+  // HEROIN
+  // =====================================================================
+  // English
   'heroin',
+  'smack',       // most common EN slang
+  'junk',
+  'horse',       // heroin slang
+  'skag',
+  'black tar',
+  'brown sugar',
+  'big H',
+  'hell dust',
+  'thunder',
+  'dragon',      // "chasing the dragon"
+  // Portuguese / BR
   'heroina',
+  'cavalo',      // horse (PT)
+  'po preto',    // black powder
+
+  // =====================================================================
+  // METHAMPHETAMINE
+  // =====================================================================
+  // English
+  'methamphetamine', 'metanfetamine',
+  'meth',
+  'crystal meth',
+  'crystal',     // as in "selling crystal"
+  'ice',         // meth slang
+  'glass',       // meth slang
+  'speed',
+  'tina',        // gay community meth slang
+  'crank',
+  'tweak',
+  'shards',
+  // Portuguese / BR
   'metanfetamina',
-  'metanfetamine',
-  'anfetamina',
-  'anfetamine',
-  'lsd',
+  'anfetamina', 'anfetamine',
+  'rebite',      // BR truck-driver amphetamine slang
+  'bolinha',     // pill (amphetamine)
+
+  // =====================================================================
+  // ECSTASY / MDMA
+  // =====================================================================
+  // English
   'ecstasy',
   'mdma',
-  'ketamina',
+  'molly',       // pure MDMA — very common EN slang
+  'molly pill',
+  'disco biscuits',
+  'love drug',
+  // Portuguese / BR
+  'balinha',     // little ball/pill — BR ecstasy slang
+  'bala',        // pill (BR)
+
+  // =====================================================================
+  // LSD
+  // =====================================================================
+  // English
+  'lsd',
+  'acid',        // most common EN slang
+  'acid tabs',
+  'blotter',
+  'lucy',        // Lucy in the Sky
+  'tab acid',
+  'doses lsd',
+  // Portuguese / BR
+  'acido litico',
+  'selinho',     // BR slang for LSD tab
+  'cartela lsd',
+
+  // =====================================================================
+  // KETAMINE
+  // =====================================================================
+  // English
   'ketamine',
-  'oxi',
-  'baseado',
-  'skunk',
-  'haxixe',
-  'hashish',
-  'lolo',
-  'noz moscada entorpecente',
+  'special k',
+  'vitamin k',
+  'horse tranquilizer',
+  'ket',
+  // Portuguese / BR
+  'ketamina',
+
+  // =====================================================================
+  // OTHER DRUGS
+  // =====================================================================
   'psilocibina',
   'cogumelo magico',
   'salvia divinorum',
-  'bolinha',
-  'rebite',
+  'lsd',
   'po branco',
-  'cheirinho da lolo',
+  'noz moscada entorpecente',
 
-  // --- Weapons ---
+  // =====================================================================
+  // FIREARMS & WEAPONS
+  // =====================================================================
+  // English — formal
+  'firearm', 'firearms',
+  'handgun', 'handguns',
+  'pistol', 'pistols',
+  'revolver', 'revolvers',
+  'shotgun', 'shotguns',
+  'rifle', 'rifles',
+  'assault rifle',
+  'submachine gun',
+  'machine gun',
+  'glock',
+  'beretta',
+  'ar-15', 'ar15',
+  'ak-47', 'ak47',
+  'uzi',
+  'tec-9', 'tec9',
+  'mac-10', 'mac10',
+  'silencer',
+  'suppressor',
+  'ammunition',
+  'hollow point',
+  'armor piercing',
+  // English — slang
+  'gun',         // THE missed term
+  'guns',
+  'piece',       // "packing a piece"
+  'heat',        // "packing heat"
+  'strap',       // gun slang
+  'banger',      // gun slang
+  'burner',      // gun slang
+  'heater',      // gun slang
+  'iron',        // "packing iron"
+  'rod',         // gun slang
+  'tool',        // "got a tool"
+  'nine',        // 9mm
+  'nine millimeter',
+  // Portuguese / BR — formal
   'arma de fogo',
+  'arma ilegal',
   'pistola',
-  'revolver',
   'espingarda',
   'fuzil',
   'metralhadora',
   'submetralhadora',
-  'rifle',
   'carabina',
   'municao',
-  'bala calibre',
   'silenciador',
   'supressor',
   'carregador de arma',
-  'cano de arma',
-  'gatilho de arma',
-  'faca de combate',
-  'soco ingles',
-  'taser ilegal',
-  'bomba caseira',
+  'bala calibre',
+  'dinamite',
+  'granada',
   'explosivo',
   'detonador',
   'polvora',
-  'dinamite',
-  'granada',
+  'bomba caseira',
   'colete a prova de balas',
+  'faca de combate',
+  'soco ingles',
+  'taser ilegal',
+  // Portuguese / BR — slang
+  'ferro',       // iron — #1 BR gun slang
+  'calco',       // BR gun slang
+  'brinquedo',   // toy (ironic BR gun reference)
+  'espeto',      // spit/skewer — BR slang
+  'maquininha',  // little machine — BR slang
+  'canao',       // big gun (BR)
 
-  // --- Counterfeit / Piracy ---
+  // =====================================================================
+  // COUNTERFEIT / PIRACY
+  // =====================================================================
   'replica',
-  'falsificado',
-  'falsificada',
+  'falsificado', 'falsificada',
   'imitacao',
   'copia pirata',
   'grade a fake',
   'grade b fake',
-  '11 fake',   // "1:1 fake" after stripping punctuation
+  '11 fake',
   'super fake',
   'primeira linha falso',
   'imposto zero',
   'sem nota fiscal falsificada',
   'lacre violado',
 
-  // --- Adult / Explicit content ---
+  // =====================================================================
+  // ADULT / EXPLICIT CONTENT
+  // =====================================================================
   'conteudo adulto',
   'pornografia',
   'material sexual explicito',
@@ -98,7 +280,9 @@ export const PROHIBITED_KEYWORDS: string[] = [
   'nudes',
   'sexo explicito',
 
-  // --- Scam / Fraud phrases ---
+  // =====================================================================
+  // SCAM / OFF-PLATFORM FRAUD
+  // =====================================================================
   'pague e receba depois',
   'envio apos pagamento fora da plataforma',
   'pix fora do aplicativo',
