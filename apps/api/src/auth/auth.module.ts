@@ -8,11 +8,13 @@ import { JwtStrategy } from './jwt.strategy';
 import { GoogleStrategy } from './google.strategy';
 import { AppleStrategy } from './apple.strategy';
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
 
 @Module({
   imports: [
     UsersModule,
+    NotificationsModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

@@ -1,8 +1,16 @@
-import { Controller, Get, Post, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { IsString, MaxLength, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ReviewsService } from './reviews.service';
+
+class ReplyToReviewDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reply!: string;
+}
 
 @ApiTags('reviews')
 @Controller()
@@ -21,11 +29,23 @@ export class ReviewsController {
   }
 
   @Get('users/:id/reviews')
-  @ApiOperation({ summary: 'Ver avaliações do usuário' })
+  @ApiOperation({ summary: 'Ver avaliações do usuário (inclui respostas do vendedor)' })
   getUserReviews(
     @Param('id') id: string,
     @Query('page') page: number = 1,
   ) {
     return this.reviewsService.getUserReviews(id, page);
+  }
+
+  @Patch('reviews/:id/reply')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Vendedor responde publicamente a uma avaliação recebida (uma vez por avaliação)' })
+  replyToReview(
+    @Param('id') id: string,
+    @Body() body: ReplyToReviewDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.reviewsService.replyToReview(id, user.id, body.reply);
   }
 }

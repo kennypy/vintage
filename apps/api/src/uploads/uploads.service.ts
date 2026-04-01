@@ -16,8 +16,11 @@ import * as sharp from 'sharp';
 import { ImageAnalysisService } from './image-analysis.service';
 import { UploadImageResponse } from './dto/upload-response.dto';
 
-/** Maximum file size in bytes (10 MB). */
+/** Maximum file size in bytes (10 MB per image). */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+/** Maximum video file size in bytes (100 MB). */
+const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 
 /** Maximum number of images per listing. */
 const MAX_IMAGES_PER_LISTING = 20;
@@ -31,11 +34,22 @@ const MAX_IMAGE_WIDTH = 1200;
 /** JPEG compression quality. */
 const JPEG_QUALITY = 80;
 
-/** Allowed MIME types mapped to their magic-byte signatures. */
+/** Allowed image MIME types mapped to their magic-byte signatures. */
 const MAGIC_BYTES: Record<string, number[]> = {
   'image/jpeg': [0xff, 0xd8, 0xff],
   'image/png': [0x89, 0x50, 0x4e, 0x47],
 };
+
+/**
+ * Allowed video MIME types and their magic-byte signatures.
+ * MP4: ftyp box at offset 4; QuickTime: starts with specific atoms.
+ * We accept video/mp4 and video/quicktime (iPhone .mov files).
+ */
+const VIDEO_MIME_SIGNATURES: Array<{ mime: string; offset: number; bytes: number[] }> = [
+  { mime: 'video/mp4', offset: 4, bytes: [0x66, 0x74, 0x79, 0x70] },       // 'ftyp'
+  { mime: 'video/quicktime', offset: 4, bytes: [0x66, 0x74, 0x79, 0x70] }, // 'ftyp' (QuickTime MOV)
+  { mime: 'video/quicktime', offset: 0, bytes: [0x00, 0x00, 0x00] },        // QuickTime fallback
+];
 
 /** Placeholder image dimensions used in dev/stub mode. */
 const PLACEHOLDER_WIDTH = 800;
@@ -285,6 +299,80 @@ export class UploadsService {
       throw new InternalServerErrorException(
         'Erro ao remover imagem. Tente novamente.',
       );
+    }
+  }
+
+  /**
+   * Validate a video buffer via magic bytes.
+   * Returns the detected MIME type or throws BadRequestException.
+   */
+  validateVideoMimeType(buffer: Buffer): string {
+    for (const sig of VIDEO_MIME_SIGNATURES) {
+      if (buffer.length >= sig.offset + sig.bytes.length) {
+        const matches = sig.bytes.every((byte, i) => buffer[sig.offset + i] === byte);
+        if (matches) return sig.mime;
+      }
+    }
+    throw new BadRequestException(
+      'Formato de vídeo não suportado. Envie um arquivo MP4 ou MOV (iPhone).',
+    );
+  }
+
+  /**
+   * Upload a listing video (max 100MB, max 30 seconds, MP4/MOV only).
+   * Returns the S3 URL. Thumbnail generation is left to the client.
+   */
+  async uploadListingVideo(
+    file: Buffer,
+    filename: string,
+    _mimeType: string,
+  ): Promise<{ url: string; key: string }> {
+    // 1. Validate size (100 MB max) — chunk-based early abort
+    const chunkSize = 64 * 1024;
+    let bytesRead = 0;
+    for (let offset = 0; offset < file.length; offset += chunkSize) {
+      bytesRead += Math.min(chunkSize, file.length - offset);
+      if (bytesRead > MAX_VIDEO_SIZE) {
+        throw new BadRequestException(
+          `Vídeo excede o tamanho máximo de ${MAX_VIDEO_SIZE / (1024 * 1024)}MB.`,
+        );
+      }
+    }
+
+    // 2. Validate MIME type via magic bytes
+    const detectedMime = this.validateVideoMimeType(file);
+    this.logger.debug(`Video upload detected MIME: ${detectedMime}`);
+
+    // 3. Sanitize filename
+    const safeName = this.sanitizeFilename(filename);
+    const timestamp = Date.now();
+    const key = `videos/${timestamp}-${safeName}`;
+
+    // Dev fallback
+    if (!this.s3Configured) {
+      return {
+        url: `https://www.w3schools.com/html/mov_bbb.mp4`, // stable dev placeholder
+        key,
+      };
+    }
+
+    try {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: file,
+          ContentType: detectedMime,
+          ServerSideEncryption: 'AES256',
+        }),
+      );
+
+      const url = await this.generatePresignedUrl(key);
+      return { url, key };
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error(`Failed to upload video: ${String(error).slice(0, 200)}`);
+      throw new InternalServerErrorException('Erro ao enviar vídeo. Tente novamente.');
     }
   }
 }

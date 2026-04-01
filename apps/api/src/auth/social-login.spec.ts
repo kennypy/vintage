@@ -5,8 +5,22 @@ import * as bcrypt from 'bcrypt';
 import { AuthService, SocialProfile } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 jest.mock('bcrypt');
+jest.mock('otplib', () => ({
+  TOTP: jest.fn().mockImplementation(() => ({
+    verify: jest.fn().mockResolvedValue({ valid: true }),
+    generate: jest.fn().mockResolvedValue('123456'),
+  })),
+  generateSecret: jest.fn().mockReturnValue('MOCKSECRET'),
+  generateURI: jest.fn().mockReturnValue('otpauth://totp/mock'),
+  NobleCryptoPlugin: jest.fn(),
+  ScureBase32Plugin: jest.fn(),
+}));
+jest.mock('qrcode', () => ({
+  toDataURL: jest.fn().mockResolvedValue('data:image/png;base64,mock'),
+}));
 
 const mockPrisma = {
   user: {
@@ -29,6 +43,10 @@ const mockEmailService = {
   sendWelcomeEmail: jest.fn(),
 };
 
+const mockNotificationsService = {
+  createNotification: jest.fn(),
+};
+
 describe('AuthService - Social Login', () => {
   let service: AuthService;
 
@@ -42,6 +60,7 @@ describe('AuthService - Social Login', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
+        { provide: NotificationsService, useValue: mockNotificationsService },
       ],
     }).compile();
 
