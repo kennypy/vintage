@@ -12,7 +12,13 @@ import { defineConfig } from 'prisma/config';
 export default defineConfig({
   schema: path.join(__dirname, 'prisma', 'schema.prisma'),
 
+  datasource: {
+    url: process.env.DATABASE_URL,
+  },
+
   migrate: {
+    seed: 'ts-node prisma/seed.ts',
+
     async adapter() {
       const { PrismaPg } = await import('@prisma/adapter-pg');
 
