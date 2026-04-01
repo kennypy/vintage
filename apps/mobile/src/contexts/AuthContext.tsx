@@ -96,9 +96,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    // Always clear any stale demo session before attempting a real login.
+    // This resets _demoModeCache to false so apiFetch doesn't bail out early.
+    await disableDemoMode();
+    await clearTokens();
+    setDemoActive(false);
     try {
       const response = await loginService(email, password);
-      setDemoActive(false);
       setUser(response.user);
     } catch (error) {
       console.error('[signIn] login failed, falling back to demo:', String(error));
