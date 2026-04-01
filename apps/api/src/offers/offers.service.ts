@@ -9,6 +9,7 @@ import { CreateOfferDto } from './dto/create-offer.dto';
 import {
   MIN_OFFER_PERCENTAGE,
   OFFER_EXPIRY_HOURS,
+  containsProhibitedContent,
 } from '@vintage/shared';
 
 @Injectable()
@@ -25,6 +26,14 @@ export class OffersService {
     }
 
     if (listing.status !== 'ACTIVE') {
+      throw new BadRequestException('Este anúncio não está disponível para ofertas');
+    }
+
+    // Catch pre-existing listings that contain prohibited content
+    if (
+      containsProhibitedContent(listing.title).matched ||
+      containsProhibitedContent(listing.description).matched
+    ) {
       throw new BadRequestException('Este anúncio não está disponível para ofertas');
     }
 
@@ -81,6 +90,14 @@ export class OffersService {
 
     if (offer.expiresAt < new Date()) {
       throw new BadRequestException('Esta oferta expirou');
+    }
+
+    // Block acceptance if the listing contains prohibited content
+    if (
+      containsProhibitedContent(offer.listing.title).matched ||
+      containsProhibitedContent(offer.listing.description).matched
+    ) {
+      throw new BadRequestException('Este anúncio não está disponível para transações');
     }
 
     return this.prisma.offer.update({

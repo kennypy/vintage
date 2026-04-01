@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { containsProhibitedContent } from '@vintage/shared';
 
 @Injectable()
 export class MessagesService {
@@ -62,6 +63,10 @@ export class MessagesService {
   }
 
   async sendMessage(conversationId: string, senderId: string, body: string) {
+    if (containsProhibitedContent(body).matched) {
+      throw new BadRequestException('Sua mensagem contém termos não permitidos na plataforma.');
+    }
+
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
     });
