@@ -17,6 +17,10 @@ async function bootstrap() {
     if (!jwtSecret || jwtSecret === 'CHANGE_ME_IN_PRODUCTION') {
       throw new Error('JWT_SECRET must be set to a secure value in production');
     }
+    const csrfSecret = config.get<string>('CSRF_SECRET');
+    if (!csrfSecret || csrfSecret === 'CHANGE_ME_IN_PRODUCTION') {
+      throw new Error('CSRF_SECRET must be set to a secure value in production');
+    }
   }
 
   // Security headers
