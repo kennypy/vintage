@@ -32,6 +32,36 @@ const SIZE_CATEGORY_MAP: Record<string, 'clothing' | 'shoes' | 'kids'> = {
   esportes: 'clothing',
 };
 
+/**
+ * Maps Vision API category slugs (from the backend seed) to local category
+ * and sub-category values used in the sell form.
+ */
+const SLUG_TO_LOCAL_CATEGORY: Record<string, { category: string; subCategory: string }> = {
+  'vestidos': { category: 'feminino', subCategory: 'Vestidos' },
+  'saias': { category: 'feminino', subCategory: 'Saias' },
+  'blusas-camisetas': { category: 'feminino', subCategory: 'Tops e blusas' },
+  'camisetas-polos': { category: 'masculino', subCategory: 'Camisetas' },
+  'calcas-shorts': { category: 'feminino', subCategory: 'Calças' },
+  'bermudas-shorts': { category: 'masculino', subCategory: 'Calças' },
+  'casacos-jaquetas-masc': { category: 'masculino', subCategory: 'Casacos' },
+  'ternos-blazers': { category: 'masculino', subCategory: 'Ternos' },
+  'macacoes': { category: 'feminino', subCategory: 'Tops e blusas' },
+  'moda-praia-fem': { category: 'feminino', subCategory: 'Moda praia' },
+  'moda-fitness-fem': { category: 'feminino', subCategory: 'Tops e blusas' },
+  'tenis': { category: 'masculino', subCategory: 'Calçados' },
+  'sandalias': { category: 'feminino', subCategory: 'Calçados' },
+  'botas': { category: 'feminino', subCategory: 'Calçados' },
+  'sapatos-sociais': { category: 'masculino', subCategory: 'Calçados' },
+  'bolsas': { category: 'feminino', subCategory: 'Bolsas' },
+  'mochilas': { category: 'masculino', subCategory: 'Bolsas' },
+  'carteiras': { category: 'feminino', subCategory: 'Acessórios' },
+  'oculos-sol': { category: 'feminino', subCategory: 'Acessórios' },
+  'relogios': { category: 'masculino', subCategory: 'Acessórios' },
+  'cintos': { category: 'masculino', subCategory: 'Acessórios' },
+  'chapeus-bones': { category: 'masculino', subCategory: 'Acessórios' },
+  'lencos-cachecois': { category: 'feminino', subCategory: 'Acessórios' },
+};
+
 const SHOE_SUBCATEGORIES = new Set(['Calçados']);
 
 const CATEGORIES: { id: string; label: string; icon: string; sub: string[] }[] = [
@@ -106,7 +136,14 @@ export default function SellScreen() {
     : [];
 
   const applyAiSuggestions = useCallback(
-    (suggestions: ListingSuggestions, currentTitle: string, currentBrand: string, currentColor: string) => {
+    (
+      suggestions: ListingSuggestions,
+      currentTitle: string,
+      currentBrand: string,
+      currentColor: string,
+      currentCategory: string,
+      currentSize: string,
+    ) => {
       const filled = new Set<string>();
 
       if (suggestions.title && !currentTitle) {
@@ -120,6 +157,18 @@ export default function SellScreen() {
       if (suggestions.color && !currentColor) {
         setColor(suggestions.color);
         filled.add('color');
+      }
+      if (suggestions.categorySlug && !currentCategory) {
+        const local = SLUG_TO_LOCAL_CATEGORY[suggestions.categorySlug];
+        if (local) {
+          setSelectedCategory(local.category);
+          setSelectedSubCategory(local.subCategory);
+          filled.add('category');
+        }
+      }
+      if (suggestions.size && !currentSize) {
+        setSize(suggestions.size);
+        filled.add('size');
       }
 
       if (filled.size > 0) {
@@ -163,6 +212,8 @@ export default function SellScreen() {
       const capturedTitle = title;
       const capturedBrand = brand;
       const capturedColor = color;
+      const capturedCategory = selectedCategory;
+      const capturedSize = size;
 
       result.assets.forEach(async (asset, idx) => {
         try {
@@ -176,7 +227,7 @@ export default function SellScreen() {
           );
           // Apply suggestions from the very first photo only
           if (isFirstBatch && idx === 0) {
-            applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor);
+            applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor, capturedCategory, capturedSize);
           }
         } catch (err) {
           console.error('[uploadListingImage] failed:', String(err));
@@ -364,7 +415,10 @@ export default function SellScreen() {
 
       {/* Category */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.label, { color: theme.textSecondary }]}>Categoria</Text>
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Categoria</Text>
+          {aiFilledFields.has('category') && <AiBadge />}
+        </View>
         <View style={styles.categoryGrid}>
           {CATEGORIES.map((cat) => (
             <TouchableOpacity
@@ -375,6 +429,7 @@ export default function SellScreen() {
                 selectedCategory === cat.id && { borderColor: colors.primary[500], backgroundColor: theme.isDark ? colors.primary[900] + '40' : colors.primary[50] },
               ]}
               onPress={() => {
+                setAiFilledFields((prev) => { const s = new Set(prev); s.delete('category'); s.delete('size'); return s; });
                 if (selectedCategory === cat.id) {
                   setSelectedCategory('');
                   setSelectedSubCategory('');
@@ -450,13 +505,16 @@ export default function SellScreen() {
       {/* Size */}
       {showSizeSelector && (
         <View style={[styles.section, { backgroundColor: theme.card }]}>
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
+          <View style={styles.labelRow}>
+            <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
+            {aiFilledFields.has('size') && <AiBadge />}
+          </View>
           <View style={styles.chipGroup}>
             {currentSizes.map((s) => (
               <TouchableOpacity
                 key={s}
                 style={[styles.sizeChip, { borderColor: theme.border, backgroundColor: theme.inputBg }, size === s && styles.chipSelected]}
-                onPress={() => setSize(size === s ? '' : s)}
+                onPress={() => { setSize(size === s ? '' : s); setAiFilledFields((prev) => { const st = new Set(prev); st.delete('size'); return st; }); }}
               >
                 <Text style={[styles.chipText, { color: theme.textSecondary }, size === s && styles.chipTextSelected]}>{s}</Text>
               </TouchableOpacity>

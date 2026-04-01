@@ -102,9 +102,11 @@ export interface SavedSearch {
 export interface ListingSuggestions {
   title?: string;
   categoryId?: string;
+  categorySlug?: string;
   color?: string;
   brandId?: string;
   brandName?: string;
+  size?: string;
 }
 
 /** Response from POST /uploads/listing-image */

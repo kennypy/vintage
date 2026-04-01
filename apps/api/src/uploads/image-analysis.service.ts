@@ -5,9 +5,64 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface ListingSuggestions {
   title?: string;
   categoryId?: string;
+  categorySlug?: string;
   color?: string;
   brandId?: string;
   brandName?: string;
+  size?: string;
+}
+
+/**
+ * Maps international clothing sizes to Brazilian equivalents.
+ */
+const INTL_TO_BR_SIZE: Record<string, string> = {
+  XS: 'PP',
+  S: 'P',
+  M: 'M',
+  L: 'G',
+  XL: 'GG',
+  XXL: 'XG',
+  '2XL': 'XG',
+  XXXL: 'XXG',
+  '3XL': 'XXG',
+};
+
+const BR_SIZE_SET = new Set(['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG']);
+
+/**
+ * Attempt to extract a clothing size (in Brazilian notation) from raw OCR text.
+ * Returns null when no confident match is found.
+ */
+function extractSizeFromText(rawText: string): string | null {
+  const text = rawText.toUpperCase();
+
+  // 1. Explicit label prefix: TAM[ANHO] or SIZE followed by the size value
+  const labelMatch = text.match(
+    /\b(?:TAMANHO|TAMANO|TAM|SIZE)\s*[:\s]\s*(PP|GG|XG|XXG|XS|XL|XXL|2XL|3XL|XXXL|[PMLG])\b/,
+  );
+  if (labelMatch) {
+    const raw = labelMatch[1];
+    return INTL_TO_BR_SIZE[raw] ?? (BR_SIZE_SET.has(raw) ? raw : null);
+  }
+
+  // 2. Unambiguous multi-char size tokens anywhere in the text (PP, GG, XG, XXG, XS, XL, etc.)
+  const multiCharMatch = text.match(
+    /\b(PP|GG|XG|XXG|XS|XL|XXL|2XL|3XL|XXXL)\b/,
+  );
+  if (multiCharMatch) {
+    const raw = multiCharMatch[1];
+    return INTL_TO_BR_SIZE[raw] ?? (BR_SIZE_SET.has(raw) ? raw : null);
+  }
+
+  // 3. Single-char tokens only when they appear alone on a line (avoids false positives)
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^[PMLG]$/.test(trimmed)) {
+      return INTL_TO_BR_SIZE[trimmed] ?? (BR_SIZE_SET.has(trimmed) ? trimmed : null);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -134,6 +189,10 @@ interface VisionWebDetection {
   bestGuessLabels?: VisionWebLabel[];
 }
 
+interface VisionTextAnnotation {
+  description: string;
+}
+
 interface VisionColor {
   color: { red: number; green: number; blue: number };
   score: number;
@@ -151,6 +210,7 @@ interface VisionResponse {
   logoAnnotations?: VisionLogo[];
   webDetection?: VisionWebDetection;
   imagePropertiesAnnotation?: VisionImageProperties;
+  textAnnotations?: VisionTextAnnotation[];
 }
 
 @Injectable()
@@ -195,6 +255,7 @@ export class ImageAnalysisService {
                 { type: 'LOGO_DETECTION', maxResults: 5 },
                 { type: 'WEB_DETECTION', maxResults: 5 },
                 { type: 'IMAGE_PROPERTIES' },
+                { type: 'TEXT_DETECTION', maxResults: 1 },
               ],
             },
           ],
@@ -247,6 +308,7 @@ export class ImageAnalysisService {
           });
           if (category) {
             suggestions.categoryId = category.id;
+            suggestions.categorySlug = slug;
           }
         }
       }
@@ -299,6 +361,18 @@ export class ImageAnalysisService {
     const bestGuessLabels = result.webDetection?.bestGuessLabels ?? [];
     if (bestGuessLabels.length > 0) {
       suggestions.title = bestGuessLabels[0].label;
+    }
+
+    // --- Size from TEXT_DETECTION (clothing label OCR) ---
+    // textAnnotations[0].description contains the full detected text block.
+    const fullText = result.textAnnotations?.[0]?.description ?? '';
+    if (fullText) {
+      this.logger.debug(`OCR text (first 200 chars): ${fullText.slice(0, 200)}`);
+      const detectedSize = extractSizeFromText(fullText);
+      if (detectedSize) {
+        suggestions.size = detectedSize;
+        this.logger.debug(`Size detected from OCR: ${detectedSize}`);
+      }
     }
 
     return suggestions;
