@@ -8,7 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
-import { createListing, uploadListingImage, ListingSuggestions } from '../../src/services/listings';
+import { createListing, uploadListingImage, uploadListingVideo, setListingVideo, ListingSuggestions } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { containsProhibitedContent } from '@vintage/shared';
@@ -83,6 +83,9 @@ export default function SellScreen() {
   const { theme } = useTheme();
 
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoUploadState, setVideoUploadState] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
@@ -195,6 +198,43 @@ export default function SellScreen() {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleAddVideo = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permissionResult.granted) {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar o vídeo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsMultipleSelection: false,
+      videoMaxDuration: 30,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setVideoUri(asset.uri);
+      setVideoUploadState('uploading');
+      setVideoUrl(null);
+
+      try {
+        const res = await uploadListingVideo(asset.uri);
+        setVideoUrl(res.url);
+        setVideoUploadState('done');
+      } catch (err) {
+        setVideoUploadState('error');
+        Alert.alert('Erro no upload', 'Não foi possível enviar o vídeo. Tente novamente.');
+      }
+    }
+  };
+
+  const handleRemoveVideo = () => {
+    setVideoUri(null);
+    setVideoUrl(null);
+    setVideoUploadState('idle');
+  };
+
   const handlePublish = async () => {
     if (!title || !description || !price || !condition) {
       Alert.alert('Campos obrigatórios', 'Preencha título, descrição, preço e condição.');
@@ -247,6 +287,16 @@ export default function SellScreen() {
           imageUrls: uploadedUrls,
         });
         listingId = listing.id;
+
+        // Attach video if uploaded
+        if (videoUrl) {
+          try {
+            await setListingVideo(listingId, videoUrl);
+          } catch (_videoErr) {
+            // Non-fatal: listing created, video attach failed silently
+            console.warn('[setListingVideo] failed:', String(_videoErr));
+          }
+        }
       } catch (_apiError) {
         const demoId = `demo-user-listing-${Date.now()}`;
         const photoUrls = uploadedUrls.length > 0 ? uploadedUrls : DEMO_PHOTOS.slice(0, 3);
@@ -271,6 +321,9 @@ export default function SellScreen() {
       }
 
       setPhotos([]);
+      setVideoUri(null);
+      setVideoUrl(null);
+      setVideoUploadState('idle');
       setTitle('');
       setDescription('');
       setPrice('');
@@ -329,6 +382,42 @@ export default function SellScreen() {
             </View>
           ))}
         </ScrollView>
+      </View>
+
+      {/* Video */}
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Vídeo (opcional)</Text>
+        <Text style={[styles.photoHint, { color: theme.textTertiary }]}>
+          Adicione um vídeo de até 30 segundos para destacar seu item.
+        </Text>
+        {videoUri ? (
+          <View style={styles.videoPreview}>
+            <View style={[styles.videoThumb, { backgroundColor: theme.inputBg }]}>
+              <Ionicons name="videocam" size={36} color={colors.primary[500]} />
+              {videoUploadState === 'uploading' && (
+                <ActivityIndicator style={styles.videoSpinner} color={colors.primary[500]} />
+              )}
+              {videoUploadState === 'done' && (
+                <View style={styles.videoDoneBadge}>
+                  <Ionicons name="checkmark-circle" size={20} color={colors.success[600]} />
+                </View>
+              )}
+              {videoUploadState === 'error' && (
+                <View style={styles.videoDoneBadge}>
+                  <Ionicons name="warning" size={20} color={colors.error[500]} />
+                </View>
+              )}
+            </View>
+            <TouchableOpacity style={styles.removeVideoBtn} onPress={handleRemoveVideo}>
+              <Ionicons name="close-circle" size={22} color={colors.error[500]} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={[styles.addVideo, { borderColor: colors.primary[200] }]} onPress={handleAddVideo}>
+            <Ionicons name="videocam-outline" size={28} color={colors.primary[500]} />
+            <Text style={[styles.addVideoText, { color: colors.primary[600] }]}>Adicionar vídeo</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Title */}
@@ -622,4 +711,17 @@ const styles = StyleSheet.create({
   },
   publishDisabled: { opacity: 0.6 },
   publishText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
+  addVideo: {
+    height: 72, borderRadius: 10, borderWidth: 2, borderStyle: 'dashed',
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10,
+  },
+  addVideoText: { fontSize: 14, fontWeight: '500' },
+  videoPreview: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  videoThumb: {
+    width: 90, height: 72, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  videoSpinner: { position: 'absolute', bottom: 6, right: 6 },
+  videoDoneBadge: { position: 'absolute', bottom: 4, right: 4 },
+  removeVideoBtn: { padding: 4 },
 });
