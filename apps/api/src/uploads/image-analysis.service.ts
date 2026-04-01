@@ -20,6 +20,8 @@ const LABEL_TO_CATEGORY_SLUG: Record<string, string> = {
   top: 'blusas-e-camisetas',
   't-shirt': 'blusas-e-camisetas',
   shirt: 'blusas-e-camisetas',
+  jersey: 'blusas-e-camisetas',
+  polo: 'blusas-e-camisetas',
   jeans: 'calcas-e-shorts',
   pants: 'calcas-e-shorts',
   trousers: 'calcas-e-shorts',
@@ -27,6 +29,11 @@ const LABEL_TO_CATEGORY_SLUG: Record<string, string> = {
   jacket: 'casacos-e-jaquetas',
   coat: 'casacos-e-jaquetas',
   blazer: 'casacos-e-jaquetas',
+  hoodie: 'casacos-e-jaquetas',
+  sweatshirt: 'casacos-e-jaquetas',
+  sweater: 'casacos-e-jaquetas',
+  pullover: 'casacos-e-jaquetas',
+  outerwear: 'casacos-e-jaquetas',
   jumpsuit: 'macacoes',
   swimwear: 'moda-praia',
   bikini: 'moda-praia',
@@ -54,26 +61,49 @@ const LABEL_TO_CATEGORY_SLUG: Record<string, string> = {
   scarf: 'lencos-e-cachecois',
 };
 
-/** Maps English color words (lowercased) to their Portuguese equivalents. */
-const COLOR_MAP: Record<string, string> = {
-  black: 'Preto',
-  white: 'Branco',
-  red: 'Vermelho',
-  blue: 'Azul',
-  green: 'Verde',
-  yellow: 'Amarelo',
-  pink: 'Rosa',
-  purple: 'Roxo',
-  orange: 'Laranja',
-  brown: 'Marrom',
-  gray: 'Cinza',
-  grey: 'Cinza',
-  beige: 'Bege',
-  navy: 'Azul Marinho',
-  cream: 'Creme',
-  gold: 'Dourado',
-  silver: 'Prata',
-};
+/**
+ * Reference color points for nearest-neighbour RGB matching.
+ * Used to convert the dominant colour from IMAGE_PROPERTIES into a
+ * Portuguese colour name.
+ */
+const COLOR_POINTS: Array<{ name: string; r: number; g: number; b: number }> =
+  [
+    { name: 'Preto', r: 0, g: 0, b: 0 },
+    { name: 'Branco', r: 255, g: 255, b: 255 },
+    { name: 'Cinza', r: 128, g: 128, b: 128 },
+    { name: 'Vermelho', r: 210, g: 30, b: 30 },
+    { name: 'Rosa', r: 230, g: 100, b: 150 },
+    { name: 'Laranja', r: 220, g: 95, b: 30 },
+    { name: 'Amarelo', r: 230, g: 200, b: 30 },
+    { name: 'Verde', r: 30, g: 130, b: 50 },
+    { name: 'Azul', r: 30, g: 80, b: 210 },
+    { name: 'Azul Marinho', r: 20, g: 30, b: 100 },
+    { name: 'Roxo', r: 120, g: 30, b: 175 },
+    { name: 'Marrom', r: 120, g: 65, b: 30 },
+    { name: 'Bege', r: 205, g: 185, b: 145 },
+    { name: 'Creme', r: 238, g: 225, b: 195 },
+    { name: 'Dourado', r: 210, g: 170, b: 40 },
+    { name: 'Prata', r: 180, g: 180, b: 190 },
+  ];
+
+/**
+ * Return the Portuguese colour name closest to the supplied RGB value using
+ * Euclidean distance in RGB space.
+ */
+function rgbToPortugueseColor(r: number, g: number, b: number): string {
+  let minDist = Infinity;
+  let closest = 'Outro';
+  for (const point of COLOR_POINTS) {
+    const dist = Math.sqrt(
+      (r - point.r) ** 2 + (g - point.g) ** 2 + (b - point.b) ** 2,
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      closest = point.name;
+    }
+  }
+  return closest;
+}
 
 const VISION_API_URL = 'https://vision.googleapis.com/v1/images:annotate';
 
@@ -94,10 +124,23 @@ interface VisionWebDetection {
   bestGuessLabels?: VisionWebLabel[];
 }
 
+interface VisionColor {
+  color: { red: number; green: number; blue: number };
+  score: number;
+  pixelFraction: number;
+}
+
+interface VisionImageProperties {
+  dominantColors?: {
+    colors: VisionColor[];
+  };
+}
+
 interface VisionResponse {
   labelAnnotations?: VisionLabel[];
   logoAnnotations?: VisionLogo[];
   webDetection?: VisionWebDetection;
+  imagePropertiesAnnotation?: VisionImageProperties;
 }
 
 @Injectable()
@@ -130,30 +173,26 @@ export class ImageAnalysisService {
     try {
       const base64Image = imageBuffer.toString('base64');
 
-      const response = await fetch(
-        `${VISION_API_URL}?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requests: [
-              {
-                image: { content: base64Image },
-                features: [
-                  { type: 'LABEL_DETECTION', maxResults: 15 },
-                  { type: 'LOGO_DETECTION', maxResults: 5 },
-                  { type: 'WEB_DETECTION', maxResults: 5 },
-                ],
-              },
-            ],
-          }),
-        },
-      );
+      const response = await fetch(`${VISION_API_URL}?key=${this.apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [
+            {
+              image: { content: base64Image },
+              features: [
+                { type: 'LABEL_DETECTION', maxResults: 15 },
+                { type: 'LOGO_DETECTION', maxResults: 5 },
+                { type: 'WEB_DETECTION', maxResults: 5 },
+                { type: 'IMAGE_PROPERTIES' },
+              ],
+            },
+          ],
+        }),
+      });
 
       if (!response.ok) {
-        this.logger.warn(
-          `Vision API respondeu com status ${response.status}`,
-        );
+        this.logger.warn(`Vision API respondeu com status ${response.status}`);
         return {};
       }
 
@@ -179,11 +218,10 @@ export class ImageAnalysisService {
   ): Promise<ListingSuggestions> {
     const suggestions: ListingSuggestions = {};
 
-    // --- Category and Color from label detection ---
+    // --- Category from label detection ---
     const labels = result.labelAnnotations ?? [];
     for (const label of labels) {
       const desc = label.description.toLowerCase();
-
       if (!suggestions.categoryId) {
         const slug = LABEL_TO_CATEGORY_SLUG[desc];
         if (slug) {
@@ -196,16 +234,31 @@ export class ImageAnalysisService {
           }
         }
       }
+      if (suggestions.categoryId) break;
+    }
 
-      if (!suggestions.color) {
-        const color = COLOR_MAP[desc];
-        if (color) {
-          suggestions.color = color;
+    // --- Color from IMAGE_PROPERTIES dominant colour (most reliable) ---
+    const colors =
+      result.imagePropertiesAnnotation?.dominantColors?.colors ?? [];
+    if (colors.length > 0) {
+      // Pick the colour with the highest score that has reasonable saturation
+      // (skip near-white/near-grey backgrounds that score highly on product shots)
+      const sorted = [...colors].sort((a, b) => b.score - a.score);
+      for (const entry of sorted) {
+        const { red: r, green: g, blue: b } = entry.color;
+        // Skip colours that are very desaturated (likely background/shadow)
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const saturation = max === 0 ? 0 : (max - min) / max;
+        if (saturation > 0.15 || max < 60) {
+          suggestions.color = rgbToPortugueseColor(r, g, b);
+          break;
         }
       }
-
-      if (suggestions.categoryId && suggestions.color) {
-        break;
+      // Fallback: just use the top colour if nothing passed the saturation check
+      if (!suggestions.color) {
+        const { red: r, green: g, blue: b } = sorted[0].color;
+        suggestions.color = rgbToPortugueseColor(r, g, b);
       }
     }
 
@@ -215,16 +268,18 @@ export class ImageAnalysisService {
       const logoName = logos[0].description;
       const brand = await this.prisma.brand.findFirst({
         where: { name: { equals: logoName, mode: 'insensitive' } },
-        select: { id: true },
+        select: { id: true, name: true },
       });
       if (brand) {
         suggestions.brandId = brand.id;
+        this.logger.debug(`Logo matched to brand: ${brand.name}`);
+      } else {
+        this.logger.debug(`Logo detected (${logoName}) but not in brands DB`);
       }
     }
 
     // --- Title from web detection best guess ---
-    const bestGuessLabels =
-      result.webDetection?.bestGuessLabels ?? [];
+    const bestGuessLabels = result.webDetection?.bestGuessLabels ?? [];
     if (bestGuessLabels.length > 0) {
       suggestions.title = bestGuessLabels[0].label;
     }
