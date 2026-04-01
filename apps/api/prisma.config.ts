@@ -1,5 +1,9 @@
 import path from 'path';
 import { defineConfig } from 'prisma/config';
+import { config as loadEnv } from 'dotenv';
+
+// Load .env so DATABASE_URL is available when Prisma CLI evaluates this file
+loadEnv({ path: path.join(__dirname, '.env') });
 
 /**
  * Prisma v7 configuration.
