@@ -228,6 +228,12 @@ export class ImageAnalysisService {
 
     // --- Category from label detection ---
     const labels = result.labelAnnotations ?? [];
+    this.logger.debug(
+      `Labels: ${labels.map((l) => `${l.description}(${l.score.toFixed(2)})`).join(', ')}`,
+    );
+    this.logger.debug(
+      `Logos: ${(result.logoAnnotations ?? []).map((l) => l.description).join(', ') || 'none'}`,
+    );
     for (const label of labels) {
       const desc = label.description.toLowerCase();
       if (!suggestions.categoryId) {
