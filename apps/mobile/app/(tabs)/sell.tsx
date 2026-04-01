@@ -187,62 +187,81 @@ export default function SellScreen() {
       return;
     }
 
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar fotos.');
-      return;
-    }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: 20 - photos.length,
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets) {
-      const isFirstBatch = photos.length === 0;
-
-      const newPhotos: UploadedPhoto[] = result.assets.map((asset) => ({
-        uri: asset.uri,
-        uploading: true,
-        error: false,
-      }));
-
-      setPhotos((prev) => [...prev, ...newPhotos].slice(0, 20));
-
-      // Capture current field values for suggestion logic
-      const capturedTitle = title;
-      const capturedBrand = brand;
-      const capturedColor = color;
-      const capturedCategory = selectedCategory;
-      const capturedSize = size;
-
-      result.assets.forEach(async (asset, idx) => {
-        try {
-          const response = await uploadListingImage(asset.uri);
-          setPhotos((prev) =>
-            prev.map((p) =>
-              p.uri === asset.uri
-                ? { ...p, url: response.url, key: response.key, uploading: false }
-                : p,
-            ),
-          );
-          // Apply suggestions from the very first photo only
-          if (isFirstBatch && idx === 0) {
-            applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor, capturedCategory, capturedSize);
-          }
-        } catch (err) {
-          console.error('[uploadListingImage] failed:', String(err));
-          Alert.alert('Erro no upload', String(err));
-          setPhotos((prev) =>
-            prev.map((p) =>
-              p.uri === asset.uri ? { ...p, uploading: false, error: true } : p,
-            ),
-          );
+    const pickFromSource = async (useCamera: boolean) => {
+      if (useCamera) {
+        const camPerm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!camPerm.granted) {
+          Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para tirar fotos.');
+          return;
         }
-      });
-    }
+      } else {
+        const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!libPerm.granted) {
+          Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar fotos.');
+          return;
+        }
+      }
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsMultipleSelection: true,
+            selectionLimit: 20 - photos.length,
+            quality: 0.8,
+          });
+
+      if (!result.canceled && result.assets) {
+        const isFirstBatch = photos.length === 0;
+
+        const newPhotos: UploadedPhoto[] = result.assets.map((asset) => ({
+          uri: asset.uri,
+          uploading: true,
+          error: false,
+        }));
+
+        setPhotos((prev) => [...prev, ...newPhotos].slice(0, 20));
+
+        // Capture current field values for suggestion logic
+        const capturedTitle = title;
+        const capturedBrand = brand;
+        const capturedColor = color;
+        const capturedCategory = selectedCategory;
+        const capturedSize = size;
+
+        result.assets.forEach(async (asset, idx) => {
+          try {
+            const response = await uploadListingImage(asset.uri);
+            setPhotos((prev) =>
+              prev.map((p) =>
+                p.uri === asset.uri
+                  ? { ...p, url: response.url, key: response.key, uploading: false }
+                  : p,
+              ),
+            );
+            // Apply suggestions from the very first photo only
+            if (isFirstBatch && idx === 0) {
+              applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor, capturedCategory, capturedSize);
+            }
+          } catch (err) {
+            console.error('[uploadListingImage] failed:', String(err));
+            Alert.alert('Erro no upload', String(err));
+            setPhotos((prev) =>
+              prev.map((p) =>
+                p.uri === asset.uri ? { ...p, uploading: false, error: true } : p,
+              ),
+            );
+          }
+        });
+      }
+    };
+
+    Alert.alert('Adicionar foto', 'Escolha a origem', [
+      { text: 'Câmera', onPress: () => pickFromSource(true) },
+      { text: 'Galeria', onPress: () => pickFromSource(false) },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const removePhoto = (index: number) => {
@@ -250,34 +269,47 @@ export default function SellScreen() {
   };
 
   const handleAddVideo = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar o vídeo.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      allowsMultipleSelection: false,
-      videoMaxDuration: 30,
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      setVideoUri(asset.uri);
-      setVideoUploadState('uploading');
-      setVideoUrl(null);
-
-      try {
-        const res = await uploadListingVideo(asset.uri);
-        setVideoUrl(res.url);
-        setVideoUploadState('done');
-      } catch (err) {
-        setVideoUploadState('error');
-        Alert.alert('Erro no upload', 'Não foi possível enviar o vídeo. Tente novamente.');
+    const pickVideoFromSource = async (useCamera: boolean) => {
+      if (useCamera) {
+        const camPerm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!camPerm.granted) {
+          Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para gravar o vídeo.');
+          return;
+        }
+      } else {
+        const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!libPerm.granted) {
+          Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar o vídeo.');
+          return;
+        }
       }
-    }
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Videos, videoMaxDuration: 30, quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Videos, allowsMultipleSelection: false, videoMaxDuration: 30, quality: 0.8 });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setVideoUri(asset.uri);
+        setVideoUploadState('uploading');
+        setVideoUrl(null);
+
+        try {
+          const res = await uploadListingVideo(asset.uri);
+          setVideoUrl(res.url);
+          setVideoUploadState('done');
+        } catch (_err) {
+          setVideoUploadState('error');
+          Alert.alert('Erro no upload', 'Não foi possível enviar o vídeo. Tente novamente.');
+        }
+      }
+    };
+
+    Alert.alert('Adicionar vídeo', 'Escolha a origem', [
+      { text: 'Câmera', onPress: () => pickVideoFromSource(true) },
+      { text: 'Galeria', onPress: () => pickVideoFromSource(false) },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const handleRemoveVideo = () => {

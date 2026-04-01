@@ -85,5 +85,10 @@ export class SearchListingsDto {
   @Min(1)
   @Max(100)
   pageSize?: number;
+
+  @ApiPropertyOptional({ example: 'clxyz789', description: 'Filtrar anúncios por vendedor' })
+  @IsOptional()
+  @IsString()
+  sellerId?: string;
 }
 
