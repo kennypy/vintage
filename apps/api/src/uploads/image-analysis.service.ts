@@ -33,6 +33,7 @@ const LABEL_TO_CATEGORY_SLUG: Record<string, string> = {
   jacket: 'casacos-jaquetas-masc',
   coat: 'casacos-jaquetas-masc',
   blazer: 'ternos-blazers',
+  hood: 'casacos-jaquetas-masc',
   hoodie: 'casacos-jaquetas-masc',
   sweatshirt: 'casacos-jaquetas-masc',
   sweater: 'casacos-jaquetas-masc',
