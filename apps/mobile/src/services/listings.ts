@@ -267,3 +267,48 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
 
   return JSON.parse(result.body) as UploadImageResponse;
 }
+
+/** Response from POST /uploads/listing-video */
+export interface UploadVideoResponse {
+  url: string;
+  key: string;
+}
+
+/**
+ * Upload a listing video (MP4/MOV, max 30s / 100MB).
+ * Uses FileSystem.uploadAsync for React Native compatibility.
+ */
+export async function uploadListingVideo(uri: string): Promise<UploadVideoResponse> {
+  const csrfToken = await getCsrfToken();
+  const token = await getToken();
+
+  const result = await FileSystem.uploadAsync(
+    `${API_BASE_URL}/uploads/listing-video`,
+    uri,
+    {
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      httpMethod: 'POST',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        'X-CSRF-Token': csrfToken,
+      },
+    },
+  );
+
+  if (result.status < 200 || result.status >= 300) {
+    let message = 'Upload de vídeo falhou';
+    try { message = (JSON.parse(result.body) as { message?: string }).message ?? message; } catch { /* ignore */ }
+    throw new Error(message);
+  }
+
+  return JSON.parse(result.body) as UploadVideoResponse;
+}
+
+/** Attach a previously-uploaded video URL to a listing */
+export async function setListingVideo(listingId: string, videoUrl: string, durationSeconds?: number): Promise<void> {
+  await apiFetch<void>(`/listings/${encodeURIComponent(listingId)}/video`, {
+    method: 'PUT',
+    body: { videoUrl, durationSeconds },
+  });
+}
