@@ -205,6 +205,14 @@ export class ListingsService {
       throw new BadRequestException('Anúncio já vendido não pode ser editado');
     }
 
+    // Prohibited content check on updated fields
+    if (dto.title !== undefined && containsProhibitedContent(dto.title).matched) {
+      throw new BadRequestException('Seu anúncio contém termos não permitidos na plataforma.');
+    }
+    if (dto.description !== undefined && containsProhibitedContent(dto.description).matched) {
+      throw new BadRequestException('Seu anúncio contém termos não permitidos na plataforma.');
+    }
+
     const data: Prisma.ListingUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
     if (dto.description !== undefined) data.description = dto.description;
