@@ -11,6 +11,7 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { createListing } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { containsProhibitedContent } from '@vintage/shared';
 
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
@@ -127,6 +128,11 @@ export default function SellScreen() {
   const handlePublish = async () => {
     if (!title || !description || !price || !condition) {
       Alert.alert('Campos obrigatórios', 'Preencha título, descrição, preço e condição.');
+      return;
+    }
+
+    if (containsProhibitedContent(title).matched || containsProhibitedContent(description).matched) {
+      Alert.alert('Anúncio não permitido', 'Seu anúncio contém termos não permitidos na plataforma.');
       return;
     }
 
