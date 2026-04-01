@@ -5,6 +5,8 @@ export interface AuthUser {
   email: string;
   name: string;
   verified: boolean;
+  role: string;
+  isBanned: boolean;
 }
 
 export const CurrentUser = createParamDecorator(

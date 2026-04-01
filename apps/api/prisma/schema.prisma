@@ -28,6 +28,10 @@ model User {
   coverPhotoUrl    String?
   vacationMode     Boolean   @default(false)
   vacationUntil    DateTime?
+  role             UserRole  @default(USER)
+  isBanned         Boolean   @default(false)
+  bannedAt         DateTime?
+  bannedReason     String?
   ratingAvg        Float     @default(0)
   ratingCount      Int       @default(0)
   followerCount    Int       @default(0)
@@ -690,6 +694,7 @@ enum ListingStatus {
   PAUSED
   SOLD
   DELETED
+  SUSPENDED
 }
 
 enum OrderStatus {
@@ -774,6 +779,11 @@ enum AdFormat {
   CARD
   SPONSORED_LISTING
   INTERSTITIAL
+}
+
+enum UserRole {
+  USER
+  ADMIN
 }
 
 enum UserEventType {

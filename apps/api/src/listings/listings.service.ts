@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
-import { MAX_LISTING_IMAGES } from '@vintage/shared';
+import { MAX_LISTING_IMAGES, containsProhibitedContent } from '@vintage/shared';
 
 @Injectable()
 export class ListingsService {
@@ -15,11 +15,23 @@ export class ListingsService {
   async create(sellerId: string, dto: CreateListingDto) {
     const seller = await this.prisma.user.findUnique({
       where: { id: sellerId },
-      select: { vacationMode: true },
+      select: { vacationMode: true, isBanned: true },
     });
+
+    if (seller?.isBanned) {
+      throw new ForbiddenException('Sua conta está suspensa.');
+    }
 
     if (seller?.vacationMode) {
       throw new BadRequestException('Desative o modo férias antes de criar anúncios');
+    }
+
+    // Prohibited content check
+    if (
+      containsProhibitedContent(dto.title).matched ||
+      containsProhibitedContent(dto.description).matched
+    ) {
+      throw new BadRequestException('Seu anúncio contém termos não permitidos na plataforma.');
     }
 
     if (dto.imageUrls.length === 0) {
@@ -89,7 +101,7 @@ export class ListingsService {
       },
     });
 
-    if (!listing || listing.status === 'DELETED') {
+    if (!listing || listing.status === 'DELETED' || listing.status === 'SUSPENDED') {
       throw new NotFoundException('Anúncio não encontrado');
     }
 
