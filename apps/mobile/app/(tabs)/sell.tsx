@@ -178,7 +178,9 @@ export default function SellScreen() {
           if (isFirstBatch && idx === 0) {
             applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor);
           }
-        } catch (_err) {
+        } catch (err) {
+          console.error('[uploadListingImage] failed:', String(err));
+          Alert.alert('Erro no upload', String(err));
           setPhotos((prev) =>
             prev.map((p) =>
               p.uri === asset.uri ? { ...p, uploading: false, error: true } : p,
