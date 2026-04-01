@@ -9,6 +9,8 @@ export interface Review {
   reviewedId: string;
   rating: number;
   comment?: string;
+  sellerReply?: string;
+  sellerReplyAt?: string;
   createdAt: string;
 }
 

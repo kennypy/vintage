@@ -91,6 +91,18 @@ export default function ReviewsScreen() {
       {item.comment && (
         <Text style={styles.reviewComment}>{item.comment}</Text>
       )}
+      {item.sellerReply && (
+        <View style={styles.replyBox}>
+          <View style={styles.replyHeader}>
+            <Ionicons name="chatbubble-ellipses-outline" size={13} color={colors.primary[600]} />
+            <Text style={styles.replyLabel}>Resposta do vendedor</Text>
+            {item.sellerReplyAt && (
+              <Text style={styles.replyDate}>{formatTimeAgo(item.sellerReplyAt)}</Text>
+            )}
+          </View>
+          <Text style={styles.replyText}>{item.sellerReply}</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -207,5 +219,34 @@ const styles = StyleSheet.create({
     color: colors.neutral[700],
     marginTop: 8,
     lineHeight: 20,
+  },
+  replyBox: {
+    marginTop: 10,
+    backgroundColor: colors.primary[50],
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primary[400],
+    borderRadius: 6,
+    padding: 10,
+  },
+  replyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  replyLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary[700],
+    flex: 1,
+  },
+  replyDate: {
+    fontSize: 11,
+    color: colors.neutral[400],
+  },
+  replyText: {
+    fontSize: 13,
+    color: colors.neutral[700],
+    lineHeight: 18,
   },
 });

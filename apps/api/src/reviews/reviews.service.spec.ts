@@ -121,31 +121,30 @@ describe('ReviewsService', () => {
   describe('getUserReviews', () => {
     it('should return paginated reviews', async () => {
       const reviews = [
-        { id: 'review-1', rating: 5 },
-        { id: 'review-2', rating: 1 },
+        { id: 'review-1', rating: 5, reviewer: { id: 'u-1', name: 'Ana', avatarUrl: null } },
+        { id: 'review-2', rating: 1, reviewer: { id: 'u-2', name: 'João', avatarUrl: null } },
       ];
       mockPrisma.review.findMany.mockResolvedValue(reviews);
       mockPrisma.review.count.mockResolvedValue(2);
 
       const result = await service.getUserReviews('user-1', 1, 20);
 
-      expect(result).toEqual({
-        items: reviews,
+      expect(result).toMatchObject({
         total: 2,
         page: 1,
-        pageSize: 20,
-        hasMore: false,
+        totalPages: 1,
       });
+      expect(result.items).toHaveLength(2);
     });
 
-    it('should calculate hasMore correctly', async () => {
-      const reviews = Array.from({ length: 10 }, (_, i) => ({ id: `review-${i}` }));
+    it('should calculate totalPages correctly', async () => {
+      const reviews = Array.from({ length: 10 }, (_, i) => ({ id: `review-${i}`, reviewer: { id: `u-${i}`, name: 'X', avatarUrl: null } }));
       mockPrisma.review.findMany.mockResolvedValue(reviews);
       mockPrisma.review.count.mockResolvedValue(25);
 
       const result = await service.getUserReviews('user-1', 1, 10);
 
-      expect(result.hasMore).toBe(true);
+      expect(result.totalPages).toBe(3);
     });
   });
 });

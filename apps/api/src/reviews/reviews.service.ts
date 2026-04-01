@@ -54,7 +54,7 @@ export class ReviewsService {
 
   async getUserReviews(userId: string, page: number = 1, pageSize: number = 20) {
     const skip = (page - 1) * pageSize;
-    const [items, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.review.findMany({
         where: { reviewedId: userId },
         include: {
@@ -67,7 +67,14 @@ export class ReviewsService {
       this.prisma.review.count({ where: { reviewedId: userId } }),
     ]);
 
-    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+    const items = rows.map(({ reviewer, ...r }) => ({
+      ...r,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      reviewerAvatarUrl: reviewer.avatarUrl ?? undefined,
+    }));
+
+    return { items, total, page, totalPages: Math.ceil(total / pageSize) };
   }
 
   /**

@@ -34,6 +34,14 @@ export class UsersController {
     return this.usersService.updateCoverPhoto(user.id, body.coverPhotoUrl);
   }
 
+  @Get('me')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Perfil do usuário autenticado' })
+  getMyProfile(@CurrentUser() user: AuthUser) {
+    return this.usersService.getMyProfile(user.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Buscar perfil de usuário' })
   getProfile(@Param('id') id: string) {
