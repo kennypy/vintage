@@ -1,4 +1,4 @@
-import { apiFetch } from './api';
+import { apiFetch, getToken } from './api';
 import { isDemoModeSync, toggleDemoFavorite, getDemoFavorites } from './demoStore';
 
 export interface ListingImage {
@@ -61,13 +61,13 @@ export interface CreateListingData {
   description: string;
   priceBrl: number;
   originalPriceBrl?: number;
-  category: string;
-  subcategory?: string;
-  size: string;
-  brand?: string;
+  categoryId: string;
+  brandId?: string;
+  size?: string;
   condition: string;
   color?: string;
-  imageIds: string[];
+  shippingWeightG: number;
+  imageUrls: string[];
 }
 
 export interface Category {
@@ -103,6 +103,7 @@ export interface ListingSuggestions {
   categoryId?: string;
   color?: string;
   brandId?: string;
+  brandName?: string;
 }
 
 /** Response from POST /uploads/listing-image */
@@ -222,4 +223,58 @@ export async function deleteSavedSearch(id: string): Promise<void> {
   await apiFetch<void>(`/listings/saved-searches/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
+}
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+
+const UPLOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * Upload a single listing image to the backend.
+ * Uses raw fetch (not apiFetch) so FormData boundary is set automatically.
+ * Fetches a fresh CSRF token before each upload.
+ */
+export async function uploadListingImage(uri: string): Promise<UploadImageResponse> {
+  // Fetch CSRF token
+  const csrfRes = await fetch(`${API_BASE_URL}/auth/csrf-token`);
+  if (!csrfRes.ok) {
+    throw new Error('Falha ao obter token CSRF');
+  }
+  const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+
+  const token = await getToken();
+
+  const filename = uri.split('/').pop() ?? 'photo.jpg';
+  const ext = filename.split('.').pop()?.toLowerCase() ?? 'jpg';
+  const mimeType = ext === 'heic' ? 'image/jpeg' : `image/${ext}`;
+
+  const formData = new FormData();
+  // React Native FormData accepts { uri, name, type } objects — cast through unknown
+  formData.append('file', { uri, name: filename, type: mimeType } as unknown as string);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/uploads/listing-image`, {
+      method: 'POST',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        'X-CSRF-Token': csrfToken,
+        // Do NOT set Content-Type — fetch sets it with multipart boundary automatically
+      },
+      body: formData,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ message: 'Upload falhou' })) as { message?: string };
+    throw new Error(err.message ?? 'Upload falhou');
+  }
+
+  return response.json() as Promise<UploadImageResponse>;
 }

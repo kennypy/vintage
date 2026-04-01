@@ -2,13 +2,13 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert,
   Image, ActivityIndicator,
 } from 'react-native';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
-import { createListing } from '../../src/services/listings';
+import { createListing, uploadListingImage, ListingSuggestions } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { containsProhibitedContent } from '@vintage/shared';
@@ -25,7 +25,6 @@ const CLOTHING_SIZES = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG'];
 const SHOE_SIZES = ['33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'];
 const KIDS_CLOTHING_SIZES = ['0-3m', '3-6m', '6-12m', '1A', '2A', '3A', '4A', '5A', '6A', '8A', '10A', '12A'];
 
-// Categories that require size selection and which size type they use
 const SIZE_CATEGORY_MAP: Record<string, 'clothing' | 'shoes' | 'kids'> = {
   feminino: 'clothing',
   masculino: 'clothing',
@@ -33,7 +32,6 @@ const SIZE_CATEGORY_MAP: Record<string, 'clothing' | 'shoes' | 'kids'> = {
   esportes: 'clothing',
 };
 
-// Sub-categories that switch to shoe sizes
 const SHOE_SUBCATEGORIES = new Set(['Calçados']);
 
 const CATEGORIES: { id: string; label: string; icon: string; sub: string[] }[] = [
@@ -71,21 +69,32 @@ const CATEGORIES: { id: string; label: string; icon: string; sub: string[] }[] =
   },
 ];
 
+interface UploadedPhoto {
+  uri: string;
+  url?: string;
+  key?: string;
+  uploading: boolean;
+  error: boolean;
+}
+
 export default function SellScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { theme } = useTheme();
-  const [photos, setPhotos] = useState<string[]>([]);
+
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [condition, setCondition] = useState('');
   const [size, setSize] = useState('');
   const [brand, setBrand] = useState('');
+  const [color, setColor] = useState('');
   const [weight, setWeight] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSubCategory, setSelectedSubCategory] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [aiFilledFields, setAiFilledFields] = useState<Set<string>>(new Set());
 
   const showSizeSelector = selectedCategory !== '' && SIZE_CATEGORY_MAP[selectedCategory] !== undefined;
   const currentSizes = showSizeSelector
@@ -95,6 +104,30 @@ export default function SellScreen() {
         ? KIDS_CLOTHING_SIZES
         : CLOTHING_SIZES
     : [];
+
+  const applyAiSuggestions = useCallback(
+    (suggestions: ListingSuggestions, currentTitle: string, currentBrand: string, currentColor: string) => {
+      const filled = new Set<string>();
+
+      if (suggestions.title && !currentTitle) {
+        setTitle(suggestions.title);
+        filled.add('title');
+      }
+      if (suggestions.brandName && !currentBrand) {
+        setBrand(suggestions.brandName);
+        filled.add('brand');
+      }
+      if (suggestions.color && !currentColor) {
+        setColor(suggestions.color);
+        filled.add('color');
+      }
+
+      if (filled.size > 0) {
+        setAiFilledFields(filled);
+      }
+    },
+    [],
+  );
 
   const handleAddPhoto = async () => {
     if (photos.length >= 20) {
@@ -116,8 +149,43 @@ export default function SellScreen() {
     });
 
     if (!result.canceled && result.assets) {
-      const newUris = result.assets.map((asset) => asset.uri);
-      setPhotos((prev) => [...prev, ...newUris].slice(0, 20));
+      const isFirstBatch = photos.length === 0;
+
+      const newPhotos: UploadedPhoto[] = result.assets.map((asset) => ({
+        uri: asset.uri,
+        uploading: true,
+        error: false,
+      }));
+
+      setPhotos((prev) => [...prev, ...newPhotos].slice(0, 20));
+
+      // Capture current field values for suggestion logic
+      const capturedTitle = title;
+      const capturedBrand = brand;
+      const capturedColor = color;
+
+      result.assets.forEach(async (asset, idx) => {
+        try {
+          const response = await uploadListingImage(asset.uri);
+          setPhotos((prev) =>
+            prev.map((p) =>
+              p.uri === asset.uri
+                ? { ...p, url: response.url, key: response.key, uploading: false }
+                : p,
+            ),
+          );
+          // Apply suggestions from the very first photo only
+          if (isFirstBatch && idx === 0) {
+            applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor);
+          }
+        } catch (_err) {
+          setPhotos((prev) =>
+            prev.map((p) =>
+              p.uri === asset.uri ? { ...p, uploading: false, error: true } : p,
+            ),
+          );
+        }
+      });
     }
   };
 
@@ -136,6 +204,21 @@ export default function SellScreen() {
       return;
     }
 
+    const uploadedUrls = photos
+      .filter((p) => p.url && !p.uploading && !p.error)
+      .map((p) => p.url as string);
+
+    if (uploadedUrls.length === 0) {
+      Alert.alert('Fotos necessárias', 'Adicione pelo menos uma foto e aguarde o envio.');
+      return;
+    }
+
+    const stillUploading = photos.some((p) => p.uploading);
+    if (stillUploading) {
+      Alert.alert('Aguarde', 'Suas fotos ainda estão sendo enviadas. Tente novamente em instantes.');
+      return;
+    }
+
     setPublishing(true);
     try {
       const priceParsed = parseFloat(price.replace(',', '.'));
@@ -145,6 +228,8 @@ export default function SellScreen() {
         return;
       }
 
+      const weightParsed = weight ? parseInt(weight, 10) : 300;
+
       let listingId: string;
 
       try {
@@ -153,15 +238,16 @@ export default function SellScreen() {
           description,
           priceBrl: priceParsed,
           condition,
-          size,
-          brand: brand || undefined,
-          category: selectedSubCategory || selectedCategory,
-          imageIds: [],
+          size: size || undefined,
+          color: color || undefined,
+          categoryId: selectedCategory || 'outros',
+          shippingWeightG: isNaN(weightParsed) ? 300 : weightParsed,
+          imageUrls: uploadedUrls,
         });
         listingId = listing.id;
       } catch (_apiError) {
         const demoId = `demo-user-listing-${Date.now()}`;
-        const photoUrls = photos.length > 0 ? photos : DEMO_PHOTOS.slice(0, 3);
+        const photoUrls = uploadedUrls.length > 0 ? uploadedUrls : DEMO_PHOTOS.slice(0, 3);
         addDemoListing({
           id: demoId,
           title,
@@ -171,7 +257,7 @@ export default function SellScreen() {
           size,
           brand: brand || undefined,
           category: selectedSubCategory || selectedCategory || 'Outros',
-          color: undefined,
+          color: color || undefined,
           images: photoUrls.map((url, i) => ({ id: `img-${i}`, url, order: i })),
           seller: { id: user?.id ?? 'demo-user', name: user?.name ?? 'Você (Demo)' },
           isFavorited: false,
@@ -189,9 +275,11 @@ export default function SellScreen() {
       setCondition('');
       setSize('');
       setBrand('');
+      setColor('');
       setWeight('');
       setSelectedCategory('');
       setSelectedSubCategory('');
+      setAiFilledFields(new Set());
 
       Alert.alert('Anúncio criado!', 'Seu anúncio está no ar.', [
         {
@@ -212,14 +300,27 @@ export default function SellScreen() {
       {/* Photos */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Fotos (até 20)</Text>
+        <Text style={[styles.photoHint, { color: theme.textTertiary }]}>
+          A primeira foto é analisada por IA para preencher os campos automaticamente.
+        </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoRow}>
           <TouchableOpacity style={styles.addPhoto} onPress={handleAddPhoto}>
             <Ionicons name="camera" size={32} color={colors.primary[500]} />
             <Text style={styles.addPhotoText}>Adicionar</Text>
           </TouchableOpacity>
-          {photos.map((uri, i) => (
+          {photos.map((photo, i) => (
             <View key={i} style={[styles.photoThumb, { backgroundColor: theme.inputBg }]}>
-              <Image source={{ uri }} style={styles.photoImage} />
+              <Image source={{ uri: photo.uri }} style={styles.photoImage} />
+              {photo.uploading && (
+                <View style={styles.photoOverlay}>
+                  <ActivityIndicator color={colors.neutral[0]} size="small" />
+                </View>
+              )}
+              {photo.error && (
+                <View style={[styles.photoOverlay, styles.photoError]}>
+                  <Ionicons name="warning" size={18} color={colors.neutral[0]} />
+                </View>
+              )}
               <TouchableOpacity style={[styles.removePhoto, { backgroundColor: theme.card }]} onPress={() => removePhoto(i)}>
                 <Ionicons name="close-circle" size={22} color={colors.error[500]} />
               </TouchableOpacity>
@@ -230,13 +331,16 @@ export default function SellScreen() {
 
       {/* Title */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.label, { color: theme.textSecondary }]}>Título *</Text>
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Título *</Text>
+          {aiFilledFields.has('title') && <AiBadge />}
+        </View>
         <TextInput
-          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
+          style={[styles.input, { color: theme.text, borderColor: aiFilledFields.has('title') ? colors.primary[300] : theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Ex: Vestido Zara preto tamanho M"
           placeholderTextColor={theme.textTertiary}
           value={title}
-          onChangeText={setTitle}
+          onChangeText={(v) => { setTitle(v); setAiFilledFields((prev) => { const s = new Set(prev); s.delete('title'); return s; }); }}
           maxLength={200}
         />
       </View>
@@ -295,7 +399,6 @@ export default function SellScreen() {
           ))}
         </View>
 
-        {/* Sub-categories — shown only after a top-level category is selected */}
         {selectedCategory !== '' && (
           <View style={styles.subSection}>
             <Text style={[styles.subLabel, { color: theme.textSecondary }]}>Sub-categoria</Text>
@@ -342,7 +445,7 @@ export default function SellScreen() {
         </View>
       </View>
 
-      {/* Size — only for clothing/shoes/kids categories */}
+      {/* Size */}
       {showSizeSelector && (
         <View style={[styles.section, { backgroundColor: theme.card }]}>
           <Text style={[styles.label, { color: theme.textSecondary }]}>Tamanho</Text>
@@ -362,13 +465,31 @@ export default function SellScreen() {
 
       {/* Brand */}
       <View style={[styles.section, { backgroundColor: theme.card }]}>
-        <Text style={[styles.label, { color: theme.textSecondary }]}>Marca</Text>
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Marca</Text>
+          {aiFilledFields.has('brand') && <AiBadge />}
+        </View>
         <TextInput
-          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
+          style={[styles.input, { color: theme.text, borderColor: aiFilledFields.has('brand') ? colors.primary[300] : theme.border, backgroundColor: theme.inputBg }]}
           placeholder="Ex: Zara, Farm, Nike..."
           placeholderTextColor={theme.textTertiary}
           value={brand}
-          onChangeText={setBrand}
+          onChangeText={(v) => { setBrand(v); setAiFilledFields((prev) => { const s = new Set(prev); s.delete('brand'); return s; }); }}
+        />
+      </View>
+
+      {/* Color */}
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <View style={styles.labelRow}>
+          <Text style={[styles.label, { color: theme.textSecondary }]}>Cor</Text>
+          {aiFilledFields.has('color') && <AiBadge />}
+        </View>
+        <TextInput
+          style={[styles.input, { color: theme.text, borderColor: aiFilledFields.has('color') ? colors.primary[300] : theme.border, backgroundColor: theme.inputBg }]}
+          placeholder="Ex: Preto, Azul Marinho, Verde..."
+          placeholderTextColor={theme.textTertiary}
+          value={color}
+          onChangeText={(v) => { setColor(v); setAiFilledFields((prev) => { const s = new Set(prev); s.delete('color'); return s; }); }}
         />
       </View>
 
@@ -421,11 +542,28 @@ export default function SellScreen() {
   );
 }
 
+function AiBadge() {
+  return (
+    <View style={styles.aiBadge}>
+      <Text style={styles.aiBadgeText}>IA ✦</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   section: { padding: 16, marginTop: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 12 },
-  label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  photoHint: { fontSize: 12, marginBottom: 12 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
+  label: { fontSize: 14, fontWeight: '600' },
+  aiBadge: {
+    backgroundColor: colors.primary[100],
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  aiBadgeText: { fontSize: 11, color: colors.primary[700], fontWeight: '600' },
   input: {
     borderWidth: 1, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
@@ -442,6 +580,13 @@ const styles = StyleSheet.create({
     marginRight: 10, position: 'relative', overflow: 'hidden',
   },
   photoImage: { width: 90, height: 90, borderRadius: 10 },
+  photoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoError: { backgroundColor: 'rgba(200,30,30,0.55)' },
   removePhoto: {
     position: 'absolute', top: 2, right: 2, borderRadius: 11,
   },
