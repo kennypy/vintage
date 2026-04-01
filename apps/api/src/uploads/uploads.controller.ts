@@ -55,11 +55,28 @@ export class UploadsController {
     );
   }
 
+  @Post('listing-video')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload de vídeo para anúncio (MP4/MOV, máx 100MB, 30s)' })
+  @ApiResponse({ status: 201, description: 'Vídeo enviado com sucesso', schema: { properties: { url: { type: 'string' }, key: { type: 'string' } } } })
+  @ApiResponse({ status: 400, description: 'Arquivo inválido' })
+  async uploadListingVideo(
+    @UploadedFile() file: UploadedFileInfo,
+  ): Promise<{ url: string; key: string }> {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Nenhum arquivo de vídeo enviado.');
+    }
+    return this.uploadsService.uploadListingVideo(file.buffer, file.originalname, file.mimetype);
+  }
+
   @Delete(':key')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Remover imagem' })
-  @ApiResponse({ status: 200, description: 'Imagem removida' })
+  @ApiOperation({ summary: 'Remover imagem ou vídeo' })
+  @ApiResponse({ status: 200, description: 'Arquivo removido' })
   async deleteImage(@Param('key') key: string) {
     await this.uploadsService.deleteImage(key);
     return { deleted: true };

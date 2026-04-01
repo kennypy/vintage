@@ -1,13 +1,26 @@
 import {
-  Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards,
+  Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ListingsService } from './listings.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
+
+class SetListingVideoDto {
+  @IsString()
+  videoUrl!: string;
+
+  @IsOptional()
+  @IsString()
+  thumbnailUrl?: string;
+
+  @IsOptional()
+  durationSeconds?: number;
+}
 
 @ApiTags('listings')
 @Controller('listings')
@@ -136,5 +149,25 @@ export class ListingsController {
   @ApiOperation({ summary: 'Favoritar/desfavoritar anúncio' })
   toggleFavorite(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.listingsService.toggleFavorite(id, user.id);
+  }
+
+  @Put(':id/video')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Associar vídeo a um anúncio (URL obtida de /uploads/listing-video)' })
+  setListingVideo(
+    @Param('id') id: string,
+    @Body() dto: SetListingVideoDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.listingsService.setListingVideo(id, user.id, dto.videoUrl, dto.thumbnailUrl, dto.durationSeconds);
+  }
+
+  @Delete(':id/video')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Remover vídeo de um anúncio' })
+  removeListingVideo(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.listingsService.removeListingVideo(id, user.id);
   }
 }

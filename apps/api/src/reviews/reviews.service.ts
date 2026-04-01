@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -68,5 +68,40 @@ export class ReviewsService {
     ]);
 
     return { items, total, page, pageSize, hasMore: skip + items.length < total };
+  }
+
+  /**
+   * Seller's public reply to a review they received.
+   * Only the reviewed user (seller) may reply, and only once per review.
+   */
+  async replyToReview(reviewId: string, sellerId: string, reply: string) {
+    if (!reply || reply.trim().length === 0) {
+      throw new BadRequestException('Resposta não pode estar vazia');
+    }
+    if (reply.length > 500) {
+      throw new BadRequestException('Resposta não pode ter mais de 500 caracteres');
+    }
+
+    const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review) throw new NotFoundException('Avaliação não encontrada');
+
+    if (review.reviewedId !== sellerId) {
+      throw new ForbiddenException('Somente o vendedor avaliado pode responder');
+    }
+
+    if (review.sellerReply) {
+      throw new ConflictException('Você já respondeu esta avaliação');
+    }
+
+    return this.prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        sellerReply: reply.trim(),
+        sellerReplyAt: new Date(),
+      },
+      include: {
+        reviewer: { select: { id: true, name: true, avatarUrl: true } },
+      },
+    });
   }
 }

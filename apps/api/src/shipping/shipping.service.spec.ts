@@ -2,7 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ShippingService } from './shipping.service';
 import { CorreiosClient } from './correios.client';
 import { JadlogClient } from './jadlog.client';
+import { KanguClient } from './kangu.client';
+import { PegakiClient } from './pegaki.client';
 import { ConfigService } from '@nestjs/config';
+
+jest.mock('qrcode', () => ({
+  toDataURL: jest.fn().mockResolvedValue('data:image/png;base64,mock'),
+}));
 
 const mockConfigService = {
   get: jest.fn().mockReturnValue(''),
@@ -19,6 +25,8 @@ describe('ShippingService', () => {
         ShippingService,
         CorreiosClient,
         JadlogClient,
+        KanguClient,
+        PegakiClient,
         { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
@@ -27,16 +35,15 @@ describe('ShippingService', () => {
   });
 
   describe('calculateRates', () => {
-    it('should return 3 shipping options for all carriers', async () => {
+    it('should return shipping options for all carriers', async () => {
       const result = await service.calculateRates('01010-000', '80000-000', 500);
 
-      expect(result).toHaveLength(3);
-      expect(result[0].carrier).toBe('Correios');
-      expect(result[0].serviceName).toBe('PAC');
-      expect(result[1].carrier).toBe('Correios');
-      expect(result[1].serviceName).toBe('SEDEX');
-      expect(result[2].carrier).toBe('Jadlog');
-      expect(result[2].serviceName).toBe('.Package');
+      expect(result.length).toBeGreaterThanOrEqual(3);
+      const correiosOptions = result.filter((r: { carrier: string }) => r.carrier === 'Correios');
+      const jadlogOptions = result.filter((r: { carrier: string }) => r.carrier === 'Jadlog');
+      expect(correiosOptions.some((r: { serviceName: string }) => r.serviceName === 'PAC')).toBe(true);
+      expect(correiosOptions.some((r: { serviceName: string }) => r.serviceName === 'SEDEX')).toBe(true);
+      expect(jadlogOptions.some((r: { serviceName: string }) => r.serviceName === '.Package')).toBe(true);
     });
 
     it('should return options with all required fields', async () => {

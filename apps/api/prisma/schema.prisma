@@ -23,6 +23,8 @@ model User {
   bio              String?
   verified         Boolean   @default(false)
   cpfVerified      Boolean   @default(false)
+  twoFaEnabled     Boolean   @default(false)
+  twoFaSecret      String?   // Encrypted TOTP secret (null when 2FA disabled)
   socialProvider   String?   // 'google', 'apple', or null
   socialProviderId String?   // provider's unique user ID
   coverPhotoUrl    String?
@@ -59,8 +61,10 @@ model User {
   promotions        Promotion[]
   savedSearches     SavedSearch[]
   priceDropAlerts   PriceDropAlert[]
-  deviceTokens      DeviceToken[]
-  reports           Report[]
+  deviceTokens           DeviceToken[]
+  reports                Report[]
+  loginEvents            LoginEvent[]
+  authenticityRequests   AuthenticityRequest[]
 
   @@index([email])
   @@index([cpf])
@@ -82,6 +86,7 @@ model Listing {
   priceBrl        Decimal       @db.Decimal(10, 2)
   shippingWeightG Int
   status          ListingStatus @default(ACTIVE)
+  isAuthentic     Boolean       @default(false) // Set when authenticity request approved
   promotedUntil   DateTime?
   favoriteCount   Int           @default(0)
   viewCount       Int           @default(0)
@@ -89,17 +94,19 @@ model Listing {
   updatedAt       DateTime      @updatedAt
 
   // Relations
-  seller          User            @relation(fields: [sellerId], references: [id])
-  category        Category        @relation(fields: [categoryId], references: [id])
-  brand           Brand?          @relation(fields: [brandId], references: [id])
-  images          ListingImage[]
-  orders          Order[]
-  offers          Offer[]
-  favorites       Favorite[]
-  bundleItems     BundleItem[]
-  promotions      Promotion[]
-  priceSuggestion PriceSuggestion?
-  priceDropAlerts PriceDropAlert[]
+  seller               User                  @relation(fields: [sellerId], references: [id])
+  category             Category              @relation(fields: [categoryId], references: [id])
+  brand                Brand?                @relation(fields: [brandId], references: [id])
+  images               ListingImage[]
+  videos               ListingVideo[]
+  orders               Order[]
+  offers               Offer[]
+  favorites            Favorite[]
+  bundleItems          BundleItem[]
+  promotions           Promotion[]
+  priceSuggestion      PriceSuggestion?
+  priceDropAlerts      PriceDropAlert[]
+  authenticityRequest  AuthenticityRequest?
 
   @@index([sellerId])
   @@index([categoryId])
@@ -119,6 +126,20 @@ model ListingImage {
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
+  @@index([listingId])
+}
+
+model ListingVideo {
+  id              String   @id @default(cuid())
+  listingId       String
+  url             String   // S3 URL for the video file
+  thumbnailUrl    String?  // S3 URL for the auto-generated thumbnail
+  durationSeconds Int?     // Duration in seconds (max 30)
+  createdAt       DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId]) // One video per listing
   @@index([listingId])
 }
 
@@ -323,13 +344,15 @@ model Message {
 // --- Reviews ---
 
 model Review {
-  id         String   @id @default(cuid())
-  orderId    String
-  reviewerId String
-  reviewedId String
-  rating     Int // 1 or 5
-  comment    String?
-  createdAt  DateTime @default(now())
+  id              String    @id @default(cuid())
+  orderId         String
+  reviewerId      String
+  reviewedId      String
+  rating          Int       // 1 or 5
+  comment         String?
+  sellerReply     String?   // Seller's public response to the review
+  sellerReplyAt   DateTime? // When the seller replied
+  createdAt       DateTime  @default(now())
 
   order    Order @relation(fields: [orderId], references: [id])
   reviewer User  @relation("ReviewWriter", fields: [reviewerId], references: [id])
@@ -679,6 +702,43 @@ model ConsentRecord {
   @@index([userId])
 }
 
+// --- Login Events (security / anomaly detection) ---
+
+model LoginEvent {
+  id           String   @id @default(cuid())
+  userId       String
+  ipHash       String   @db.VarChar(64) // SHA256 of IP, never raw
+  deviceIdHash String?  @db.VarChar(64) // SHA256 of device fingerprint
+  platform     String?  // 'ios', 'android', 'web'
+  success      Boolean  // false = wrong password attempt
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([userId, success])
+}
+
+// --- Authenticity Badge Requests ---
+
+model AuthenticityRequest {
+  id             String              @id @default(cuid())
+  listingId      String              @unique
+  sellerId       String
+  proofImageUrls String[]            // S3 URLs of uploaded proof photos (receipts, tags, care labels)
+  status         AuthenticityStatus  @default(PENDING)
+  reviewNote     String?             // Admin note on approval/rejection
+  reviewedBy     String?             // Admin user ID who processed the request
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  seller  User    @relation(fields: [sellerId], references: [id])
+
+  @@index([sellerId])
+  @@index([status])
+}
+
 // --- Enums ---
 
 enum ItemCondition {
@@ -764,6 +824,14 @@ enum ReportStatus {
 enum Carrier {
   CORREIOS
   JADLOG
+  KANGU
+  PEGAKI
+}
+
+enum AuthenticityStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum AdCampaignStatus {

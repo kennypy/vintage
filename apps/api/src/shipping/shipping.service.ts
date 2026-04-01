@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as QRCode from 'qrcode';
 import { CorreiosClient } from './correios.client';
 import { JadlogClient } from './jadlog.client';
+import { KanguClient } from './kangu.client';
+import { PegakiClient } from './pegaki.client';
 
 export interface ShippingOption {
   carrier: string;
@@ -8,6 +11,7 @@ export interface ShippingOption {
   priceBrl: number;
   estimatedDays: string;
   trackingAvailable: boolean;
+  supportsPrinterFree: boolean; // True for Kangu, Pegaki, JadLog
 }
 
 export interface ShippingLabel {
@@ -15,6 +19,8 @@ export interface ShippingLabel {
   trackingCode: string;
   carrier: string;
   estimatedDelivery: string;
+  qrCodeData?: string;     // QR code content string (for printer-free drop-off)
+  qrCodeDataUrl?: string;  // Base64 PNG data URL of QR code image
 }
 
 export interface TrackingEvent {
@@ -41,6 +47,8 @@ export class ShippingService {
   constructor(
     private readonly correios: CorreiosClient,
     private readonly jadlog: JadlogClient,
+    private readonly kangu: KanguClient,
+    private readonly pegaki: PegakiClient,
   ) {}
 
   /**
@@ -57,21 +65,23 @@ export class ShippingService {
     const dimensions =
       length && width && height ? { length, width, height } : undefined;
 
-    const [correiosRates, jadlogRates] = await Promise.all([
+    const [correiosRates, jadlogRates, kanguRates] = await Promise.all([
       this.correios
         .calculateRates(originCep, destinationCep, weightG, dimensions)
         .catch((err) => {
-          this.logger.error(
-            `Correios rate calculation failed: ${String(err).slice(0, 200)}`,
-          );
+          this.logger.error(`Correios rate calculation failed: ${String(err).slice(0, 200)}`);
           return [];
         }),
       this.jadlog
         .calculateRates(originCep, destinationCep, weightG)
         .catch((err) => {
-          this.logger.error(
-            `Jadlog rate calculation failed: ${String(err).slice(0, 200)}`,
-          );
+          this.logger.error(`Jadlog rate calculation failed: ${String(err).slice(0, 200)}`);
+          return [];
+        }),
+      this.kangu
+        .calculateRates(originCep, destinationCep, weightG)
+        .catch((err) => {
+          this.logger.error(`Kangu rate calculation failed: ${String(err).slice(0, 200)}`);
           return [];
         }),
     ]);
@@ -85,6 +95,7 @@ export class ShippingService {
         priceBrl: rate.priceBrl,
         estimatedDays: `${rate.estimatedDays} dias úteis`,
         trackingAvailable: true,
+        supportsPrinterFree: false,
       });
     }
 
@@ -95,6 +106,18 @@ export class ShippingService {
         priceBrl: rate.priceBrl,
         estimatedDays: `${rate.estimatedDays} dias úteis`,
         trackingAvailable: true,
+        supportsPrinterFree: true, // JadLog supports QR drop-off
+      });
+    }
+
+    for (const rate of kanguRates) {
+      options.push({
+        carrier: 'Kangu',
+        serviceName: rate.serviceName,
+        priceBrl: rate.priceBrl,
+        estimatedDays: `${rate.estimatedDays} dias úteis`,
+        trackingAvailable: true,
+        supportsPrinterFree: true, // Kangu is printer-free native
       });
     }
 
@@ -114,32 +137,55 @@ export class ShippingService {
     const normalizedCarrier = carrier.toLowerCase();
 
     if (normalizedCarrier === 'jadlog') {
-      const label = await this.jadlog.generateLabel(
-        orderId,
-        originAddress,
-        destinationAddress,
-        weightG,
-      );
+      const label = await this.jadlog.generateLabel(orderId, originAddress, destinationAddress, weightG);
+      // Generate QR code for printer-free drop-off
+      const qrCodeData = `https://melhorrastreio.com.br/rastreio/${label.trackingCode}`;
+      const qrCodeDataUrl = await QRCode.toDataURL(qrCodeData).catch(() => undefined);
       return {
         labelUrl: label.labelUrl,
         trackingCode: label.trackingCode,
         carrier: 'Jadlog',
         estimatedDelivery: label.estimatedDelivery,
+        qrCodeData,
+        qrCodeDataUrl,
+      };
+    }
+
+    if (normalizedCarrier === 'kangu') {
+      const label = await this.kangu.generateLabel(orderId, originAddress, destinationAddress, weightG);
+      return {
+        labelUrl: label.labelUrl,
+        trackingCode: label.trackingCode,
+        carrier: 'Kangu',
+        estimatedDelivery: label.estimatedDelivery,
+        qrCodeData: label.qrCodeData,
+        qrCodeDataUrl: label.qrCodeDataUrl,
+      };
+    }
+
+    if (normalizedCarrier === 'pegaki') {
+      const label = await this.pegaki.generateLabel(orderId, originAddress, destinationAddress, weightG);
+      return {
+        labelUrl: label.labelUrl,
+        trackingCode: label.trackingCode,
+        carrier: 'Pegaki',
+        estimatedDelivery: label.estimatedDelivery,
+        qrCodeData: label.qrCodeData,
+        qrCodeDataUrl: label.qrCodeDataUrl,
       };
     }
 
     // Default to Correios
-    const label = await this.correios.generateLabel(
-      orderId,
-      originAddress,
-      destinationAddress,
-      weightG,
-    );
+    const label = await this.correios.generateLabel(orderId, originAddress, destinationAddress, weightG);
+    const qrCodeData = `https://rastreamento.correios.com.br/app/index.php/cores/${label.trackingCode}`;
+    const qrCodeDataUrl = await QRCode.toDataURL(qrCodeData).catch(() => undefined);
     return {
       labelUrl: label.labelUrl,
       trackingCode: label.trackingCode,
       carrier: 'Correios',
       estimatedDelivery: label.estimatedDelivery,
+      qrCodeData,
+      qrCodeDataUrl,
     };
   }
 
@@ -161,29 +207,40 @@ export class ShippingService {
    */
   async getDropoffPoints(cep: string, carrier?: string): Promise<DropoffPoint[]> {
     const normalizedCarrier = carrier?.toLowerCase();
+    const allCarriers = !normalizedCarrier;
 
-    const [correiosPoints, jadlogPoints] = await Promise.all([
-      normalizedCarrier && normalizedCarrier !== 'correios'
-        ? Promise.resolve([])
-        : this.correios.findAgencies(cep).catch((err) => {
-            this.logger.error(
-              `Correios agency lookup failed: ${String(err).slice(0, 200)}`,
-            );
+    const [correiosPoints, jadlogPoints, kanguPoints, pegakiPoints] = await Promise.all([
+      allCarriers || normalizedCarrier === 'correios'
+        ? this.correios.findAgencies(cep).catch((err) => {
+            this.logger.error(`Correios agency lookup failed: ${String(err).slice(0, 200)}`);
             return [];
-          }),
-      normalizedCarrier && normalizedCarrier !== 'jadlog'
-        ? Promise.resolve([])
-        : this.jadlog.findPartnerPoints(cep).catch((err) => {
-            this.logger.error(
-              `Jadlog partner point lookup failed: ${String(err).slice(0, 200)}`,
-            );
+          })
+        : Promise.resolve([]),
+      allCarriers || normalizedCarrier === 'jadlog'
+        ? this.jadlog.findPartnerPoints(cep).catch((err) => {
+            this.logger.error(`Jadlog partner point lookup failed: ${String(err).slice(0, 200)}`);
             return [];
-          }),
+          })
+        : Promise.resolve([]),
+      allCarriers || normalizedCarrier === 'kangu'
+        ? this.kangu.findDropoffPoints(cep).catch((err) => {
+            this.logger.error(`Kangu dropoff lookup failed: ${String(err).slice(0, 200)}`);
+            return [];
+          })
+        : Promise.resolve([]),
+      allCarriers || normalizedCarrier === 'pegaki'
+        ? this.pegaki.findDropoffPoints(cep).catch((err) => {
+            this.logger.error(`Pegaki dropoff lookup failed: ${String(err).slice(0, 200)}`);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     const points: DropoffPoint[] = [
       ...correiosPoints.map((p) => ({ ...p, carrier: 'Correios' as const })),
       ...jadlogPoints.map((p) => ({ ...p, carrier: 'Jadlog' as const })),
+      ...kanguPoints.map((p) => ({ ...p, carrier: 'Kangu' as const })),
+      ...pegakiPoints.map((p) => ({ ...p, carrier: 'Pegaki' as const })),
     ];
 
     return points.sort((a, b) => a.distanceKm - b.distanceKm);

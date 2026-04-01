@@ -32,6 +32,9 @@ import { AudienceModule } from './audience/audience.module';
 import { AdPartnersModule } from './ad-partners/ad-partners.module';
 import { AdsModule } from './ads/ads.module';
 import { ModerationModule } from './moderation/moderation.module';
+import { AuthenticityModule } from './authenticity/authenticity.module';
+import { SellerInsightsModule } from './seller-insights/seller-insights.module';
+import { ImpactModule } from './impact/impact.module';
 
 @Module({
   imports: [
@@ -70,6 +73,9 @@ import { ModerationModule } from './moderation/moderation.module';
     AdPartnersModule,
     AdsModule,
     ModerationModule,
+    AuthenticityModule,
+    SellerInsightsModule,
+    ImpactModule,
   ],
   providers: [
     {
@@ -87,6 +93,7 @@ export class AppModule implements NestModule {
         { path: 'api/v1/payments/webhook', method: RequestMethod.POST },
         { path: 'api/v1/auth/register', method: RequestMethod.POST },
         { path: 'api/v1/auth/login', method: RequestMethod.POST },
+        { path: 'api/v1/auth/2fa/confirm-login', method: RequestMethod.POST },
         { path: 'api/v1/auth/apple/callback', method: RequestMethod.POST },
         // Partner API endpoints use X-Partner-Key; CSRF middleware already
         // skips routes where X-API-Key is present. Explicit exclusion for clarity.

@@ -90,12 +90,14 @@ export class ListingsService {
       where: { id },
       include: {
         images: { orderBy: { position: 'asc' } },
+        videos: true,
         category: true,
         brand: true,
         seller: {
           select: {
             id: true, name: true, avatarUrl: true, verified: true,
             ratingAvg: true, ratingCount: true, createdAt: true,
+            twoFaEnabled: true,
           },
         },
       },
@@ -472,5 +474,41 @@ export class ListingsService {
       maxPriceBrl: Number(aggregate._max.itemPriceBrl),
       basedOnCount: aggregate._count,
     };
+  }
+
+  // --- Video Listings ---
+
+  /** Attach a video to a listing (max 1 per listing, max 30s). URL from /uploads/listing-video. */
+  async setListingVideo(
+    listingId: string,
+    sellerId: string,
+    videoUrl: string,
+    thumbnailUrl?: string,
+    durationSeconds?: number,
+  ) {
+    const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });
+    if (!listing) throw new NotFoundException('Anúncio não encontrado');
+    if (listing.sellerId !== sellerId) throw new ForbiddenException('Acesso negado');
+
+    if (durationSeconds !== undefined && durationSeconds > 30) {
+      throw new BadRequestException('O vídeo não pode ter mais de 30 segundos');
+    }
+
+    // Upsert — one video per listing (enforced by @@unique in schema)
+    return this.prisma.listingVideo.upsert({
+      where: { listingId },
+      create: { listingId, url: videoUrl, thumbnailUrl: thumbnailUrl ?? null, durationSeconds: durationSeconds ?? null },
+      update: { url: videoUrl, thumbnailUrl: thumbnailUrl ?? null, durationSeconds: durationSeconds ?? null },
+    });
+  }
+
+  /** Remove a listing's video. */
+  async removeListingVideo(listingId: string, sellerId: string) {
+    const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });
+    if (!listing) throw new NotFoundException('Anúncio não encontrado');
+    if (listing.sellerId !== sellerId) throw new ForbiddenException('Acesso negado');
+
+    await this.prisma.listingVideo.deleteMany({ where: { listingId } });
+    return { deleted: true };
   }
 }
