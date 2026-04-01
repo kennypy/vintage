@@ -13,6 +13,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as sharp from 'sharp';
+import { ImageAnalysisService } from './image-analysis.service';
+import { UploadImageResponse } from './dto/upload-response.dto';
 
 /** Maximum file size in bytes (10 MB). */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -47,7 +49,10 @@ export class UploadsService {
   private readonly presignedUrlExpiry: number;
   private readonly s3Configured: boolean;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly imageAnalysisService: ImageAnalysisService,
+  ) {
     const region = this.configService.get<string>('S3_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('S3_ENDPOINT', '');
     const accessKeyId = this.configService.get<string>('S3_ACCESS_KEY', '');
@@ -167,7 +172,7 @@ export class UploadsService {
     filename: string,
     mimeType: string,
     _listingImageCount?: number,
-  ): Promise<{ url: string; key: string; width: number; height: number }> {
+  ): Promise<UploadImageResponse> {
     // 1. Validate file size with early abort
     this.validateFileSize(file);
 
@@ -190,6 +195,9 @@ export class UploadsService {
     const timestamp = Date.now();
     const key = `listings/${timestamp}-${safeName}.jpg`;
 
+    // 5. Run image analysis on the validated buffer (non-blocking, never throws)
+    const suggestions = await this.imageAnalysisService.analyze(file);
+
     // Dev fallback: when S3 is not configured return a stable placeholder URL
     if (!this.s3Configured) {
       const seed = timestamp % 1000;
@@ -198,11 +206,12 @@ export class UploadsService {
         key,
         width: PLACEHOLDER_WIDTH,
         height: PLACEHOLDER_HEIGHT,
+        suggestions,
       };
     }
 
     try {
-      // 5. Process with Sharp: resize + compress to JPEG
+      // 6. Process with Sharp: resize + compress to JPEG
       const processed = await sharp(file)
         .resize({ width: MAX_IMAGE_WIDTH, withoutEnlargement: true })
         .jpeg({ quality: JPEG_QUALITY })
@@ -210,7 +219,7 @@ export class UploadsService {
 
       const metadata = await sharp(processed).metadata();
 
-      // 6. Upload to S3 with server-side encryption
+      // 7. Upload to S3 with server-side encryption
       await this.s3.send(
         new PutObjectCommand({
           Bucket: this.bucket,
@@ -228,6 +237,7 @@ export class UploadsService {
         key,
         width: metadata.width ?? 0,
         height: metadata.height ?? 0,
+        suggestions,
       };
     } catch (error) {
       if (error instanceof BadRequestException) {
