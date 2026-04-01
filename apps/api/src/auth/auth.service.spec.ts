@@ -104,7 +104,7 @@ describe('AuthService', () => {
           wallet: { create: {} },
         }),
       });
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
       });
@@ -152,10 +152,11 @@ describe('AuthService', () => {
 
       const result = await service.login(loginDto);
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
       });
+      expect(result).toHaveProperty('user');
     });
 
     it('should reject invalid password', async () => {
