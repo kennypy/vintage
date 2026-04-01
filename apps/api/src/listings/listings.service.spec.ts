@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 jest.mock('@vintage/shared', () => ({
   MAX_LISTING_IMAGES: 20,
+  containsProhibitedContent: jest.fn().mockReturnValue({ matched: false }),
 }));
 
 const mockPrisma = {
