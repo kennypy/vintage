@@ -78,7 +78,8 @@ function AppShell() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
         <Stack.Screen name="listing/[id]" options={{ title: 'Detalhes do anúncio' }} />
         <Stack.Screen name="checkout" options={{ title: 'Checkout', presentation: 'modal' }} />
         <Stack.Screen name="orders/index" options={{ title: 'Meus pedidos' }} />

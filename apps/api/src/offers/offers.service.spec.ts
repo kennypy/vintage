@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 jest.mock('@vintage/shared', () => ({
   MIN_OFFER_PERCENTAGE: 0.5,
   OFFER_EXPIRY_HOURS: 48,
+  containsProhibitedContent: jest.fn().mockReturnValue({ matched: false }),
 }));
 
 const mockPrisma = {
