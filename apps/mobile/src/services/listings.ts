@@ -1,4 +1,4 @@
-import { apiFetch, getToken } from './api';
+import { apiFetch, getToken, getCsrfToken } from './api';
 import { isDemoModeSync, toggleDemoFavorite, getDemoFavorites } from './demoStore';
 
 export interface ListingImage {
@@ -235,12 +235,7 @@ const UPLOAD_TIMEOUT_MS = 30_000;
  * Fetches a fresh CSRF token before each upload.
  */
 export async function uploadListingImage(uri: string): Promise<UploadImageResponse> {
-  // Fetch CSRF token
-  const csrfRes = await fetch(`${API_BASE_URL}/auth/csrf-token`);
-  if (!csrfRes.ok) {
-    throw new Error('Falha ao obter token CSRF');
-  }
-  const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+  const csrfToken = await getCsrfToken();
 
   const token = await getToken();
   console.log('[upload] token present:', !!token, '| csrf present:', !!csrfToken);
