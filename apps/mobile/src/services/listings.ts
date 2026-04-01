@@ -1,5 +1,5 @@
 import { apiFetch, getToken, getCsrfToken } from './api';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { isDemoModeSync, toggleDemoFavorite, getDemoFavorites } from './demoStore';
 
 export interface ListingImage {
@@ -102,9 +102,11 @@ export interface SavedSearch {
 export interface ListingSuggestions {
   title?: string;
   categoryId?: string;
+  categorySlug?: string;
   color?: string;
   brandId?: string;
   brandName?: string;
+  size?: string;
 }
 
 /** Response from POST /uploads/listing-image */
