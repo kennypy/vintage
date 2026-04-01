@@ -26,6 +26,25 @@ interface RequestOptions extends RequestInit {
 
 const FETCH_TIMEOUT_MS = 5000;
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// CSRF token cache — tokens are valid for 24 h on the server; refresh after 23 h
+let csrfTokenCache: string | null = null;
+let csrfTokenFetchedAt = 0;
+const CSRF_CACHE_TTL_MS = 23 * 60 * 60 * 1000;
+
+export async function getCsrfToken(): Promise<string> {
+  if (csrfTokenCache && Date.now() - csrfTokenFetchedAt < CSRF_CACHE_TTL_MS) {
+    return csrfTokenCache;
+  }
+  const res = await fetch(`${API_BASE_URL}/auth/csrf-token`);
+  if (!res.ok) throw new Error('Falha ao obter token CSRF');
+  const data = (await res.json()) as { csrfToken: string };
+  csrfTokenCache = data.csrfToken;
+  csrfTokenFetchedAt = Date.now();
+  return csrfTokenCache;
+}
+
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   // In demo mode there is no API — fail immediately so fallbacks trigger without delay
   if (isDemoModeSync()) {
@@ -44,6 +63,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
+  }
+
+  // Attach CSRF token for all state-changing requests
+  if (!SAFE_METHODS.has(options.method?.toUpperCase() ?? 'GET')) {
+    headers['X-CSRF-Token'] = await getCsrfToken();
   }
 
   const controller = new AbortController();
