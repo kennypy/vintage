@@ -1,4 +1,5 @@
 import { apiFetch, getToken, getCsrfToken } from './api';
+import * as FileSystem from 'expo-file-system';
 import { isDemoModeSync, toggleDemoFavorite, getDemoFavorites } from './demoStore';
 
 export interface ListingImage {
@@ -227,7 +228,6 @@ export async function deleteSavedSearch(id: string): Promise<void> {
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
 
-const UPLOAD_TIMEOUT_MS = 30_000;
 
 /**
  * Upload a single listing image to the backend.
@@ -240,40 +240,28 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   const token = await getToken();
   console.log('[upload] token present:', !!token, '| csrf present:', !!csrfToken);
 
-  const filename = uri.split('/').pop() ?? 'photo.jpg';
-  const ext = filename.split('.').pop()?.toLowerCase() ?? 'jpg';
-  const mimeType = ext === 'heic' ? 'image/jpeg' : `image/${ext}`;
-
-  const formData = new FormData();
-  // React Native FormData accepts { uri, name, type } objects — cast through unknown
-  formData.append('file', { uri, name: filename, type: mimeType } as unknown as string);
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/uploads/listing-image`, {
-      method: 'POST',
+  // FileSystem.uploadAsync handles Android content:// URIs correctly,
+  // avoiding the "Network request failed" error that raw fetch+FormData causes.
+  const result = await FileSystem.uploadAsync(
+    `${API_BASE_URL}/uploads/listing-image`,
+    uri,
+    {
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      httpMethod: 'POST',
       headers: {
         Authorization: token ? `Bearer ${token}` : '',
         'X-CSRF-Token': csrfToken,
-        // Do NOT set Content-Type — fetch sets it with multipart boundary automatically
       },
-      body: formData,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
+    },
+  );
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    console.log('[upload] error status:', response.status, '| body:', body);
+  if (result.status < 200 || result.status >= 300) {
+    console.log('[upload] error status:', result.status, '| body:', result.body);
     let message = 'Upload falhou';
-    try { message = (JSON.parse(body) as { message?: string }).message ?? message; } catch { /* ignore */ }
+    try { message = (JSON.parse(result.body) as { message?: string }).message ?? message; } catch { /* ignore */ }
     throw new Error(message);
   }
 
-  return response.json() as Promise<UploadImageResponse>;
+  return JSON.parse(result.body) as UploadImageResponse;
 }
