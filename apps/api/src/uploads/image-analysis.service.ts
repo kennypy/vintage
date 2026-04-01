@@ -7,6 +7,7 @@ export interface ListingSuggestions {
   categoryId?: string;
   color?: string;
   brandId?: string;
+  brandName?: string;
 }
 
 /**
@@ -287,6 +288,7 @@ export class ImageAnalysisService {
       });
       if (brand) {
         suggestions.brandId = brand.id;
+        suggestions.brandName = brand.name;
         this.logger.debug(`Logo matched to brand: ${brand.name}`);
       } else {
         this.logger.debug(`Logo detected (${logoName}) but not in brands DB`);
