@@ -94,7 +94,10 @@ export class MercadoPagoClient {
       return this.mockPixPayment(orderId, amountBrl);
     }
 
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`pix:${orderId}:${amountBrl}`)
+      .digest('hex');
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',
@@ -135,7 +138,10 @@ export class MercadoPagoClient {
       return this.mockCardPayment(orderId, amountBrl, installments);
     }
 
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`card:${orderId}:${amountBrl}:${installments}:${cardToken}`)
+      .digest('hex');
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',
@@ -180,7 +186,10 @@ export class MercadoPagoClient {
       return this.mockBoletoPayment(orderId, amountBrl);
     }
 
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`boleto:${orderId}:${amountBrl}`)
+      .digest('hex');
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',
@@ -268,7 +277,10 @@ export class MercadoPagoClient {
       return this.mockRefund(paymentId, amountBrl);
     }
 
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`refund:${paymentId}:${amountBrl ?? 'full'}`)
+      .digest('hex');
     const body = amountBrl !== undefined ? { amount: amountBrl } : {};
 
     const refund = await this.request<{ id: number; status: string }>(
