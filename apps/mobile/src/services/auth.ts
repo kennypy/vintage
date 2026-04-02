@@ -65,3 +65,30 @@ export async function refreshToken(): Promise<AuthTokens> {
   await setTokens(data.accessToken, data.refreshToken);
   return data;
 }
+
+export interface SocialLoginResponse {
+  user: Omit<AuthUser, 'cpf'> & { cpf: string | null };
+  accessToken: string;
+  refreshToken: string;
+  cpfVerified: boolean;
+}
+
+export async function signInWithGoogle(idToken: string): Promise<SocialLoginResponse> {
+  const data = await apiFetch<SocialLoginResponse>('/auth/google/token', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ idToken }),
+  });
+  await setTokens(data.accessToken, data.refreshToken);
+  return data;
+}
+
+export async function signInWithApple(identityToken: string, name?: string): Promise<SocialLoginResponse> {
+  const data = await apiFetch<SocialLoginResponse>('/auth/apple/callback', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ identityToken, name }),
+  });
+  await setTokens(data.accessToken, data.refreshToken);
+  return data;
+}

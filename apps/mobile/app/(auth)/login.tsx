@@ -2,18 +2,40 @@ import {
   View, Text, TextInput, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 
+WebBrowser.maybeCompleteAuthSession();
+
 export default function LoginScreen() {
   const router = useRouter();
   const { theme } = useTheme();
-  const { signIn, signInDemo } = useAuth();
+  const { signIn, signInDemo, signInWithGoogle, signInWithApple } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState(false);
+
+  const [_request, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? '',
+    scopes: ['openid', 'profile', 'email'],
+  });
+
+  useEffect(() => {
+    if (googleResponse?.type === 'success' && googleResponse.authentication?.idToken) {
+      const idToken = googleResponse.authentication.idToken;
+      setSocialLoading(true);
+      signInWithGoogle(idToken)
+        .then(() => router.replace('/(tabs)'))
+        .catch(() => Alert.alert('Erro ao entrar', 'Não foi possível entrar com Google. Tente novamente.'))
+        .finally(() => setSocialLoading(false));
+    }
+  }, [googleResponse]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -29,6 +51,30 @@ export default function LoginScreen() {
       Alert.alert('Erro ao entrar', 'Email ou senha incorretos. Tente novamente.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setSocialLoading(true);
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (credential.identityToken) {
+        const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+          .filter(Boolean).join(' ') || undefined;
+        await signInWithApple(credential.identityToken, fullName);
+        router.replace('/(tabs)');
+      }
+    } catch (e: unknown) {
+      if ((e as { code?: string }).code !== 'ERR_CANCELED') {
+        Alert.alert('Erro ao entrar', 'Não foi possível entrar com Apple. Tente novamente.');
+      }
+    } finally {
+      setSocialLoading(false);
     }
   };
 
@@ -83,13 +129,25 @@ export default function LoginScreen() {
           <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
         </View>
 
-        <TouchableOpacity style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
-          <Text style={[styles.socialButtonText, { color: theme.text }]}>Continuar com Google</Text>
+        <TouchableOpacity
+          style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
+          onPress={() => promptGoogleAsync()}
+          disabled={loading || socialLoading}
+        >
+          <Text style={[styles.socialButtonText, { color: theme.text }]}>
+            {socialLoading ? 'Entrando...' : 'Continuar com Google'}
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
-          <Text style={[styles.socialButtonText, { color: theme.text }]}>Continuar com Apple</Text>
-        </TouchableOpacity>
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity
+            style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
+            onPress={handleAppleSignIn}
+            disabled={loading || socialLoading}
+          >
+            <Text style={[styles.socialButtonText, { color: theme.text }]}>Continuar com Apple</Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={styles.demoButton}

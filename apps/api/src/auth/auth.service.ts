@@ -281,10 +281,8 @@ export class AuthService {
         });
       }
 
-      return {
-        ...this.generateTokens(existingUser.id),
-        cpfVerified: existingUser.cpfVerified,
-      };
+      const tokens = await this.generateTokensWithUser(existingUser.id);
+      return { ...tokens, cpfVerified: existingUser.cpfVerified };
     }
 
     // Create new user without CPF (required on first purchase)
@@ -307,9 +305,47 @@ export class AuthService {
     // Send welcome email (non-blocking, non-critical)
     this.emailService.sendWelcomeEmail(newUser.email, newUser.name);
 
+    const tokens = await this.generateTokensWithUser(newUser.id);
+    return { ...tokens, cpfVerified: false };
+  }
+
+  async verifyGoogleIdToken(idToken: string): Promise<SocialProfile> {
+    const clientId = this.config.get<string>('GOOGLE_CLIENT_ID', '');
+
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+      );
+    } catch {
+      throw new UnauthorizedException('Falha ao verificar token do Google');
+    }
+
+    if (!res.ok) {
+      throw new UnauthorizedException('Token do Google inválido');
+    }
+
+    const data = await res.json() as {
+      aud?: string;
+      email?: string;
+      name?: string;
+      picture?: string;
+      sub?: string;
+    };
+
+    if (clientId && data.aud !== clientId) {
+      throw new UnauthorizedException('Token do Google inválido para este app');
+    }
+
+    if (!data.email || !data.sub) {
+      throw new UnauthorizedException('Email não disponível na conta Google');
+    }
+
     return {
-      ...this.generateTokens(newUser.id),
-      cpfVerified: false,
+      email: data.email,
+      name: data.name ?? data.email.split('@')[0],
+      avatarUrl: data.picture,
+      providerId: data.sub,
     };
   }
 
