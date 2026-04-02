@@ -46,6 +46,9 @@
     "experiments": {
       "typedRoutes": true
     },
+    "install": {
+      "exclude": ["react-native-worklets"]
+    },
     "extra": {}
   }
 }
