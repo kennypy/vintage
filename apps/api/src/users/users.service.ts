@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
@@ -333,5 +333,82 @@ export class UsersService {
     }
 
     return user;
+  }
+
+  // --- Admin Methods ---
+
+  async listUsersAdmin(page: number, pageSize: number, search?: string) {
+    const skip = (page - 1) * pageSize;
+
+    const where = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { email: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
+
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          isBanned: true,
+          bannedReason: true,
+          verified: true,
+          createdAt: true,
+          _count: {
+            select: {
+              listings: true,
+              ordersBuyer: true,
+              ordersSeller: true,
+            },
+          },
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      items: items.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        isBanned: u.isBanned,
+        bannedReason: u.bannedReason,
+        verified: u.verified,
+        createdAt: u.createdAt,
+        listingCount: u._count.listings,
+        ordersBought: u._count.ordersBuyer,
+        ordersSold: u._count.ordersSeller,
+      })),
+      total,
+      page,
+      pageSize,
+      hasMore: skip + pageSize < total,
+    };
+  }
+
+  async promoteToAdmin(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    if (user.role === 'ADMIN') {
+      throw new BadRequestException('Usuário já é administrador.');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role: 'ADMIN' },
+    });
+
+    return { success: true, message: `Usuário ${user.name} promovido a administrador.` };
   }
 }

@@ -337,6 +337,17 @@ export interface PixPaymentData {
   expiresAt: string;
 }
 
+// --- Feature Flags ---
+
+export interface FeatureFlag {
+  id: string;
+  key: string;
+  enabled: boolean;
+  description: string | null;
+  metadata: Record<string, unknown> | null;
+  updatedAt: string;
+}
+
 // --- Coupons ---
 
 export interface CouponValidationResult {

@@ -10,6 +10,7 @@ import {
 import * as NavigationBar from 'expo-navigation-bar';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FavoritesProvider } from '../src/contexts/FavoritesContext';
+import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { colors } from '../src/theme/colors';
 
@@ -110,9 +111,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <FavoritesProvider>
-          <AppShell />
-        </FavoritesProvider>
+        <FeatureFlagsProvider>
+          <FavoritesProvider>
+            <AppShell />
+          </FavoritesProvider>
+        </FeatureFlagsProvider>
       </AuthProvider>
     </ThemeProvider>
   );

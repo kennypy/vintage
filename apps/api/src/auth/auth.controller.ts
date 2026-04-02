@@ -141,4 +141,15 @@ export class AuthController {
     const profile = await this.authService.verifyGoogleIdToken(body.idToken);
     return this.authService.socialLogin('google', profile);
   }
+
+  @Post('admin-setup')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Bootstrap: promover usuário autenticado a ADMIN (requer ADMIN_SETUP_KEY)' })
+  adminSetup(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { setupKey: string },
+  ) {
+    return this.authService.adminSetup(user.id, body.setupKey);
+  }
 }
