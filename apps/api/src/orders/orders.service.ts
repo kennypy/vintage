@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -15,7 +16,10 @@ import {
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private coupons: CouponsService,
+  ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
     const listing = await this.prisma.listing.findUnique({
@@ -49,13 +53,27 @@ export class OrdersService {
     const shippingCost = this.calculateShipping(listing.shippingWeightG);
     const buyerProtectionFee =
       BUYER_PROTECTION_FIXED_BRL + itemPrice * BUYER_PROTECTION_RATE;
-    const total = itemPrice + shippingCost + buyerProtectionFee;
+    const subtotal = itemPrice + shippingCost + buyerProtectionFee;
 
     // Validate installments
     const installments = dto.installments ?? 1;
     if (installments > 1 && dto.paymentMethod !== 'CREDIT_CARD') {
       throw new BadRequestException('Parcelamento disponível apenas para cartão de crédito');
     }
+
+    // Apply coupon if provided
+    let couponId: string | undefined;
+    let discountBrl = 0;
+    let isFreeOrder = false;
+
+    if (dto.couponCode) {
+      const couponResult = await this.coupons.validate(dto.couponCode, subtotal);
+      couponId = couponResult.couponId;
+      discountBrl = couponResult.discountBrl;
+      isFreeOrder = couponResult.discountPct === 100 || discountBrl >= subtotal;
+    }
+
+    const total = Math.max(0, subtotal - discountBrl);
 
     // Create order and mark listing as SOLD in a transaction
     const order = await this.prisma.$transaction(async (tx) => {
@@ -73,13 +91,16 @@ export class OrdersService {
           buyerId,
           sellerId: listing.sellerId,
           listingId: dto.listingId,
-          status: 'PENDING',
+          // Free orders skip payment entirely — mark as PAID immediately
+          status: isFreeOrder ? 'PAID' : 'PENDING',
           totalBrl: new Decimal(total.toFixed(2)),
           itemPriceBrl: listing.priceBrl,
           shippingCostBrl: new Decimal(shippingCost.toFixed(2)),
           buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
-          paymentMethod: dto.paymentMethod,
-          installments,
+          discountBrl: discountBrl > 0 ? new Decimal(discountBrl.toFixed(2)) : undefined,
+          couponId: couponId ?? undefined,
+          paymentMethod: isFreeOrder ? 'FREE' : dto.paymentMethod,
+          installments: isFreeOrder ? 1 : installments,
         },
         include: {
           listing: {
@@ -96,6 +117,14 @@ export class OrdersService {
         where: { id: dto.listingId },
         data: { status: 'SOLD' },
       });
+
+      // Increment coupon usage counter
+      if (couponId) {
+        await tx.coupon.update({
+          where: { id: couponId },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
 
       return createdOrder;
     });

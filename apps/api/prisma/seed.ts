@@ -655,6 +655,23 @@ async function main() {
   console.log('  ✅ Login events (security dashboard)');
 
   // ---------------------------------------------------------------------------
+  // Test coupon — 100% discount for end-to-end testing without real payments
+  // ---------------------------------------------------------------------------
+  await prisma.coupon.upsert({
+    where: { code: 'TESTE100' },
+    update: {},
+    create: {
+      code: 'TESTE100',
+      discountPct: 100,
+      maxUses: null,   // unlimited
+      isActive: true,
+      expiresAt: null, // never expires
+    },
+  });
+
+  console.log('  ✅ Test coupon TESTE100 (100% off, unlimited uses)');
+
+  // ---------------------------------------------------------------------------
   // Summary
   // ---------------------------------------------------------------------------
   console.log('\n🌱 Seeding complete!');

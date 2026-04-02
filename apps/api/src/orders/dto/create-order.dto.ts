@@ -1,4 +1,4 @@
-import { IsString, IsEnum, IsOptional, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsEnum, IsOptional, IsInt, Min, Max, Length } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 enum PaymentMethod {
@@ -26,4 +26,10 @@ export class CreateOrderDto {
   @Min(1)
   @Max(12)
   installments?: number;
+
+  @ApiPropertyOptional({ example: 'TESTE100', description: 'Código de cupom de desconto' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 50)
+  couponCode?: string;
 }

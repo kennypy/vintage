@@ -171,6 +171,23 @@ model Brand {
   @@index([slug])
 }
 
+// --- Coupons ---
+
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  discountPct Int       // 0–100 (100 = free)
+  maxUses     Int?      // null = unlimited
+  usedCount   Int       @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  orders Order[]
+
+  @@index([code])
+}
+
 // --- Orders ---
 
 model Order {
@@ -183,6 +200,8 @@ model Order {
   itemPriceBrl          Decimal       @db.Decimal(10, 2)
   shippingCostBrl       Decimal       @db.Decimal(10, 2)
   buyerProtectionFeeBrl Decimal       @db.Decimal(10, 2)
+  discountBrl           Decimal?      @db.Decimal(10, 2)
+  couponId              String?
   paymentMethod         PaymentMethod
   paymentId             String?
   shippingLabelUrl      String?
@@ -199,6 +218,7 @@ model Order {
   buyer        User           @relation("OrderBuyer", fields: [buyerId], references: [id])
   seller       User           @relation("OrderSeller", fields: [sellerId], references: [id])
   listing      Listing        @relation(fields: [listingId], references: [id])
+  coupon       Coupon?        @relation(fields: [couponId], references: [id])
   conversation Conversation?
   reviews      Review[]
   dispute      Dispute?
@@ -772,6 +792,7 @@ enum PaymentMethod {
   PIX
   CREDIT_CARD
   BOLETO
+  FREE
 }
 
 enum OfferStatus {

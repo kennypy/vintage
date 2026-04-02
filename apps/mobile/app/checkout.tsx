@@ -1,5 +1,6 @@
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useState, useEffect } from 'react';
@@ -9,6 +10,7 @@ import { colors } from '../src/theme/colors';
 import { useTheme } from '../src/contexts/ThemeContext';
 import { createOrder } from '../src/services/orders';
 import { getAddresses, Address } from '../src/services/addresses';
+import { validateCoupon, CouponValidationResult } from '../src/services/coupons';
 
 type PaymentMethod = 'pix' | 'credit_card' | 'boleto';
 
@@ -31,6 +33,11 @@ export default function CheckoutScreen() {
   const [paying, setPaying] = useState(false);
   const [_addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponInput, setCouponInput] = useState('');
+  const [couponResult, setCouponResult] = useState<CouponValidationResult | null>(null);
+  const [couponError, setCouponError] = useState('');
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   useEffect(() => {
     async function fetchAddresses() {
@@ -50,9 +57,36 @@ export default function CheckoutScreen() {
   const listingTitle = params.title ?? 'Item';
   const shippingCost = 18.9;
   const buyerProtectionFee = 3.5 + itemPrice * 0.05;
-  const total = itemPrice + shippingCost + buyerProtectionFee;
+  const subtotal = itemPrice + shippingCost + buyerProtectionFee;
+  const discount = couponResult?.discountBrl ?? 0;
+  const total = Math.max(0, subtotal - discount);
+  const isFreeOrder = total === 0;
 
   const installmentOptions = [1, 2, 3, 6, 10, 12];
+
+  const handleApplyCoupon = async () => {
+    const trimmed = couponInput.trim().toUpperCase();
+    if (!trimmed) return;
+    setApplyingCoupon(true);
+    setCouponError('');
+    setCouponResult(null);
+    try {
+      const result = await validateCoupon(trimmed, subtotal);
+      setCouponResult(result);
+      setCouponCode(trimmed);
+    } catch (_err) {
+      setCouponError('Cupom inválido, expirado ou não encontrado.');
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setCouponResult(null);
+    setCouponCode('');
+    setCouponInput('');
+    setCouponError('');
+  };
 
   const handlePay = async () => {
     if (!params.listingId) {
@@ -65,7 +99,9 @@ export default function CheckoutScreen() {
       await createOrder({
         listingId: params.listingId,
         addressId: selectedAddress?.id ?? 'default',
-        shippingOptionId: 'standard',
+        paymentMethod: paymentMethod.toUpperCase() as 'PIX' | 'CREDIT_CARD' | 'BOLETO',
+        installments: paymentMethod === 'credit_card' ? installments : undefined,
+        couponCode: couponCode || undefined,
       });
       Alert.alert(
         'Pedido realizado!',
@@ -223,6 +259,50 @@ export default function CheckoutScreen() {
           </View>
         )}
 
+        {/* Coupon Code */}
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Cupom de desconto</Text>
+          {couponResult ? (
+            <View style={[styles.couponApplied, { backgroundColor: colors.success[500] + '15', borderColor: colors.success[500] }]}>
+              <Ionicons name="pricetag" size={18} color={colors.success[600]} />
+              <View style={styles.couponAppliedInfo}>
+                <Text style={[styles.couponAppliedCode, { color: colors.success[700] }]}>{couponResult.code}</Text>
+                <Text style={[styles.couponAppliedDesc, { color: colors.success[600] }]}>
+                  {couponResult.discountPct}% de desconto — R$ {formatBrl(couponResult.discountBrl)} de economia
+                </Text>
+              </View>
+              <TouchableOpacity onPress={handleRemoveCoupon}>
+                <Ionicons name="close-circle" size={20} color={colors.success[600]} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.couponRow}>
+              <TextInput
+                style={[styles.couponInput, { backgroundColor: theme.inputBg, color: theme.text, borderColor: theme.border }]}
+                placeholder="CÓDIGO DO CUPOM"
+                placeholderTextColor={theme.textTertiary}
+                value={couponInput}
+                onChangeText={setCouponInput}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.couponButton, { backgroundColor: colors.primary[600] }, applyingCoupon && styles.payButtonDisabled]}
+                onPress={handleApplyCoupon}
+                disabled={applyingCoupon || !couponInput.trim()}
+              >
+                {applyingCoupon
+                  ? <ActivityIndicator color={colors.neutral[0]} size="small" />
+                  : <Text style={styles.couponButtonText}>Aplicar</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          )}
+          {!!couponError && (
+            <Text style={styles.couponError}>{couponError}</Text>
+          )}
+        </View>
+
         {/* Summary */}
         <View style={[styles.section, { backgroundColor: theme.card }]}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Resumo do pedido</Text>
@@ -238,9 +318,17 @@ export default function CheckoutScreen() {
             <Text style={[styles.summaryLabel, { color: theme.textSecondary }]}>Proteção ao comprador</Text>
             <Text style={[styles.summaryValue, { color: theme.textSecondary }]}>R$ {formatBrl(buyerProtectionFee)}</Text>
           </View>
+          {couponResult && (
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: colors.success[600] }]}>Cupom {couponResult.code}</Text>
+              <Text style={[styles.summaryValue, { color: colors.success[600] }]}>– R$ {formatBrl(couponResult.discountBrl)}</Text>
+            </View>
+          )}
           <View style={[styles.summaryRow, styles.totalRow, { borderTopColor: theme.border }]}>
             <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
-            <Text style={[styles.totalValue, { color: colors.primary[600] }]}>R$ {formatBrl(total)}</Text>
+            <Text style={[styles.totalValue, { color: isFreeOrder ? colors.success[600] : colors.primary[600] }]}>
+              {isFreeOrder ? 'Grátis' : `R$ ${formatBrl(total)}`}
+            </Text>
           </View>
         </View>
 
@@ -266,12 +354,12 @@ export default function CheckoutScreen() {
       ]}>
         <View style={styles.bottomTotal}>
           <Text style={[styles.bottomTotalLabel, { color: theme.textSecondary }]}>Total</Text>
-          <Text style={[styles.bottomTotalValue, { color: theme.text }]}>
-            R$ {formatBrl(total)}
+          <Text style={[styles.bottomTotalValue, { color: isFreeOrder ? colors.success[600] : theme.text }]}>
+            {isFreeOrder ? 'Grátis' : `R$ ${formatBrl(total)}`}
           </Text>
         </View>
         <TouchableOpacity
-          style={[styles.payButton, paying && styles.payButtonDisabled]}
+          style={[styles.payButton, isFreeOrder && styles.payButtonFree, paying && styles.payButtonDisabled]}
           onPress={handlePay}
           disabled={paying}
         >
@@ -279,7 +367,8 @@ export default function CheckoutScreen() {
             <ActivityIndicator color={colors.neutral[0]} size="small" />
           ) : (
             <Text style={styles.payButtonText}>
-              {paymentMethod === 'pix' ? 'Pagar com PIX' :
+              {isFreeOrder ? 'Confirmar pedido grátis' :
+                paymentMethod === 'pix' ? 'Pagar com PIX' :
                 paymentMethod === 'credit_card' ? 'Pagar com cartão' : 'Gerar boleto'}
             </Text>
           )}
@@ -359,6 +448,25 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[600], paddingHorizontal: 24, paddingVertical: 14,
     borderRadius: 12,
   },
+  payButtonFree: { backgroundColor: colors.success[600] },
   payButtonDisabled: { opacity: 0.6 },
   payButtonText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
+  couponRow: { flexDirection: 'row', gap: 8 },
+  couponInput: {
+    flex: 1, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
+    fontSize: 14, letterSpacing: 1,
+  },
+  couponButton: {
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center', minWidth: 80,
+  },
+  couponButtonText: { color: colors.neutral[0], fontSize: 14, fontWeight: '600' },
+  couponApplied: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    padding: 12, borderRadius: 10, borderWidth: 1,
+  },
+  couponAppliedInfo: { flex: 1 },
+  couponAppliedCode: { fontSize: 14, fontWeight: '700' },
+  couponAppliedDesc: { fontSize: 12, marginTop: 2 },
+  couponError: { color: '#ef4444', fontSize: 12, marginTop: 6 },
 });
