@@ -244,13 +244,11 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
 
   // FileSystem.uploadAsync handles Android content:// URIs correctly,
   // avoiding the "Network request failed" error that raw fetch+FormData causes.
-  // FileSystemUploadType.MULTIPART = 1 (numeric literal used because the enum
-  // moved to a legacy sub-path in expo-file-system v55+)
   const result = await FileSystem.uploadAsync(
     `${API_BASE_URL}/uploads/listing-image`,
     uri,
     {
-      uploadType: 1 as unknown as FileSystem.FileSystemUploadType,
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
       fieldName: 'file',
       httpMethod: 'POST',
       headers: {
