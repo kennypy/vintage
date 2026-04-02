@@ -131,4 +131,14 @@ export class AuthController {
 
     return this.authService.socialLogin('apple', profile);
   }
+
+  @Post('google/token')
+  @ApiOperation({ summary: 'Login com Google via ID token (mobile)' })
+  async googleTokenAuth(@Body() body: { idToken: string }) {
+    if (!body.idToken) {
+      throw new BadRequestException('ID token do Google é obrigatório');
+    }
+    const profile = await this.authService.verifyGoogleIdToken(body.idToken);
+    return this.authService.socialLogin('google', profile);
+  }
 }

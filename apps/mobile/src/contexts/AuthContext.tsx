@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getToken, clearTokens } from '../services/api';
-import { login as loginService, register as registerService, AuthUser } from '../services/auth';
+import { login as loginService, register as registerService, signInWithGoogle as signInWithGoogleService, signInWithApple as signInWithAppleService, AuthUser } from '../services/auth';
 import { getProfile, UserProfile } from '../services/users';
 import {
   getDemoUser,
@@ -17,6 +17,8 @@ interface AuthContextType {
   isDemoMode: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, cpf: string, password: string) => Promise<void>;
+  signInWithGoogle: (idToken: string) => Promise<void>;
+  signInWithApple: (identityToken: string, name?: string) => Promise<void>;
   signInDemo: (name?: string, email?: string, cpf?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -137,6 +139,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signInWithGoogle = useCallback(async (idToken: string) => {
+    await disableDemoMode();
+    await clearTokens();
+    setDemoActive(false);
+    const response = await signInWithGoogleService(idToken);
+    setUser({ ...response.user, cpf: response.user.cpf ?? '' } as AuthUser & Partial<UserProfile>);
+  }, []);
+
+  const signInWithApple = useCallback(async (identityToken: string, name?: string) => {
+    await disableDemoMode();
+    await clearTokens();
+    setDemoActive(false);
+    const response = await signInWithAppleService(identityToken, name);
+    setUser({ ...response.user, cpf: response.user.cpf ?? '' } as AuthUser & Partial<UserProfile>);
+  }, []);
+
   const signInDemo = useCallback(async (
     name = 'Usuário Demo',
     email = 'demo@vintage.br',
@@ -170,6 +188,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isDemoMode: demoActive,
         signIn,
         signUp,
+        signInWithGoogle,
+        signInWithApple,
         signInDemo,
         signOut,
         refreshUser,
