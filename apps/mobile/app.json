@@ -48,7 +48,8 @@
       "expo-image-picker",
       "expo-notifications",
       "expo-local-authentication",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
