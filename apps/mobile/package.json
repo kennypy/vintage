@@ -26,15 +26,7 @@
     "expo-file-system": "~19.0.21",
     "expo-image-picker": "~17.0.10",
     "expo-linking": "~8.0.11",
-<<<<<<< Updated upstream
-    "expo-apple-authentication": "*",
-    "expo-auth-session": "*",
-    "expo-crypto": "*",
     "expo-local-authentication": "~17.0.8",
-    "expo-web-browser": "*",
-=======
-    "expo-local-authentication": "~17.0.8",
->>>>>>> Stashed changes
     "expo-navigation-bar": "~5.0.10",
     "expo-notifications": "~0.32.16",
     "expo-router": "~6.0.23",
