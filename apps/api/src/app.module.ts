@@ -35,6 +35,7 @@ import { ModerationModule } from './moderation/moderation.module';
 import { AuthenticityModule } from './authenticity/authenticity.module';
 import { SellerInsightsModule } from './seller-insights/seller-insights.module';
 import { ImpactModule } from './impact/impact.module';
+import { CouponsModule } from './coupons/coupons.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { ImpactModule } from './impact/impact.module';
     AuthenticityModule,
     SellerInsightsModule,
     ImpactModule,
+    CouponsModule,
   ],
   providers: [
     {

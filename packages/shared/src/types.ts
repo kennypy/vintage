@@ -34,6 +34,7 @@ export enum PaymentMethod {
   PIX = 'pix',
   CREDIT_CARD = 'credit_card',
   BOLETO = 'boleto',
+  FREE = 'free',
 }
 
 export enum OfferStatus {
@@ -332,4 +333,14 @@ export interface PixPaymentData {
   qrCodeBase64: string;
   pixCopiaECola: string;
   expiresAt: string;
+}
+
+// --- Coupons ---
+
+export interface CouponValidationResult {
+  valid: boolean;
+  couponId: string;
+  code: string;
+  discountPct: number;
+  discountBrl: number;
 }

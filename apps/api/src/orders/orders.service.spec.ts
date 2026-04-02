@@ -7,6 +7,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CouponsService } from '../coupons/coupons.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -29,6 +30,13 @@ const mockTx = {
   walletTransaction: {
     create: jest.fn(),
   },
+  coupon: {
+    update: jest.fn(),
+  },
+};
+
+const mockCoupons = {
+  validate: jest.fn(),
 };
 
 const mockPrisma = {
@@ -57,6 +65,7 @@ describe('OrdersService', () => {
       providers: [
         OrdersService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: CouponsService, useValue: mockCoupons },
       ],
     }).compile();
 

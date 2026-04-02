@@ -61,7 +61,9 @@ export interface OrdersResponse {
 export interface CreateOrderData {
   listingId: string;
   addressId: string;
-  shippingOptionId: string;
+  paymentMethod: 'PIX' | 'CREDIT_CARD' | 'BOLETO';
+  installments?: number;
+  couponCode?: string;
 }
 
 export async function createOrder(data: CreateOrderData): Promise<Order> {
