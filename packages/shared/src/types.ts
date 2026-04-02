@@ -64,6 +64,8 @@ export enum WalletTransactionType {
   DEBIT = 'debit',
   PAYOUT = 'payout',
   REFUND = 'refund',
+  ESCROW_HOLD = 'escrow_hold',
+  ESCROW_RELEASE = 'escrow_release',
 }
 
 export enum PromotionType {

@@ -127,6 +127,9 @@ export class DisputesService {
 
   /**
    * Resolve uma disputa (ação administrativa).
+   *
+   * - refund=true  → buyer wins: refund buyer, reverse seller escrow hold
+   * - refund=false → seller wins: release escrow to seller balance
    */
   async resolve(disputeId: string, resolution: string, refund: boolean) {
     const dispute = await this.prisma.dispute.findUnique({
@@ -170,14 +173,42 @@ export class DisputesService {
         },
       });
 
+      const itemAmount = Number(dispute.order.itemPriceBrl);
+
       if (refund) {
-        // Refund buyer: update order to REFUNDED
+        // Buyer wins: refund buyer and reverse seller escrow hold
         await tx.order.update({
           where: { id: dispute.orderId },
           data: { status: 'REFUNDED' },
         });
 
-        // Create wallet refund transaction for the buyer
+        // Reverse the escrow hold on seller's wallet
+        const sellerWallet = await tx.wallet.upsert({
+          where: { userId: dispute.order.sellerId },
+          create: {
+            userId: dispute.order.sellerId,
+            balanceBrl: 0,
+            pendingBrl: 0,
+          },
+          update: {},
+        });
+
+        await tx.wallet.update({
+          where: { id: sellerWallet.id },
+          data: { pendingBrl: { decrement: itemAmount } },
+        });
+
+        await tx.walletTransaction.create({
+          data: {
+            walletId: sellerWallet.id,
+            type: 'ESCROW_RELEASE',
+            amountBrl: new Decimal((-itemAmount).toFixed(2)),
+            referenceId: dispute.orderId,
+            description: `Custódia revertida (disputa): ${dispute.order.listing.title}`,
+          },
+        });
+
+        // Refund buyer's wallet with full order total
         const buyerWallet = await tx.wallet.upsert({
           where: { userId: dispute.order.buyerId },
           create: {
@@ -200,14 +231,14 @@ export class DisputesService {
         await tx.walletTransaction.create({
           data: {
             walletId: buyerWallet.id,
-            type: 'CREDIT',
+            type: 'REFUND',
             amountBrl: new Decimal(refundAmount.toFixed(2)),
             referenceId: dispute.orderId,
             description: `Reembolso da disputa: ${dispute.order.listing.title}`,
           },
         });
       } else {
-        // Resolve in seller's favor: complete order and release funds
+        // Seller wins: release escrow to seller balance
         await tx.order.update({
           where: { id: dispute.orderId },
           data: {
@@ -216,7 +247,6 @@ export class DisputesService {
           },
         });
 
-        // Credit seller wallet
         const sellerWallet = await tx.wallet.upsert({
           where: { userId: dispute.order.sellerId },
           create: {
@@ -227,11 +257,10 @@ export class DisputesService {
           update: {},
         });
 
-        const itemAmount = Number(dispute.order.itemPriceBrl);
-
         await tx.wallet.update({
           where: { id: sellerWallet.id },
           data: {
+            pendingBrl: { decrement: itemAmount },
             balanceBrl: { increment: itemAmount },
           },
         });
@@ -239,10 +268,10 @@ export class DisputesService {
         await tx.walletTransaction.create({
           data: {
             walletId: sellerWallet.id,
-            type: 'CREDIT',
+            type: 'ESCROW_RELEASE',
             amountBrl: new Decimal(itemAmount.toFixed(2)),
             referenceId: dispute.orderId,
-            description: `Venda concluída (disputa resolvida): ${dispute.order.listing.title}`,
+            description: `Fundos liberados (disputa resolvida): ${dispute.order.listing.title}`,
           },
         });
       }

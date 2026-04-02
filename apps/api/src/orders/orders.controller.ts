@@ -69,6 +69,13 @@ export class OrdersController {
     return this.ordersService.markShipped(id, user.id, dto);
   }
 
+  @Patch(':id/deliver')
+  @ApiOperation({ summary: 'Marcar pedido como entregue (comprador ou rastreio)' })
+  @ApiResponse({ status: 200, description: 'Pedido marcado como entregue' })
+  deliver(@CurrentUser() _user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.markDelivered(id);
+  }
+
   @Patch(':id/confirm')
   @ApiOperation({ summary: 'Comprador confirma recebimento ("Tudo certo")' })
   @ApiResponse({ status: 200, description: 'Recebimento confirmado, fundos liberados' })
