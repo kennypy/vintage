@@ -20,7 +20,8 @@
     "turbo": "^2.3.0"
   },
   "overrides": {
-    "react-test-renderer": "19.1.0"
+    "react-test-renderer": "19.1.0",
+    "expo-file-system": "~19.0.21"
   },
   "engines": {
     "node": ">=20.0.0"
