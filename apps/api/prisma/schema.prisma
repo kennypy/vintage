@@ -814,6 +814,8 @@ enum WalletTransactionType {
   DEBIT
   PAYOUT
   REFUND
+  ESCROW_HOLD
+  ESCROW_RELEASE
 }
 
 enum PromotionType {

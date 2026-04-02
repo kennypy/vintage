@@ -5,6 +5,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Decimal } from '@prisma/client/runtime/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { MercadoPagoClient } from './mercadopago.client';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
@@ -18,6 +20,7 @@ export class PaymentsService {
   constructor(
     private readonly mercadoPago: MercadoPagoClient,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {
     this.nodeEnv = this.configService.get<string>(
       'NODE_ENV',
@@ -45,11 +48,16 @@ export class PaymentsService {
   async createPixPayment(orderId: string, amountBrl: number) {
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating PIX payment for order ${orderId}`);
-    return this.mercadoPago.createPixPayment(
+    const result = await this.mercadoPago.createPixPayment(
       orderId,
       amountBrl,
       `Vintage.br - Pedido ${orderId}`,
     );
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { paymentId: String(result.id) },
+    });
+    return result;
   }
 
   async createCardPayment(
@@ -60,22 +68,32 @@ export class PaymentsService {
   ) {
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating card payment for order ${orderId}`);
-    return this.mercadoPago.createCardPayment(
+    const result = await this.mercadoPago.createCardPayment(
       orderId,
       amountBrl,
       installments,
       cardToken ?? '',
     );
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { paymentId: String(result.id) },
+    });
+    return result;
   }
 
   async createBoletoPayment(orderId: string, amountBrl: number) {
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating boleto payment for order ${orderId}`);
-    return this.mercadoPago.createBoletoPayment(
+    const result = await this.mercadoPago.createBoletoPayment(
       orderId,
       amountBrl,
       `Vintage.br - Pedido ${orderId}`,
     );
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { paymentId: String(result.id) },
+    });
+    return result;
   }
 
   async handleWebhook(payload: Record<string, unknown>, signature?: string) {
@@ -136,9 +154,65 @@ export class PaymentsService {
       this.logger.log(
         `Payment ${dataId} status updated: ${status.status}`,
       );
+
+      if (status.status === 'approved') {
+        await this.processApprovedPayment(dataId);
+      }
     }
 
     return { received: true };
+  }
+
+  /**
+   * Transitions order from PENDING → PAID and creates an escrow hold
+   * on the seller's wallet (funds in pendingBrl, not balanceBrl).
+   */
+  private async processApprovedPayment(paymentId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { paymentId, status: 'PENDING' },
+      include: { listing: { select: { title: true } } },
+    });
+
+    if (!order) {
+      this.logger.log(
+        `No PENDING order found for paymentId ${paymentId} — already processed or missing`,
+      );
+      return;
+    }
+
+    const itemAmount = Number(order.itemPriceBrl);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: 'PAID' },
+      });
+
+      const wallet = await tx.wallet.upsert({
+        where: { userId: order.sellerId },
+        create: { userId: order.sellerId, balanceBrl: 0, pendingBrl: 0 },
+        update: {},
+      });
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { pendingBrl: { increment: itemAmount } },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'ESCROW_HOLD',
+          amountBrl: new Decimal(itemAmount.toFixed(2)),
+          referenceId: order.id,
+          description: `Venda em custódia: ${order.listing.title}`,
+        },
+      });
+    });
+
+    this.logger.log(
+      `Order ${order.id} marked PAID — R$${itemAmount.toFixed(2)} held in escrow for seller ${order.sellerId}`,
+    );
   }
 
   async getPaymentStatus(paymentId: string) {

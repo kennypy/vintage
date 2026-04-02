@@ -12,6 +12,7 @@ import { ShipOrderDto } from './dto/ship-order.dto';
 import {
   BUYER_PROTECTION_FIXED_BRL,
   BUYER_PROTECTION_RATE,
+  DISPUTE_WINDOW_DAYS,
 } from '@vintage/shared';
 
 @Injectable()
@@ -126,6 +127,30 @@ export class OrdersService {
         });
       }
 
+      // Free orders are already PAID — hold funds in escrow immediately
+      if (isFreeOrder) {
+        const wallet = await tx.wallet.upsert({
+          where: { userId: listing.sellerId },
+          create: { userId: listing.sellerId, balanceBrl: 0, pendingBrl: 0 },
+          update: {},
+        });
+
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: { pendingBrl: { increment: itemPrice } },
+        });
+
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'ESCROW_HOLD',
+            amountBrl: new Decimal(itemPrice.toFixed(2)),
+            referenceId: createdOrder.id,
+            description: `Venda em custódia: ${listing.title}`,
+          },
+        });
+      }
+
       return createdOrder;
     });
 
@@ -232,6 +257,49 @@ export class OrdersService {
     });
   }
 
+  /**
+   * Marks a shipped order as delivered and sets the dispute deadline.
+   * Called by tracking webhook or manually by the buyer/admin.
+   */
+  async markDelivered(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Pedido não encontrado');
+    }
+
+    if (order.status !== 'SHIPPED') {
+      throw new BadRequestException('Pedido precisa estar enviado para marcar como entregue');
+    }
+
+    const now = new Date();
+    const disputeDeadline = new Date(now);
+    disputeDeadline.setDate(disputeDeadline.getDate() + DISPUTE_WINDOW_DAYS);
+
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: 'DELIVERED',
+        deliveredAt: now,
+        disputeDeadline,
+      },
+      include: {
+        listing: {
+          include: {
+            images: { orderBy: { position: 'asc' }, take: 1 },
+          },
+        },
+        buyer: { select: { id: true, name: true } },
+        seller: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  /**
+   * Buyer confirms receipt. Validates identity and delegates to releaseEscrow().
+   */
   async confirmReceipt(orderId: string, buyerId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -249,9 +317,17 @@ export class OrdersService {
       throw new BadRequestException('Pedido precisa estar enviado para confirmar recebimento');
     }
 
-    // Confirm order and credit seller wallet in a transaction
-    const updatedOrder = await this.prisma.$transaction(async (tx) => {
-      const confirmed = await tx.order.update({
+    return this.releaseEscrow(orderId);
+  }
+
+  /**
+   * Releases escrowed funds: moves itemPriceBrl from seller's pendingBrl
+   * to balanceBrl, marks order as COMPLETED. Used by confirmReceipt(),
+   * auto-confirm cron, and dispute resolution (seller wins).
+   */
+  async releaseEscrow(orderId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.update({
         where: { id: orderId },
         data: {
           status: 'COMPLETED',
@@ -268,10 +344,8 @@ export class OrdersService {
         },
       });
 
-      // Credit seller wallet
       const itemAmount = Number(order.itemPriceBrl);
 
-      // Ensure seller has a wallet
       const wallet = await tx.wallet.upsert({
         where: { userId: order.sellerId },
         create: { userId: order.sellerId, balanceBrl: 0, pendingBrl: 0 },
@@ -281,6 +355,7 @@ export class OrdersService {
       await tx.wallet.update({
         where: { id: wallet.id },
         data: {
+          pendingBrl: { decrement: itemAmount },
           balanceBrl: { increment: itemAmount },
         },
       });
@@ -288,17 +363,15 @@ export class OrdersService {
       await tx.walletTransaction.create({
         data: {
           walletId: wallet.id,
-          type: 'CREDIT',
+          type: 'ESCROW_RELEASE',
           amountBrl: new Decimal(itemAmount.toFixed(2)),
           referenceId: orderId,
-          description: `Venda do anúncio: ${confirmed.listing.title}`,
+          description: `Fundos liberados: ${order.listing.title}`,
         },
       });
 
-      return confirmed;
+      return order;
     });
-
-    return updatedOrder;
   }
 
   /**
