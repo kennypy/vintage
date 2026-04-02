@@ -1,19 +1,45 @@
 import {
   Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards,
+  DefaultValuePipe, ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 
 @ApiTags('users')
-@Controller('users')
+@Controller()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Get('storefront/:username')
+  // --- Admin Endpoints ---
+
+  @Get('admin/users')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Listar todos os usuários (admin)' })
+  listUsersAdmin(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('pageSize', new DefaultValuePipe(20), ParseIntPipe) pageSize: number,
+    @Query('search') search?: string,
+  ) {
+    return this.usersService.listUsersAdmin(page, Math.min(pageSize, 100), search);
+  }
+
+  @Post('admin/users/:id/promote')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Promover usuário a ADMIN' })
+  promoteToAdmin(@Param('id') id: string) {
+    return this.usersService.promoteToAdmin(id);
+  }
+
+  // --- Public & Authenticated Endpoints ---
+
+  @Get('users/storefront/:username')
   @ApiOperation({ summary: 'Ver vitrine pública de um vendedor' })
   getStorefront(
     @Param('username') username: string,
@@ -23,7 +49,7 @@ export class UsersController {
     return this.usersService.getStorefront(username, page, pageSize);
   }
 
-  @Patch('me/cover-photo')
+  @Patch('users/me/cover-photo')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Atualizar foto de capa do perfil' })
@@ -34,7 +60,7 @@ export class UsersController {
     return this.usersService.updateCoverPhoto(user.id, body.coverPhotoUrl);
   }
 
-  @Get('me')
+  @Get('users/me')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Perfil do usuário autenticado' })
@@ -42,13 +68,13 @@ export class UsersController {
     return this.usersService.getMyProfile(user.id);
   }
 
-  @Get(':id')
+  @Get('users/:id')
   @ApiOperation({ summary: 'Buscar perfil de usuário' })
   getProfile(@Param('id') id: string) {
     return this.usersService.getProfile(id);
   }
 
-  @Patch(':id')
+  @Patch('users/:id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Atualizar perfil (avatar, bio, telefone)' })
@@ -60,7 +86,7 @@ export class UsersController {
     return this.usersService.updateProfile(id, user.id, dto);
   }
 
-  @Get(':id/listings')
+  @Get('users/:id/listings')
   @ApiOperation({ summary: 'Listar anúncios do usuário' })
   getUserListings(
     @Param('id') id: string,
@@ -72,7 +98,7 @@ export class UsersController {
 
   // --- Addresses ---
 
-  @Get('me/addresses')
+  @Get('users/me/addresses')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Listar endereços do usuário autenticado' })
@@ -80,7 +106,7 @@ export class UsersController {
     return this.usersService.getAddresses(user.id);
   }
 
-  @Post('me/addresses')
+  @Post('users/me/addresses')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Adicionar endereço' })
@@ -88,7 +114,7 @@ export class UsersController {
     return this.usersService.createAddress(user.id, dto);
   }
 
-  @Delete('me/addresses/:addressId')
+  @Delete('users/me/addresses/:addressId')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Remover endereço' })
@@ -98,7 +124,7 @@ export class UsersController {
 
   // --- Follow ---
 
-  @Post(':id/follow')
+  @Post('users/:id/follow')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Seguir usuário' })
@@ -106,7 +132,7 @@ export class UsersController {
     return this.usersService.followUser(user.id, id);
   }
 
-  @Delete(':id/follow')
+  @Delete('users/:id/follow')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Deixar de seguir' })
@@ -116,7 +142,7 @@ export class UsersController {
 
   // --- Vacation Mode ---
 
-  @Patch('me/vacation')
+  @Patch('users/me/vacation')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Ativar/desativar modo férias' })

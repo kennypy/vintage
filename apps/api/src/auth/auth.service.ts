@@ -349,6 +349,36 @@ export class AuthService {
     };
   }
 
+  async adminSetup(userId: string, setupKey: string) {
+    const envKey = this.config.get<string>('ADMIN_SETUP_KEY');
+    if (!envKey) {
+      throw new BadRequestException(
+        'ADMIN_SETUP_KEY não está configurada. Defina a variável de ambiente para usar este endpoint.',
+      );
+    }
+
+    if (setupKey !== envKey) {
+      throw new UnauthorizedException('Chave de setup inválida.');
+    }
+
+    // Check if any admin already exists
+    const existingAdmin = await this.prisma.user.findFirst({
+      where: { role: 'ADMIN' },
+    });
+    if (existingAdmin) {
+      throw new BadRequestException(
+        'Já existe um administrador. Use POST /admin/users/:id/promote para promover outros usuários.',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role: 'ADMIN' },
+    });
+
+    return { success: true, message: 'Conta promovida a administrador.' };
+  }
+
   async refreshToken(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {

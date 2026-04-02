@@ -37,6 +37,8 @@ import { AuthenticityModule } from './authenticity/authenticity.module';
 import { SellerInsightsModule } from './seller-insights/seller-insights.module';
 import { ImpactModule } from './impact/impact.module';
 import { CouponsModule } from './coupons/coupons.module';
+import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
+import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { CouponsModule } from './coupons/coupons.module';
     SellerInsightsModule,
     ImpactModule,
     CouponsModule,
+    FeatureFlagsModule,
+    AdminAnalyticsModule,
   ],
   providers: [
     {

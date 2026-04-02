@@ -41,6 +41,9 @@ export default [
         KeyboardEvent: 'readonly',
         HTMLFormElement: 'readonly',
         alert: 'readonly',
+        atob: 'readonly',
+        confirm: 'readonly',
+        prompt: 'readonly',
       },
     },
     plugins: {
