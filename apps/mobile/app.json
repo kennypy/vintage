@@ -28,13 +28,7 @@
         "backgroundColor": "#1a1a2e"
       },
       "package": "br.vintage.app",
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
-      ]
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
     },
     "web": {
       "bundler": "metro",
@@ -52,11 +46,9 @@
     "experiments": {
       "typedRoutes": true
     },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "bec14fac-3828-4d4c-9941-26fd182865f0"
-      }
-    }
+    "install": {
+      "exclude": ["react-native-worklets"]
+    },
+    "extra": {}
   }
 }
