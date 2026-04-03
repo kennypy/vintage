@@ -142,6 +142,9 @@ export default function ListingDetailPage({ params }: { params: { id: string } }
   const [activeImage, setActiveImage] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [contactingLoading, setContactingLoading] = useState(false);
+  const [showOfferModal, setShowOfferModal] = useState(false);
+  const [offerAmount, setOfferAmount] = useState('');
+  const [offerLoading, setOfferLoading] = useState(false);
 
   useEffect(() => {
     apiGet<ListingData>(`/listings/${encodeURIComponent(params.id)}`)
@@ -151,6 +154,43 @@ export default function ListingDetailPage({ params }: { params: { id: string } }
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [params.id]);
+
+  const handleBuyNow = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
+    if (!token) {
+      router.push('/auth/login');
+      return;
+    }
+    if (!listing) return;
+    const price = getPrice(listing);
+    const img = (listing.images ?? []).map(getImageUrl)[0] ?? '';
+    router.push(`/checkout?listingId=${encodeURIComponent(listing.id)}&title=${encodeURIComponent(listing.title)}&price=${price}&image=${encodeURIComponent(img)}`);
+  };
+
+  const handleMakeOffer = async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
+    if (!token) {
+      router.push('/auth/login');
+      return;
+    }
+    if (!listing) return;
+    const amount = parseFloat(offerAmount.replace(',', '.'));
+    if (isNaN(amount) || amount <= 0) {
+      alert('Digite um valor valido.');
+      return;
+    }
+    setOfferLoading(true);
+    try {
+      await apiPost('/offers', { listingId: listing.id, amountBrl: amount });
+      setShowOfferModal(false);
+      setOfferAmount('');
+      alert('Oferta enviada com sucesso!');
+    } catch {
+      alert('Erro ao enviar oferta. Tente novamente.');
+    } finally {
+      setOfferLoading(false);
+    }
+  };
 
   const handleContactSeller = async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -338,10 +378,22 @@ export default function ListingDetailPage({ params }: { params: { id: string } }
 
           {/* Action buttons */}
           <div className="space-y-3">
-            <button className="w-full py-3 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition text-lg">
+            <button
+              type="button"
+              onClick={handleBuyNow}
+              className="w-full py-3 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition text-lg"
+            >
               Comprar agora
             </button>
-            <button className="w-full py-3 border-2 border-brand-600 text-brand-600 rounded-xl font-medium hover:bg-brand-50 transition">
+            <button
+              type="button"
+              onClick={() => {
+                const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
+                if (!token) { router.push('/auth/login'); return; }
+                setShowOfferModal(true);
+              }}
+              className="w-full py-3 border-2 border-brand-600 text-brand-600 rounded-xl font-medium hover:bg-brand-50 transition"
+            >
               Fazer oferta
             </button>
             {sellerId && (
@@ -420,6 +472,44 @@ export default function ListingDetailPage({ params }: { params: { id: string } }
           )}
         </div>
       </div>
+
+      {/* Offer modal */}
+      {showOfferModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowOfferModal(false)}>
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-gray-900">Fazer oferta</h2>
+            <p className="text-sm text-gray-500">Preco atual: {formatBRL(getPrice(listing))}</p>
+            <div>
+              <label className="text-sm text-gray-700 block mb-1">Valor da oferta (R$)</label>
+              <input
+                type="text"
+                value={offerAmount}
+                onChange={(e) => setOfferAmount(e.target.value)}
+                placeholder="0,00"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleMakeOffer}
+                disabled={offerLoading}
+                className="flex-1 py-2 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition disabled:opacity-50"
+              >
+                {offerLoading ? 'Enviando...' : 'Enviar oferta'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOfferModal(false)}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
