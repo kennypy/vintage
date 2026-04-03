@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { MessagesGateway } from './messages.gateway';
 import { MessagesService } from './messages.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { Socket, Server } from 'socket.io';
 
 const mockMessagesService = {
@@ -17,6 +18,12 @@ const mockJwtService = {
   verify: jest.fn(),
 };
 
+const mockPrisma = {
+  conversation: {
+    findUnique: jest.fn(),
+  },
+};
+
 describe('MessagesGateway', () => {
   let gateway: MessagesGateway;
 
@@ -26,6 +33,7 @@ describe('MessagesGateway', () => {
         MessagesGateway,
         { provide: MessagesService, useValue: mockMessagesService },
         { provide: JwtService, useValue: mockJwtService },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -323,18 +331,74 @@ describe('MessagesGateway', () => {
   });
 
   describe('handleJoinConversation', () => {
-    it('should join conversation room', () => {
+    it('should join conversation room when user is a participant', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1' });
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'conv-1',
+        participant1Id: 'user-1',
+        participant2Id: 'user-2',
+      });
+
       const client = {
         id: 'socket-1',
+        handshake: { auth: { token: 'valid-jwt' }, query: {}, headers: {} },
         join: jest.fn(),
+        emit: jest.fn(),
+        disconnect: jest.fn(),
       } as unknown as Socket;
 
-      const result = gateway.handleJoinConversation(client, {
+      await gateway.handleConnection(client);
+      jest.clearAllMocks();
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'conv-1',
+        participant1Id: 'user-1',
+        participant2Id: 'user-2',
+      });
+
+      const result = await gateway.handleJoinConversation(client, {
         conversationId: 'conv-1',
       });
 
       expect(client.join).toHaveBeenCalledWith('conversation:conv-1');
       expect(result).toEqual({ joined: 'conv-1' });
+    });
+
+    it('should reject join when user is not a participant', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1' });
+      mockPrisma.conversation.findUnique.mockResolvedValue({
+        id: 'conv-1',
+        participant1Id: 'user-3',
+        participant2Id: 'user-4',
+      });
+
+      const client = {
+        id: 'socket-1',
+        handshake: { auth: { token: 'valid-jwt' }, query: {}, headers: {} },
+        join: jest.fn(),
+        emit: jest.fn(),
+        disconnect: jest.fn(),
+      } as unknown as Socket;
+
+      await gateway.handleConnection(client);
+
+      const result = await gateway.handleJoinConversation(client, {
+        conversationId: 'conv-1',
+      });
+
+      expect(result).toEqual({ error: 'Acesso negado' });
+    });
+
+    it('should return error when not authenticated', async () => {
+      const client = {
+        id: 'unknown-socket',
+        join: jest.fn(),
+      } as unknown as Socket;
+
+      const result = await gateway.handleJoinConversation(client, {
+        conversationId: 'conv-1',
+      });
+
+      expect(result).toEqual({ error: 'Não autenticado' });
     });
   });
 

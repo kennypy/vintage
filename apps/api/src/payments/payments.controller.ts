@@ -29,10 +29,10 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via PIX' })
   @ApiResponse({ status: 201, description: 'Pagamento PIX criado' })
   createPix(
-    @CurrentUser() _user: AuthUser,
-    @Body() body: { orderId: string; amountBrl: number },
+    @CurrentUser() user: AuthUser,
+    @Body() body: { orderId: string },
   ) {
-    return this.paymentsService.createPixPayment(body.orderId, body.amountBrl);
+    return this.paymentsService.createPixPayment(body.orderId, user.id);
   }
 
   @Post('card')
@@ -41,12 +41,12 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via cartão de crédito' })
   @ApiResponse({ status: 201, description: 'Pagamento com cartão criado' })
   createCard(
-    @CurrentUser() _user: AuthUser,
-    @Body() body: { orderId: string; amountBrl: number; installments: number },
+    @CurrentUser() user: AuthUser,
+    @Body() body: { orderId: string; installments: number },
   ) {
     return this.paymentsService.createCardPayment(
       body.orderId,
-      body.amountBrl,
+      user.id,
       body.installments,
     );
   }
@@ -57,13 +57,10 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Criar pagamento via boleto bancário' })
   @ApiResponse({ status: 201, description: 'Boleto gerado' })
   createBoleto(
-    @CurrentUser() _user: AuthUser,
-    @Body() body: { orderId: string; amountBrl: number },
+    @CurrentUser() user: AuthUser,
+    @Body() body: { orderId: string },
   ) {
-    return this.paymentsService.createBoletoPayment(
-      body.orderId,
-      body.amountBrl,
-    );
+    return this.paymentsService.createBoletoPayment(body.orderId, user.id);
   }
 
   @Post('webhook')

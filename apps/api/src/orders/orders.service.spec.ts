@@ -260,7 +260,9 @@ describe('OrdersService', () => {
 
       const confirmedOrder = {
         id: 'order-1',
+        sellerId: 'seller-1',
         status: 'COMPLETED',
+        itemPriceBrl: new Decimal('100'),
         listing: { title: 'Vestido' },
       };
       mockTx.order.update.mockResolvedValue(confirmedOrder);
@@ -278,13 +280,16 @@ describe('OrdersService', () => {
       expect(result).toEqual(confirmedOrder);
       expect(mockTx.wallet.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { balanceBrl: { increment: 100 } },
+          data: {
+            pendingBrl: { decrement: 100 },
+            balanceBrl: { increment: 100 },
+          },
         }),
       );
       expect(mockTx.walletTransaction.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            type: 'CREDIT',
+            type: 'ESCROW_RELEASE',
             walletId: 'wallet-1',
           }),
         }),

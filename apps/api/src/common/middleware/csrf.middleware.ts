@@ -23,8 +23,8 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  *   1. Call GET /api/v1/auth/csrf-token to receive a token.
  *   2. Include it in the X-CSRF-Token header on every state-changing request.
  *
- * CSRF validation is SKIPPED when the X-API-Key header is present
- * (API clients authenticate via key and are not subject to CSRF).
+ * Machine-to-machine routes (partner API, webhooks) are excluded
+ * via app.module.ts route exclusions — not via header sniffing.
  */
 @Injectable()
 export class CsrfMiddleware implements NestMiddleware {
@@ -44,11 +44,6 @@ export class CsrfMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     // Skip safe HTTP methods
     if (SAFE_METHODS.has(req.method)) {
-      return next();
-    }
-
-    // Skip when API key authentication is used
-    if (req.headers['x-api-key']) {
       return next();
     }
 

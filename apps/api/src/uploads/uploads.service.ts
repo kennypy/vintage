@@ -62,6 +62,7 @@ export class UploadsService {
   private readonly bucket: string;
   private readonly presignedUrlExpiry: number;
   private readonly s3Configured: boolean;
+  private readonly nodeEnv: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -85,6 +86,7 @@ export class UploadsService {
 
     // S3 is only usable when real credentials are provided
     this.s3Configured = !!(accessKeyId && secretAccessKey && this.bucket !== 'vintage-uploads');
+    this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
     const s3Config: ConstructorParameters<typeof S3Client>[0] = {
       region,
@@ -214,6 +216,9 @@ export class UploadsService {
 
     // Dev fallback: when S3 is not configured return a stable placeholder URL
     if (!this.s3Configured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('S3 storage not configured — cannot upload images in production');
+      }
       const seed = timestamp % 1000;
       return {
         url: `https://picsum.photos/seed/${seed}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`,
@@ -350,6 +355,9 @@ export class UploadsService {
 
     // Dev fallback
     if (!this.s3Configured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('S3 storage not configured — cannot upload videos in production');
+      }
       return {
         url: `https://www.w3schools.com/html/mov_bbb.mp4`, // stable dev placeholder
         key,

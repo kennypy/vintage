@@ -29,6 +29,7 @@ export class MercadoPagoClient {
   private readonly accessToken: string;
   private readonly webhookSecret: string;
   private readonly baseUrl = 'https://api.mercadopago.com';
+  private readonly nodeEnv: string;
 
   constructor(private configService: ConfigService) {
     this.accessToken = this.configService.get<string>(
@@ -39,6 +40,7 @@ export class MercadoPagoClient {
       'MERCADOPAGO_WEBHOOK_SECRET',
       '',
     );
+    this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
   }
 
   private get isConfigured(): boolean {
@@ -91,6 +93,9 @@ export class MercadoPagoClient {
     description: string,
   ) {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot process payments in production');
+      }
       return this.mockPixPayment(orderId, amountBrl);
     }
 
@@ -135,6 +140,9 @@ export class MercadoPagoClient {
     cardToken: string,
   ) {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot process payments in production');
+      }
       return this.mockCardPayment(orderId, amountBrl, installments);
     }
 
@@ -183,6 +191,9 @@ export class MercadoPagoClient {
     description: string,
   ) {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot process payments in production');
+      }
       return this.mockBoletoPayment(orderId, amountBrl);
     }
 
@@ -249,6 +260,9 @@ export class MercadoPagoClient {
    */
   async getPaymentStatus(paymentId: string) {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot check payment status in production');
+      }
       return {
         id: paymentId,
         status: 'pending',
@@ -265,6 +279,7 @@ export class MercadoPagoClient {
       id: String(payment.id),
       status: payment.status,
       statusDetail: payment.status_detail,
+      transaction_amount: payment.transaction_amount,
       updatedAt: new Date().toISOString(),
     };
   }
@@ -274,6 +289,9 @@ export class MercadoPagoClient {
    */
   async refundPayment(paymentId: string, amountBrl?: number) {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot process refunds in production');
+      }
       return this.mockRefund(paymentId, amountBrl);
     }
 

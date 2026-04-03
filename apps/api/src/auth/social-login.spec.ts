@@ -84,7 +84,9 @@ describe('AuthService - Social Login', () => {
         cpfVerified: true,
         avatarUrl: null,
       };
-      mockPrisma.user.findUnique.mockResolvedValue(existingUser);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(existingUser) // check if user exists by email
+        .mockResolvedValueOnce({ id: 'user-1', name: 'Maria Silva', email: 'maria@gmail.com', cpf: null, avatarUrl: null, createdAt: new Date() }); // generateTokensWithUser
       mockJwtService.sign
         .mockReturnValueOnce('access-token')
         .mockReturnValueOnce('refresh-token');
@@ -95,12 +97,15 @@ describe('AuthService - Social Login', () => {
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
         cpfVerified: true,
+        user: expect.objectContaining({ id: 'user-1' }),
       });
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
     });
 
     it('should create new user when email does not exist', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // check if user exists by email
+        .mockResolvedValueOnce({ id: 'new-user-1', name: 'Maria Silva', email: 'maria@gmail.com', cpf: null, avatarUrl: null, createdAt: new Date() }); // generateTokensWithUser
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_random_password');
       mockPrisma.user.create.mockResolvedValue({
         id: 'new-user-1',
@@ -117,6 +122,7 @@ describe('AuthService - Social Login', () => {
         accessToken: 'access-token',
         refreshToken: 'refresh-token',
         cpfVerified: false,
+        user: { id: 'new-user-1', name: 'Maria Silva', email: 'maria@gmail.com', cpf: null, avatarUrl: null, createdAt: expect.any(Date) },
       });
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -135,11 +141,13 @@ describe('AuthService - Social Login', () => {
     });
 
     it('should flag social login user without CPF as cpfVerified false', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // check if user exists
+        .mockResolvedValueOnce({ id: 'new-user-1', name: 'Maria Silva', email: 'maria@apple.com', cpf: null, avatarUrl: null, createdAt: new Date() }); // generateTokensWithUser
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_random_password');
       mockPrisma.user.create.mockResolvedValue({
         id: 'new-user-1',
-        email: 'maria@gmail.com',
+        email: 'maria@apple.com',
         name: 'Maria Silva',
       });
       mockJwtService.sign

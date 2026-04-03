@@ -17,7 +17,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string }) {
+  async validate(payload: { sub: string; type?: string }) {
+    // Reject non-access tokens — refresh and 2FA tokens must not be
+    // usable as access tokens on regular endpoints.
+    if (payload.type === 'refresh' || payload.type === 'twofa_pending') {
+      throw new UnauthorizedException('Token type not accepted for this endpoint');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: { id: true, email: true, name: true, verified: true, role: true, isBanned: true },
