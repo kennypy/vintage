@@ -1,12 +1,14 @@
 import { PrismaClient, ItemCondition, OrderStatus, AuthenticityStatus, UserRole } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import { config as loadEnv } from 'dotenv';
 import * as path from 'path';
 
 loadEnv({ path: path.join(__dirname, '../.env') });
 
-const adapter = new PrismaPg(process.env.DATABASE_URL!);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 // ---------------------------------------------------------------------------
