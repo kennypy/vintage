@@ -1,4 +1,7 @@
+'use client';
+
 import Link from 'next/link';
+import { apiPost } from '@/lib/api';
 
 export interface ListingCardProps {
   id: string;
@@ -8,6 +11,8 @@ export interface ListingCardProps {
   condition: string;
   sellerName: string;
   imageUrl?: string;
+  favorited?: boolean;
+  onToggleFavorite?: (id: string, favorited: boolean) => void;
 }
 
 function formatBRL(value: number): string {
@@ -22,9 +27,25 @@ export default function ListingCard({
   condition,
   sellerName,
   imageUrl,
+  favorited,
+  onToggleFavorite,
 }: ListingCardProps) {
+  const handleFavorite = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
+    if (!token) return;
+
+    try {
+      const res = await apiPost<{ favorited: boolean }>(`/listings/${encodeURIComponent(id)}/favorite`);
+      onToggleFavorite?.(id, res.favorited);
+    } catch {
+      // silently fail
+    }
+  };
+
   return (
-    <Link href={`/listings/${id}`} className="group block">
+    <Link href={`/listings/${id}`} className="group block relative">
       <div className="relative aspect-[4/5] bg-gray-100 rounded-xl overflow-hidden mb-2">
         {imageUrl ? (
           <img
@@ -43,6 +64,24 @@ export default function ListingCard({
               />
             </svg>
           </div>
+        )}
+        {/* Favorite button */}
+        {onToggleFavorite !== undefined && (
+          <button
+            type="button"
+            onClick={handleFavorite}
+            className="absolute top-2 right-2 p-1.5 bg-white/80 rounded-full hover:bg-white transition shadow-sm"
+            aria-label={favorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+          >
+            <svg
+              className={`w-5 h-5 ${favorited ? 'text-red-500 fill-current' : 'text-gray-400'}`}
+              fill={favorited ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+            </svg>
+          </button>
         )}
       </div>
       <div className="space-y-1">

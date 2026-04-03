@@ -101,6 +101,12 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - Keep the README in Portuguese (BR) to match the project locale
 - The README should always reflect the current state of the project — not aspirational features
 
+### Mobile–Web Feature Parity
+- **Every feature, improvement, or bug fix added to the mobile app (`apps/mobile/`) MUST also be implemented in the web app (`apps/web/`), and vice-versa.**
+- When adding a new screen or feature to one platform, create the equivalent page/component on the other platform in the same PR.
+- Shared types should live in `packages/shared/` whenever possible.
+- If a feature genuinely cannot apply to one platform (e.g., push notifications on web, or browser-only APIs), document the exception in the PR description.
+
 ### Commit Hygiene
 - Run the full pre-push checklist above before every commit that will be pushed
 - Do not commit code with lint errors
