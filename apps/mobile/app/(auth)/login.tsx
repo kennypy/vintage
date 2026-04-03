@@ -168,17 +168,21 @@ export default function LoginScreen() {
           <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
         </View>
 
-        {_webBrowserReady && (
-          <TouchableOpacity
-            style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
-            onPress={() => promptGoogleAsync()}
-            disabled={loading || socialLoading}
-          >
-            <Text style={[styles.socialButtonText, { color: theme.text }]}>
-              {socialLoading ? 'Entrando...' : 'Continuar com Google'}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
+          onPress={() => {
+            if (!_webBrowserReady) {
+              Alert.alert('Indisponível', 'Login com Google requer uma versão de desenvolvimento com módulos nativos. Use email/senha por enquanto.');
+              return;
+            }
+            promptGoogleAsync();
+          }}
+          disabled={loading || socialLoading}
+        >
+          <Text style={[styles.socialButtonText, { color: theme.text }]}>
+            {socialLoading ? 'Entrando...' : 'Continuar com Google'}
+          </Text>
+        </TouchableOpacity>
 
         {Platform.OS === 'ios' && _Apple && (
           <TouchableOpacity

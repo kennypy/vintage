@@ -79,11 +79,17 @@ export class AuthService {
 
     const valid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!valid) {
-      // Log failed attempt for anomaly detection (fire-and-forget)
+      // Log failed attempt for anomaly detection (fire-and-forget).
+      // Use async IIFE + try/catch to guard against both synchronous errors
+      // (e.g. loginEvent undefined when Prisma client is stale) and async ones.
       if (ipHash) {
-        this.prisma.loginEvent.create({
-          data: { userId: user.id, ipHash, deviceIdHash: deviceIdHash ?? null, platform: platform ?? null, success: false },
-        }).catch(() => {});
+        (async () => {
+          try {
+            await this.prisma.loginEvent.create({
+              data: { userId: user.id, ipHash, deviceIdHash: deviceIdHash ?? null, platform: platform ?? null, success: false },
+            });
+          } catch { /* never let anomaly logging break the auth response */ }
+        })();
       }
       throw new UnauthorizedException('Email ou senha inválidos');
     }
