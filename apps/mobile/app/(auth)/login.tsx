@@ -3,14 +3,51 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
-import * as AppleAuthentication from 'expo-apple-authentication';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 
-WebBrowser.maybeCompleteAuthSession();
+// expo-web-browser requires a native module that may not be available in all runtimes
+// (e.g. Expo Go). Load it lazily so the screen still renders when it's missing.
+let _webBrowserReady = false;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const WebBrowser = require('expo-web-browser') as typeof import('expo-web-browser');
+  WebBrowser.maybeCompleteAuthSession();
+  _webBrowserReady = true;
+} catch (_e) {
+  // Native module not available — social login will be disabled
+}
+
+// expo-auth-session/providers/google also depends on expo-web-browser internally
+type GoogleAuthRequest = {
+  useAuthRequest: (
+    config: Record<string, unknown>
+  ) => [unknown, { type: string; authentication?: { idToken?: string } } | null, () => Promise<void>];
+};
+let _Google: GoogleAuthRequest | null = null;
+if (_webBrowserReady) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _Google = require('expo-auth-session/providers/google') as GoogleAuthRequest;
+  } catch (_e) {
+    // Not available
+  }
+}
+
+type AppleAuthModule = typeof import('expo-apple-authentication');
+let _Apple: AppleAuthModule | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  _Apple = require('expo-apple-authentication') as AppleAuthModule;
+} catch (_e) {
+  // Not available
+}
+
+// Stub hook used when Google auth modules are unavailable so hook call count is stable
+function useGoogleAuthStub(): [null, null, () => Promise<void>] {
+  return [null, null, async () => {}];
+}
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -21,7 +58,8 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
 
-  const [_request, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+  const useGoogleAuth = _Google?.useAuthRequest ?? useGoogleAuthStub;
+  const [_request, googleResponse, promptGoogleAsync] = useGoogleAuth({
     clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? '',
     scopes: ['openid', 'profile', 'email'],
   });
@@ -55,12 +93,13 @@ export default function LoginScreen() {
   };
 
   const handleAppleSignIn = async () => {
+    if (!_Apple) return;
     setSocialLoading(true);
     try {
-      const credential = await AppleAuthentication.signInAsync({
+      const credential = await _Apple.signInAsync({
         requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          _Apple.AppleAuthenticationScope.FULL_NAME,
+          _Apple.AppleAuthenticationScope.EMAIL,
         ],
       });
       if (credential.identityToken) {
@@ -129,17 +168,19 @@ export default function LoginScreen() {
           <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
         </View>
 
-        <TouchableOpacity
-          style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
-          onPress={() => promptGoogleAsync()}
-          disabled={loading || socialLoading}
-        >
-          <Text style={[styles.socialButtonText, { color: theme.text }]}>
-            {socialLoading ? 'Entrando...' : 'Continuar com Google'}
-          </Text>
-        </TouchableOpacity>
+        {_webBrowserReady && (
+          <TouchableOpacity
+            style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
+            onPress={() => promptGoogleAsync()}
+            disabled={loading || socialLoading}
+          >
+            <Text style={[styles.socialButtonText, { color: theme.text }]}>
+              {socialLoading ? 'Entrando...' : 'Continuar com Google'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
-        {Platform.OS === 'ios' && (
+        {Platform.OS === 'ios' && _Apple && (
           <TouchableOpacity
             style={[styles.socialButton, { borderColor: theme.border, backgroundColor: theme.card }]}
             onPress={handleAppleSignIn}
