@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Request, Req, Res, BadRequestException, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Req, Res, BadRequestException, UnauthorizedException, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Response } from 'express';
@@ -90,11 +90,15 @@ export class AuthController {
   }
 
   @Post('refresh')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Renovar token de acesso' })
-  refresh(@Request() req: { user: { id: string } }) {
-    return this.authService.refreshToken(req.user.id);
+  @ApiOperation({ summary: 'Renovar token de acesso (requer refresh token)' })
+  refresh(@Req() req: { headers: Record<string, string | undefined> }) {
+    const authHeader = req.headers['authorization'] ?? '';
+    const rawToken = authHeader.replace('Bearer ', '');
+    if (!rawToken) {
+      throw new UnauthorizedException('Token ausente');
+    }
+    return this.authService.refreshToken(rawToken);
   }
 
   @Get('google')

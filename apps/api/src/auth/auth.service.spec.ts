@@ -38,6 +38,7 @@ const mockPrisma = {
 
 const mockJwtService = {
   sign: jest.fn(),
+  verify: jest.fn(),
 };
 
 const mockConfigService = {
@@ -187,24 +188,35 @@ describe('AuthService', () => {
   });
 
   describe('refreshToken', () => {
-    it('should return new tokens for valid user', async () => {
+    it('should return new tokens for valid refresh token', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh' });
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
       mockJwtService.sign
         .mockReturnValueOnce('new-access-token')
         .mockReturnValueOnce('new-refresh-token');
 
-      const result = await service.refreshToken('user-1');
+      const result = await service.refreshToken('valid-refresh-token');
 
+      expect(mockJwtService.verify).toHaveBeenCalledWith('valid-refresh-token');
       expect(result).toEqual({
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
       });
     });
 
+    it('should reject if token type is not refresh', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1' }); // access token — no type
+
+      await expect(service.refreshToken('access-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
     it('should reject if user not found', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'nonexistent', type: 'refresh' });
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.refreshToken('nonexistent')).rejects.toThrow(
+      await expect(service.refreshToken('valid-refresh-token')).rejects.toThrow(
         UnauthorizedException,
       );
     });

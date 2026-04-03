@@ -242,7 +242,10 @@ describe('DisputesService', () => {
       );
       expect(mockTx.wallet.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { balanceBrl: { increment: 120 } },
+          data: {
+            pendingBrl: { decrement: 120 },
+            balanceBrl: { increment: 120 },
+          },
         }),
       );
     });

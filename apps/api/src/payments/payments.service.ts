@@ -3,6 +3,8 @@ import {
   Logger,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
@@ -28,6 +30,22 @@ export class PaymentsService {
     );
   }
 
+  private async getAndValidateOrder(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (order.buyerId !== userId) {
+      throw new ForbiddenException('Acesso negado ao pedido.');
+    }
+    if (order.status !== 'PENDING') {
+      throw new BadRequestException('Pedido já foi pago ou não está pendente.');
+    }
+    return order;
+  }
+
   private validateAmount(amountBrl: number, orderId: string): void {
     if (!Number.isFinite(amountBrl) || amountBrl <= 0) {
       this.logger.warn(
@@ -45,7 +63,9 @@ export class PaymentsService {
     }
   }
 
-  async createPixPayment(orderId: string, amountBrl: number) {
+  async createPixPayment(orderId: string, userId: string) {
+    const order = await this.getAndValidateOrder(orderId, userId);
+    const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating PIX payment for order ${orderId}`);
     const result = await this.mercadoPago.createPixPayment(
@@ -62,10 +82,12 @@ export class PaymentsService {
 
   async createCardPayment(
     orderId: string,
-    amountBrl: number,
+    userId: string,
     installments: number,
     cardToken?: string,
   ) {
+    const order = await this.getAndValidateOrder(orderId, userId);
+    const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating card payment for order ${orderId}`);
     const result = await this.mercadoPago.createCardPayment(
@@ -81,7 +103,9 @@ export class PaymentsService {
     return result;
   }
 
-  async createBoletoPayment(orderId: string, amountBrl: number) {
+  async createBoletoPayment(orderId: string, userId: string) {
+    const order = await this.getAndValidateOrder(orderId, userId);
+    const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
     this.logger.log(`Creating boleto payment for order ${orderId}`);
     const result = await this.mercadoPago.createBoletoPayment(
@@ -178,6 +202,18 @@ export class PaymentsService {
         `No PENDING order found for paymentId ${paymentId} — already processed or missing`,
       );
       return;
+    }
+
+    // Verify payment amount matches order total (when available from gateway)
+    const paymentDetails = await this.mercadoPago.getPaymentStatus(paymentId);
+    if (paymentDetails.transaction_amount !== undefined) {
+      const orderTotal = Number(order.totalBrl);
+      if (Math.abs(paymentDetails.transaction_amount - orderTotal) > 0.01) {
+        this.logger.error(
+          `Payment amount mismatch for order ${order.id}: paid R$${paymentDetails.transaction_amount}, expected R$${orderTotal}. Flagged for manual review.`,
+        );
+        return;
+      }
     }
 
     const itemAmount = Number(order.itemPriceBrl);

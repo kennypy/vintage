@@ -31,6 +31,7 @@ export class NFeClient {
   private readonly logger = new Logger(NFeClient.name);
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly nodeEnv: string;
 
   constructor(private configService: ConfigService) {
     this.apiKey = this.configService.get<string>('NFE_API_KEY', '');
@@ -38,6 +39,7 @@ export class NFeClient {
       'NFE_API_URL',
       'https://api.enotas.com.br/v2',
     );
+    this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
   }
 
   private get isConfigured(): boolean {
@@ -82,6 +84,9 @@ export class NFeClient {
     taxInfo: NFeTaxInfo,
   ): Promise<NFeResponse> {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('NF-e service not configured — cannot operate in production');
+      }
       return this.mockGenerateNFe(orderData);
     }
 
@@ -120,6 +125,9 @@ export class NFeClient {
    */
   async getNFe(nfeId: string): Promise<NFeResponse> {
     if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('NF-e service not configured — cannot operate in production');
+      }
       return this.mockGetNFe(nfeId);
     }
 

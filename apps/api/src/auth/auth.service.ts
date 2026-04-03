@@ -379,8 +379,19 @@ export class AuthService {
     return { success: true, message: 'Conta promovida a administrador.' };
   }
 
-  async refreshToken(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  async refreshToken(rawToken: string) {
+    let payload: { sub: string; type?: string };
+    try {
+      payload = this.jwtService.verify(rawToken) as { sub: string; type?: string };
+    } catch {
+      throw new UnauthorizedException('Token inválido ou expirado');
+    }
+
+    if (payload.type !== 'refresh') {
+      throw new UnauthorizedException('Token inválido para renovação — use o refresh token');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) {
       throw new UnauthorizedException('Usuário não encontrado');
     }

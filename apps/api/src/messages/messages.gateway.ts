@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from './messages.service';
 
 /** Strip HTML tags from a string to prevent XSS in broadcast messages. */
@@ -36,6 +37,7 @@ export class MessagesGateway
   constructor(
     private readonly messagesService: MessagesService,
     private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -204,19 +206,34 @@ export class MessagesGateway
   }
 
   @SubscribeMessage('joinConversation')
-  handleJoinConversation(
+  async handleJoinConversation(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = this.socketToUser.get(client.id);
+    if (!userId) {
+      return { error: 'Não autenticado' };
+    }
+
+    // Verify user is a participant of this conversation
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: data.conversationId },
+    });
+
+    if (
+      !conversation ||
+      (conversation.participant1Id !== userId &&
+        conversation.participant2Id !== userId)
+    ) {
+      return { error: 'Acesso negado' };
+    }
+
     client.join(`conversation:${data.conversationId}`);
 
     // Track conversation for reconnection
-    if (userId) {
-      const convSet = this.userConversations.get(userId) || new Set();
-      convSet.add(data.conversationId);
-      this.userConversations.set(userId, convSet);
-    }
+    const convSet = this.userConversations.get(userId) || new Set();
+    convSet.add(data.conversationId);
+    this.userConversations.set(userId, convSet);
 
     this.logger.log(
       `Cliente ${client.id} entrou na conversa:${data.conversationId}`,

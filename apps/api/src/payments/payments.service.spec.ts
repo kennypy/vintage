@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { Decimal } from '@prisma/client/runtime/client';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
+import { PrismaService } from '../prisma/prisma.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -19,6 +21,23 @@ const mockConfigService = {
   }),
 };
 
+const mockPrisma: Record<string, any> = {
+  order: {
+    update: jest.fn(),
+    findFirst: jest.fn().mockResolvedValue(null),
+    findUnique: jest.fn(),
+  },
+  wallet: {
+    upsert: jest.fn(),
+    update: jest.fn(),
+  },
+  walletTransaction: {
+    create: jest.fn(),
+  },
+  $transaction: jest.fn(),
+};
+mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+
 describe('PaymentsService', () => {
   let service: PaymentsService;
 
@@ -30,14 +49,30 @@ describe('PaymentsService', () => {
         PaymentsService,
         { provide: MercadoPagoClient, useValue: mockMercadoPago },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
     service = module.get<PaymentsService>(PaymentsService);
   });
 
+  const mockOrder = {
+    id: 'order-1',
+    buyerId: 'buyer-1',
+    sellerId: 'seller-1',
+    status: 'PENDING',
+    totalBrl: new Decimal('150'),
+    itemPriceBrl: new Decimal('150'),
+  };
+
+  beforeEach(() => {
+    // Default: order.findUnique returns a valid PENDING order owned by buyer-1
+    mockPrisma.order.findUnique.mockResolvedValue(mockOrder);
+    mockPrisma.order.update.mockResolvedValue({});
+  });
+
   describe('createPixPayment', () => {
-    it('should return a PIX payment with QR code', async () => {
+    it('should return a PIX payment using server-side order amount', async () => {
       const pixResponse = {
         id: 'pix-1',
         orderId: 'order-1',
@@ -51,59 +86,40 @@ describe('PaymentsService', () => {
       };
       mockMercadoPago.createPixPayment.mockResolvedValue(pixResponse);
 
-      const result = await service.createPixPayment('order-1', 150.0);
+      const result = await service.createPixPayment('order-1', 'buyer-1');
 
       expect(result).toEqual(pixResponse);
-      expect(result.orderId).toBe('order-1');
-      expect(result.method).toBe('pix');
-      expect(result.amountBrl).toBe(150.0);
-      expect(result.qrCode).toBeDefined();
       expect(result.status).toBe('pending');
-    });
-
-    it('should set expiry to 30 minutes from now', async () => {
-      const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-      mockMercadoPago.createPixPayment.mockResolvedValue({
-        id: 'pix-1',
-        orderId: 'order-1',
-        method: 'pix',
-        amountBrl: 100,
-        qrCode: 'qr',
-        qrCodeBase64: 'base64',
-        pixCopiaECola: 'pix',
-        expiresAt,
-        status: 'pending',
-      });
-
-      const result = await service.createPixPayment('order-1', 100);
-
       expect(mockMercadoPago.createPixPayment).toHaveBeenCalledWith(
         'order-1',
-        100,
+        150,
         'Vintage.br - Pedido order-1',
       );
-      expect(result.expiresAt).toBeDefined();
+    });
+
+    it('should reject if user is not the buyer', async () => {
+      await expect(
+        service.createPixPayment('order-1', 'attacker-1'),
+      ).rejects.toThrow();
     });
   });
 
   describe('createCardPayment', () => {
-    it('should calculate installment amounts', async () => {
+    it('should use server-side amount and pass installments', async () => {
       const cardResponse = {
         id: 'card-1',
         orderId: 'order-1',
         method: 'card',
         installments: 3,
-        installmentAmount: 100.0,
-        total: 300.0,
+        installmentAmount: 50.0,
+        total: 150.0,
         status: 'pending',
       };
       mockMercadoPago.createCardPayment.mockResolvedValue(cardResponse);
 
-      const result = await service.createCardPayment('order-1', 300.0, 3);
+      const result = await service.createCardPayment('order-1', 'buyer-1', 3);
 
       expect(result.installments).toBe(3);
-      expect(result.installmentAmount).toBe(100.0);
-      expect(result.total).toBe(300.0);
       expect(result.status).toBe('pending');
     });
 
@@ -113,16 +129,16 @@ describe('PaymentsService', () => {
         orderId: 'order-1',
         method: 'card',
         installments: 1,
-        installmentAmount: 100,
-        total: 100,
+        installmentAmount: 150,
+        total: 150,
         status: 'pending',
       });
 
-      await service.createCardPayment('order-1', 100.0, 1, 'token-123');
+      await service.createCardPayment('order-1', 'buyer-1', 1, 'token-123');
 
       expect(mockMercadoPago.createCardPayment).toHaveBeenCalledWith(
         'order-1',
-        100.0,
+        150,
         1,
         'token-123',
       );
@@ -130,28 +146,25 @@ describe('PaymentsService', () => {
   });
 
   describe('createBoletoPayment', () => {
-    it('should return a boleto with 3-day expiry', async () => {
+    it('should return a boleto using server-side amount', async () => {
       const boletoResponse = {
         id: 'boleto-1',
         orderId: 'order-1',
         method: 'boleto',
-        amountBrl: 200.0,
+        amountBrl: 150.0,
         barcodeUrl: 'https://api.mercadopago.com/v1/payments/boleto-1/boleto',
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
         status: 'pending',
       };
       mockMercadoPago.createBoletoPayment.mockResolvedValue(boletoResponse);
 
-      const result = await service.createBoletoPayment('order-1', 200.0);
+      const result = await service.createBoletoPayment('order-1', 'buyer-1');
 
       expect(result.orderId).toBe('order-1');
-      expect(result.method).toBe('boleto');
-      expect(result.amountBrl).toBe(200.0);
-      expect(result.barcodeUrl).toBeDefined();
       expect(result.status).toBe('pending');
       expect(mockMercadoPago.createBoletoPayment).toHaveBeenCalledWith(
         'order-1',
-        200.0,
+        150,
         'Vintage.br - Pedido order-1',
       );
     });

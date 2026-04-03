@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
+import { PrismaService } from '../prisma/prisma.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -12,6 +13,23 @@ const mockMercadoPago = {
   getPaymentStatus: jest.fn(),
   refundPayment: jest.fn(),
 };
+
+const mockPrisma: Record<string, any> = {
+  order: {
+    update: jest.fn(),
+    findFirst: jest.fn().mockResolvedValue(null),
+    findUnique: jest.fn(),
+  },
+  wallet: {
+    upsert: jest.fn(),
+    update: jest.fn(),
+  },
+  walletTransaction: {
+    create: jest.fn(),
+  },
+  $transaction: jest.fn(),
+};
+mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
 
 function createService(nodeEnv: string): Promise<PaymentsService> {
   return Test.createTestingModule({
@@ -27,6 +45,7 @@ function createService(nodeEnv: string): Promise<PaymentsService> {
           }),
         },
       },
+      { provide: PrismaService, useValue: mockPrisma },
     ],
   })
     .compile()
