@@ -910,3 +910,16 @@ model FeatureFlag {
 
   @@map("feature_flags")
 }
+
+// --- Distributed Cron Locks ---
+// Prevents duplicate cron job execution in multi-instance deployments.
+// Each row represents a lock for a specific cron job. The lockedUntil
+// column acts as both the lock flag and the automatic expiry.
+
+model CronLock {
+  id         String   @id
+  lockedAt   DateTime @default(now())
+  lockedUntil DateTime
+
+  @@map("cron_locks")
+}
