@@ -16,6 +16,43 @@ import {
 export class OffersService {
   constructor(private prisma: PrismaService) {}
 
+  async findUserOffers(
+    userId: string,
+    type: 'received' | 'sent',
+    page: number,
+    pageSize: number,
+  ) {
+    const where =
+      type === 'received'
+        ? { listing: { sellerId: userId } }
+        : { buyerId: userId };
+
+    const [items, total] = await Promise.all([
+      this.prisma.offer.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          listing: {
+            include: {
+              images: { orderBy: { position: 'asc' }, take: 1 },
+            },
+          },
+          buyer: { select: { id: true, name: true, avatarUrl: true } },
+        },
+      }),
+      this.prisma.offer.count({ where }),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
   async create(buyerId: string, dto: CreateOfferDto) {
     const listing = await this.prisma.listing.findUnique({
       where: { id: dto.listingId },

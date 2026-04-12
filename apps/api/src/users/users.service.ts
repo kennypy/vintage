@@ -335,6 +335,35 @@ export class UsersService {
     return user;
   }
 
+  // --- Account Deletion ---
+
+  async deleteAccount(userId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      // Soft-delete the user: anonymise PII, ban the account
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          isBanned: true,
+          bannedAt: new Date(),
+          bannedReason: 'Account deleted by user',
+          email: `deleted_${userId}@deleted.vintage.br`,
+          name: 'Conta excluída',
+          cpf: null,
+          avatarUrl: null,
+          bio: null,
+        },
+      });
+
+      // Deactivate all the user's active listings
+      await tx.listing.updateMany({
+        where: { sellerId: userId, status: 'ACTIVE' },
+        data: { status: 'PAUSED' },
+      });
+    });
+
+    return { success: true };
+  }
+
   // --- Admin Methods ---
 
   async listUsersAdmin(page: number, pageSize: number, search?: string) {

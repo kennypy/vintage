@@ -59,7 +59,7 @@ export default function ConversationPage() {
       return;
     }
 
-    apiGet<ConversationDetail>(`/messages/conversations/${params.id}`)
+    apiGet<ConversationDetail>(`/messages/conversations/${params.id}/messages`)
       .then((conv) => {
         setConversation(conv);
         setMessages(conv.messages ?? []);
@@ -67,6 +67,34 @@ export default function ConversationPage() {
       .catch(() => router.push('/messages'))
       .finally(() => setLoading(false));
   }, [router, params.id]);
+
+  // Poll for new messages every 3 seconds
+  useEffect(() => {
+    const conversationId = params.id;
+    if (!conversationId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const conv = await apiGet<ConversationDetail>(
+          `/messages/conversations/${conversationId}`,
+        );
+        const fetched = conv.messages ?? [];
+        setMessages((prev) => {
+          const prevIds = new Set(prev.map((m) => m.id));
+          const hasNew = fetched.some((m) => !prevIds.has(m.id));
+          const countChanged = fetched.length !== prev.length;
+          if (hasNew || countChanged) {
+            return fetched;
+          }
+          return prev;
+        });
+      } catch (_err) {
+        // Silently ignore polling errors to avoid disrupting the UI
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [params.id]);
 
   useEffect(() => {
     scrollToBottom();

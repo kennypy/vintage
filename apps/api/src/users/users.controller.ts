@@ -37,6 +37,16 @@ export class UsersController {
     return this.usersService.promoteToAdmin(id);
   }
 
+  // --- Account Deletion ---
+
+  @Delete('users/me')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Excluir conta do usuário autenticado' })
+  deleteAccount(@CurrentUser() user: AuthUser) {
+    return this.usersService.deleteAccount(user.id);
+  }
+
   // --- Public & Authenticated Endpoints ---
 
   @Get('users/storefront/:username')

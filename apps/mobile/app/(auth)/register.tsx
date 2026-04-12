@@ -101,8 +101,9 @@ export default function RegisterScreen() {
       const rawCpf = cpf.replace(/\D/g, '');
       await signUp(name, email, rawCpf, password);
       router.replace('/(tabs)');
-    } catch (_error) {
-      Alert.alert('Erro ao criar conta', 'Não foi possível criar sua conta. Verifique os dados e tente novamente.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível criar sua conta. Verifique os dados e tente novamente.';
+      Alert.alert('Erro ao criar conta', message);
     } finally {
       setLoading(false);
     }

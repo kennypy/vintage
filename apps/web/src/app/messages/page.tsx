@@ -67,6 +67,27 @@ export default function MessagesPage() {
       .finally(() => setLoading(false));
   }, [router]);
 
+  // Poll for conversation list updates every 5 seconds
+  useEffect(() => {
+    const token =
+      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
+    if (!token) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiGet<Conversation[] | { data: Conversation[] }>(
+          '/messages/conversations',
+        );
+        const fetched = Array.isArray(res) ? res : (res.data ?? []);
+        setConversations(fetched);
+      } catch (_err) {
+        // Silently ignore polling errors to avoid disrupting the UI
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Mensagens</h1>

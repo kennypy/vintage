@@ -1,9 +1,11 @@
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Linking } from 'react-native';
+import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Linking, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { apiFetch } from '../../src/services/api';
 
 const NOTIF_PREFS_KEY = 'vintage_notif_prefs';
 
@@ -33,11 +35,13 @@ async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
 
 export default function ConfiguracoesScreen() {
   const { theme, mode, setMode, fullScreen, setFullScreen } = useTheme();
+  const { signOut } = useAuth();
 
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [smsEnabled, setSmsEnabled] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const darkMode = mode === 'dark' || (mode === 'system' && theme.isDark);
 
@@ -65,7 +69,21 @@ export default function ConfiguracoesScreen() {
       'Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.',
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Excluir', style: 'destructive', onPress: () => {} },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await apiFetch('/users/me', { method: 'DELETE', authenticated: true });
+              await signOut();
+            } catch (_e) {
+              Alert.alert('Erro', 'Não foi possível excluir sua conta. Tente novamente.');
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
       ],
     );
   };
@@ -172,8 +190,12 @@ export default function ConfiguracoesScreen() {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
-        <Text style={styles.deleteButtonText}>Excluir minha conta</Text>
+      <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount} disabled={deleting}>
+        {deleting ? (
+          <ActivityIndicator color={colors.error[500]} />
+        ) : (
+          <Text style={styles.deleteButtonText}>Excluir minha conta</Text>
+        )}
       </TouchableOpacity>
       <View style={{ height: 40 }} />
     </ScrollView>

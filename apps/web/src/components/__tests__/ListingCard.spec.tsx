@@ -13,7 +13,7 @@ jest.mock('next/link', () => {
 // Mock next/image to render a plain img tag
 jest.mock('next/image', () => {
   return function MockImage(props: Record<string, unknown>) {
-    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+    // eslint-disable-next-line
     return <img {...props} />;
   };
 });

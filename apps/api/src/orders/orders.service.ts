@@ -255,7 +255,7 @@ export class OrdersService {
       data: {
         status: 'SHIPPED',
         trackingCode: dto.trackingCode,
-        carrier: dto.carrier,
+        carrier: dto.carrier as string as import('@prisma/client').Carrier,
         shippedAt: new Date(),
       },
       include: {
@@ -275,7 +275,7 @@ export class OrdersService {
         updated.buyerId,
         'order',
         'Pedido enviado!',
-        `Seu pedido "${updated.listing.title}" foi enviado. Rastreio: ${dto.trackingCode}`,
+        `Seu pedido "${(updated as any).listing?.title ?? 'item'}" foi enviado. Rastreio: ${dto.trackingCode}`,
         { orderId: updated.id, trackingCode: dto.trackingCode },
       )
       .catch(() => {});

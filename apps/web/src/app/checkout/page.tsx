@@ -165,7 +165,18 @@ function CheckoutPage() {
             <Link href="/profile" className="text-xs text-brand-600 hover:text-brand-700">Gerenciar</Link>
           </div>
           {addresses.length === 0 ? (
-            <p className="text-sm text-gray-500">Nenhum endereco cadastrado. <Link href="/profile" className="text-brand-600 hover:underline">Adicionar endereco</Link></p>
+            <Link
+              href="/profile"
+              className="flex items-center gap-3 p-4 border-2 border-dashed border-brand-400 rounded-xl hover:bg-brand-50 transition"
+            >
+              <svg className="w-8 h-8 text-brand-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-brand-600">Adicionar endereco de entrega</p>
+                <p className="text-xs text-gray-500 mt-0.5">Voce precisa cadastrar um endereco para finalizar a compra</p>
+              </div>
+            </Link>
           ) : (
             <div className="space-y-2">
               {addresses.map((addr) => (

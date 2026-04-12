@@ -32,7 +32,7 @@ export default function CheckoutScreen() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
   const [paying, setPaying] = useState(false);
-  const [_addresses, setAddresses] = useState<Address[]>([]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
   const [couponCode, setCouponCode] = useState('');
   const [couponInput, setCouponInput] = useState('');
@@ -90,9 +90,17 @@ export default function CheckoutScreen() {
     setCouponError('');
   };
 
+  const hasNoAddresses = addresses.length === 0;
+  const isAddressSelected = selectedAddress !== null;
+
   const handlePay = async () => {
     if (!params.listingId) {
       Alert.alert('Erro', 'Dados do anúncio não encontrados.');
+      return;
+    }
+
+    if (!selectedAddress) {
+      Alert.alert('Endereço necessário', 'Selecione um endereço de entrega');
       return;
     }
 
@@ -100,7 +108,7 @@ export default function CheckoutScreen() {
     try {
       await createOrder({
         listingId: params.listingId,
-        addressId: selectedAddress?.id ?? 'default',
+        addressId: selectedAddress.id,
         paymentMethod: paymentMethod.toUpperCase() as 'PIX' | 'CREDIT_CARD' | 'BOLETO',
         installments: paymentMethod === 'credit_card' ? installments : undefined,
         couponCode: couponCode || undefined,
@@ -145,29 +153,47 @@ export default function CheckoutScreen() {
         {/* Address */}
         <View style={[styles.section, { backgroundColor: theme.card }]}>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Endereço de entrega</Text>
-          <TouchableOpacity
-            style={[styles.addressCard, { backgroundColor: theme.inputBg }]}
-            onPress={() => router.push('/addresses')}
-          >
-            <Ionicons name="location-outline" size={20} color={theme.textSecondary} />
-            <View style={styles.addressInfo}>
-              {selectedAddress ? (
-                <>
-                  <Text style={[styles.addressLabel, { color: theme.text }]}>{selectedAddress.label}</Text>
-                  <Text style={[styles.addressText, { color: theme.textSecondary }]}>
-                    {selectedAddress.street}, {selectedAddress.number}
-                    {selectedAddress.complement ? ` - ${selectedAddress.complement}` : ''}
-                  </Text>
-                  <Text style={[styles.addressText, { color: theme.textSecondary }]}>
-                    {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.cep}
-                  </Text>
-                </>
-              ) : (
-                <Text style={[styles.addressText, { color: theme.textSecondary }]}>Adicionar endereço de entrega</Text>
-              )}
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
-          </TouchableOpacity>
+          {hasNoAddresses ? (
+            <TouchableOpacity
+              style={[styles.addAddressCta, { borderColor: colors.primary[400] }]}
+              onPress={() => router.push('/addresses')}
+            >
+              <Ionicons name="add-circle" size={28} color={colors.primary[600]} />
+              <View style={styles.addAddressCtaInfo}>
+                <Text style={[styles.addAddressCtaTitle, { color: colors.primary[600] }]}>
+                  Adicionar endereço de entrega
+                </Text>
+                <Text style={[styles.addAddressCtaDesc, { color: theme.textSecondary }]}>
+                  Você precisa cadastrar um endereço para finalizar a compra
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.primary[600]} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.addressCard, { backgroundColor: theme.inputBg }]}
+              onPress={() => router.push('/addresses')}
+            >
+              <Ionicons name="location-outline" size={20} color={theme.textSecondary} />
+              <View style={styles.addressInfo}>
+                {selectedAddress ? (
+                  <>
+                    <Text style={[styles.addressLabel, { color: theme.text }]}>{selectedAddress.label}</Text>
+                    <Text style={[styles.addressText, { color: theme.textSecondary }]}>
+                      {selectedAddress.street}, {selectedAddress.number}
+                      {selectedAddress.complement ? ` - ${selectedAddress.complement}` : ''}
+                    </Text>
+                    <Text style={[styles.addressText, { color: theme.textSecondary }]}>
+                      {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.cep}
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={[styles.addressText, { color: theme.textSecondary }]}>Selecione um endereço de entrega</Text>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Payment Method */}
@@ -361,9 +387,9 @@ export default function CheckoutScreen() {
           </Text>
         </View>
         <TouchableOpacity
-          style={[styles.payButton, isFreeOrder && styles.payButtonFree, paying && styles.payButtonDisabled]}
+          style={[styles.payButton, isFreeOrder && styles.payButtonFree, (paying || !isAddressSelected) && styles.payButtonDisabled]}
           onPress={handlePay}
-          disabled={paying}
+          disabled={paying || !isAddressSelected}
         >
           {paying ? (
             <ActivityIndicator color={colors.neutral[0]} size="small" />
@@ -399,6 +425,14 @@ const styles = StyleSheet.create({
   addressInfo: { flex: 1 },
   addressLabel: { fontSize: 14, fontWeight: '600' },
   addressText: { fontSize: 13, marginTop: 2 },
+  addAddressCta: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 16, borderRadius: 12, borderWidth: 2,
+    borderStyle: 'dashed',
+  },
+  addAddressCtaInfo: { flex: 1 },
+  addAddressCtaTitle: { fontSize: 15, fontWeight: '600' },
+  addAddressCtaDesc: { fontSize: 12, marginTop: 4, lineHeight: 18 },
   paymentOption: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     padding: 14, borderRadius: 10, borderWidth: 1,

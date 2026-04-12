@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,14 @@ import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getOrder, markShipped, confirmReceipt } from '../../src/services/orders';
 import type { Order, OrderStatus } from '../../src/services/orders';
+
+const CARRIERS = [
+  { value: 'CORREIOS', label: 'Correios' },
+  { value: 'SEDEX', label: 'Sedex' },
+  { value: 'PAC', label: 'PAC' },
+  { value: 'JADLOG', label: 'Jadlog' },
+  { value: 'KANGU', label: 'Kangu' },
+] as const;
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending_payment: 'Aguardando pagamento',
@@ -29,6 +37,9 @@ export default function OrderDetailScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [shipModalVisible, setShipModalVisible] = useState(false);
+  const [selectedCarrier, setSelectedCarrier] = useState<string>('');
+  const [trackingCodeInput, setTrackingCodeInput] = useState('');
 
   useEffect(() => {
     async function fetchOrder() {
@@ -44,29 +55,26 @@ export default function OrderDetailScreen() {
     fetchOrder();
   }, [id]);
 
-  const handleMarkShipped = () => {
-    Alert.prompt
-      ? Alert.prompt('Código de rastreio', 'Informe o código de rastreio:', async (trackingCode) => {
-          if (!trackingCode || !order) return;
-          setActionLoading(true);
-          try {
-            const updated = await markShipped(order.id, trackingCode, 'Correios');
-            setOrder(updated);
-            Alert.alert('Enviado!', 'Pedido marcado como enviado.');
-          } catch (_error) {
-            Alert.alert('Erro', 'Não foi possível atualizar o status.');
-          } finally {
-            setActionLoading(false);
-          }
-        })
-      : handleMarkShippedFallback();
+  const handleOpenShipModal = () => {
+    setSelectedCarrier('');
+    setTrackingCodeInput('');
+    setShipModalVisible(true);
   };
 
-  const handleMarkShippedFallback = async () => {
+  const handleConfirmShip = async () => {
     if (!order) return;
+    if (!selectedCarrier) {
+      Alert.alert('Transportadora', 'Selecione uma transportadora.');
+      return;
+    }
+    if (!trackingCodeInput.trim()) {
+      Alert.alert('Código de rastreio', 'Informe o código de rastreio.');
+      return;
+    }
+    setShipModalVisible(false);
     setActionLoading(true);
     try {
-      const updated = await markShipped(order.id, 'TRACKING_CODE', 'Correios');
+      const updated = await markShipped(order.id, trackingCodeInput.trim(), selectedCarrier);
       setOrder(updated);
       Alert.alert('Enviado!', 'Pedido marcado como enviado.');
     } catch (_error) {
@@ -221,7 +229,7 @@ export default function OrderDetailScreen() {
       {order.status === 'paid' && isSeller && (
         <TouchableOpacity
           style={[styles.actionButton, actionLoading && styles.actionDisabled]}
-          onPress={handleMarkShipped}
+          onPress={handleOpenShipModal}
           disabled={actionLoading}
         >
           <Ionicons name="cube-outline" size={20} color={colors.neutral[0]} />
@@ -254,7 +262,84 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
+      {(order.status === 'delivered' || order.status === 'shipped') && isBuyer && (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.disputeButton]}
+          onPress={() => router.push(`/dispute/${order.id}`)}
+        >
+          <Ionicons name="shield-outline" size={20} color={colors.neutral[0]} />
+          <Text style={styles.actionButtonText}>Abrir disputa</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={{ height: 40 }} />
+
+      {/* Ship Modal */}
+      <Modal
+        visible={shipModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShipModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Enviar pedido</Text>
+
+            <Text style={styles.modalLabel}>Transportadora</Text>
+            <View style={styles.carrierList}>
+              {CARRIERS.map((c) => (
+                <TouchableOpacity
+                  key={c.value}
+                  style={[
+                    styles.carrierButton,
+                    selectedCarrier === c.value && styles.carrierButtonSelected,
+                  ]}
+                  onPress={() => setSelectedCarrier(c.value)}
+                >
+                  <Text
+                    style={[
+                      styles.carrierButtonText,
+                      selectedCarrier === c.value && styles.carrierButtonTextSelected,
+                    ]}
+                  >
+                    {c.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.modalLabel}>Codigo de rastreio</Text>
+            <TextInput
+              style={styles.trackingInput}
+              placeholder="Ex: BR123456789XX"
+              placeholderTextColor={colors.neutral[400]}
+              value={trackingCodeInput}
+              onChangeText={setTrackingCodeInput}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShipModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalConfirmButton,
+                  (!selectedCarrier || !trackingCodeInput.trim()) && styles.actionDisabled,
+                ]}
+                onPress={handleConfirmShip}
+                disabled={!selectedCarrier || !trackingCodeInput.trim()}
+              >
+                <Text style={styles.modalConfirmText}>Confirmar envio</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -296,6 +381,64 @@ const styles = StyleSheet.create({
   },
   confirmButton: { backgroundColor: colors.success[600] },
   reviewButton: { backgroundColor: colors.accent[500] },
+  disputeButton: { backgroundColor: colors.error[500] },
   actionDisabled: { opacity: 0.6 },
   actionButtonText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 36,
+  },
+  modalTitle: {
+    fontSize: 18, fontWeight: '700', color: colors.neutral[900],
+    marginBottom: 16, textAlign: 'center',
+  },
+  modalLabel: {
+    fontSize: 14, fontWeight: '600', color: colors.neutral[700],
+    marginBottom: 8, marginTop: 12,
+  },
+  carrierList: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+  },
+  carrierButton: {
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 10, borderWidth: 1.5,
+    borderColor: colors.neutral[300], backgroundColor: colors.neutral[0],
+  },
+  carrierButtonSelected: {
+    borderColor: colors.primary[600], backgroundColor: colors.primary[50],
+  },
+  carrierButtonText: {
+    fontSize: 14, fontWeight: '500', color: colors.neutral[700],
+  },
+  carrierButtonTextSelected: {
+    color: colors.primary[700], fontWeight: '600',
+  },
+  trackingInput: {
+    borderWidth: 1, borderColor: colors.neutral[300], borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 14,
+    color: colors.neutral[900], backgroundColor: colors.neutral[50],
+  },
+  modalActions: {
+    flexDirection: 'row', gap: 12, marginTop: 20,
+  },
+  modalCancelButton: {
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.neutral[300],
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 15, fontWeight: '600', color: colors.neutral[700],
+  },
+  modalConfirmButton: {
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: colors.primary[600], alignItems: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 15, fontWeight: '600', color: colors.neutral[0],
+  },
 });

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { apiGet, apiPost, apiPut, apiDelete, clearAuthToken } from '@/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete, clearAuthToken } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ export default function ProfilePage() {
   const handleSaveProfile = async () => {
     if (!user) return;
     try {
-      await apiPut(`/users/${user.id}`, { name: username, bio });
+      await apiPatch(`/users/${user.id}`, { name: username, bio });
       showSaved();
     } catch {
       // silently fail in UI — field stays editable
@@ -206,7 +206,7 @@ export default function ProfilePage() {
   const handleSaveAccount = async () => {
     if (!user) return;
     try {
-      await apiPut(`/users/${user.id}`, { name: fullName, phone: phoneNumber });
+      await apiPatch(`/users/${user.id}`, { name: fullName, phone: phoneNumber });
       showSaved();
     } catch {
       // silently fail
@@ -241,10 +241,21 @@ export default function ProfilePage() {
     router.push('/');
   };
 
-  const handleDeleteAccount = () => {
-    if (window.confirm('Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.')) {
+  const [deletingAccount, setDeletingAccount] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm('Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.')) {
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      await apiDelete('/users/me');
       clearAuthToken();
       router.push('/');
+    } catch (_e) {
+      alert('Não foi possível excluir sua conta. Tente novamente.');
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -453,9 +464,10 @@ export default function ProfilePage() {
               <Section title="Zona de perigo">
                 <button
                   onClick={handleDeleteAccount}
-                  className="w-full py-2.5 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition"
+                  disabled={deletingAccount}
+                  className="w-full py-2.5 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-50"
                 >
-                  Eliminar minha conta
+                  {deletingAccount ? 'Excluindo...' : 'Excluir minha conta'}
                 </button>
                 <p className="text-xs text-gray-400 mt-2">Esta ação é permanente e não pode ser revertida.</p>
               </Section>
