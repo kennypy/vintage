@@ -9,14 +9,13 @@ export default function TabLayout() {
   const { theme } = useTheme();
   const { isAuthenticated, isLoading } = useAuth();
 
-  // While auth is loading or user is not authenticated, render nothing.
-  // The root layout's useEffect will redirect to login once auth resolves.
-  // Returning null here prevents any tab screen from rendering before the
-  // redirect fires, closing the content-flash race condition.
-  if (isLoading || !isAuthenticated) {
+  // Show a loading spinner while auth state is resolving.
+  // Once resolved, render tabs — guests can browse Home and Search.
+  // Tabs that require auth (Sell, Inbox, Profile) handle their own gate.
+  if (isLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center' }}>
-        {isLoading && <ActivityIndicator color={colors.primary[500]} />}
+        <ActivityIndicator color={colors.primary[500]} />
       </View>
     );
   }

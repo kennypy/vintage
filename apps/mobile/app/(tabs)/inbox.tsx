@@ -7,6 +7,7 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
 import { getAllDemoConversations } from '../../src/services/demoStore';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 function formatTimeAgo(dateString: string): string {
   const now = new Date();
@@ -22,7 +23,35 @@ function formatTimeAgo(dateString: string): string {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
+function InboxAuthGate() {
+  const router = useRouter();
+  const { theme } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Ionicons name="chatbubble-outline" size={48} color={colors.primary[500]} />
+      <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginTop: 16, textAlign: 'center' }}>
+        Entre para ver suas mensagens
+      </Text>
+      <Text style={{ fontSize: 14, color: theme.textSecondary, marginTop: 8, textAlign: 'center' }}>
+        Faça login para conversar com vendedores e compradores.
+      </Text>
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
+        style={{ marginTop: 24, backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Entrar / Cadastrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function InboxScreen() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <InboxAuthGate />;
+  return <InboxScreenContent />;
+}
+
+function InboxScreenContent() {
   const router = useRouter();
   const { theme } = useTheme();
   const [conversations, setConversations] = useState<Conversation[]>([]);

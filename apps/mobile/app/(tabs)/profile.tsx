@@ -8,7 +8,35 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Avatar } from '../../src/components/Avatar';
 
+function ProfileAuthGate() {
+  const router = useRouter();
+  const { theme } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Ionicons name="person-outline" size={48} color={colors.primary[500]} />
+      <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginTop: 16, textAlign: 'center' }}>
+        Entre na sua conta
+      </Text>
+      <Text style={{ fontSize: 14, color: theme.textSecondary, marginTop: 8, textAlign: 'center' }}>
+        Faça login para acessar seu perfil, pedidos e carteira.
+      </Text>
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
+        style={{ marginTop: 24, backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Entrar / Cadastrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <ProfileAuthGate />;
+  return <ProfileScreenContent />;
+}
+
+function ProfileScreenContent() {
   const router = useRouter();
   const { theme } = useTheme();
   const { user, isAuthenticated, isLoading: loading, signOut, isDemoMode, refreshUser } = useAuth();
