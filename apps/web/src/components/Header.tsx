@@ -174,6 +174,9 @@ export default function Header() {
           <Link href="/my-listings" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Meus anuncios</Link>
           <Link href="/wallet" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Carteira</Link>
           <Link href="/offers" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Ofertas</Link>
+          <Link href="/promotions/megaphone" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Megafone</Link>
+          <Link href="/promotions/boost" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Impulsionar</Link>
+          <Link href="/promotions/highlight" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Destaque</Link>
           <Link href="/profile" className="block px-3 py-2 text-sm text-brand-600 hover:bg-brand-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Meu perfil</Link>
           <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="block w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Sair</button>
         </div>

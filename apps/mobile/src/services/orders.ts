@@ -77,7 +77,8 @@ export async function getOrders(
   type: 'purchases' | 'sales',
   page?: number,
 ): Promise<OrdersResponse> {
-  const params = new URLSearchParams({ type });
+  const role = type === 'purchases' ? 'buyer' : 'seller';
+  const params = new URLSearchParams({ role });
   if (page) params.append('page', String(page));
   return apiFetch<OrdersResponse>(`/orders?${params.toString()}`);
 }

@@ -5,26 +5,41 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { createSpotlight } from '../../src/services/promotions';
+import { SPOTLIGHT_PRICE_BRL, SPOTLIGHT_DURATION_DAYS } from '@vintage/shared';
 
 export default function HighlightScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const [activating, setActivating] = useState(false);
 
-  const handleActivate = async () => {
-    setActivating(true);
-    try {
-      await createSpotlight();
-      Alert.alert(
-        'Destaque ativado!',
-        'Seu perfil agora tem o selo de loja em destaque por 7 dias.',
-        [{ text: 'Ver meu perfil', onPress: () => router.push('/(tabs)/profile') }],
-      );
-    } catch {
-      Alert.alert('Erro', 'Não foi possível ativar o destaque. Tente novamente.');
-    } finally {
-      setActivating(false);
-    }
+  const handleActivate = () => {
+    const priceFormatted = SPOTLIGHT_PRICE_BRL.toFixed(2).replace('.', ',');
+    Alert.alert(
+      'Confirmar pagamento',
+      `Confirmar pagamento de R$ ${priceFormatted}?\n\nSeu perfil será destaque por ${SPOTLIGHT_DURATION_DAYS} dias.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            setActivating(true);
+            try {
+              await createSpotlight();
+              Alert.alert(
+                'Destaque ativado!',
+                `Seu perfil agora tem o selo de loja em destaque por ${SPOTLIGHT_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
+                [{ text: 'Ver meu perfil', onPress: () => router.push('/(tabs)/profile') }],
+              );
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : 'Não foi possível ativar o destaque. Tente novamente.';
+              Alert.alert('Erro', message);
+            } finally {
+              setActivating(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (

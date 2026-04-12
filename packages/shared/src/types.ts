@@ -88,7 +88,10 @@ export enum NotificationType {
 
 export enum Carrier {
   CORREIOS = 'correios',
+  SEDEX = 'sedex',
+  PAC = 'pac',
   JADLOG = 'jadlog',
+  KANGU = 'kangu',
 }
 
 // --- Brazilian Sizes ---

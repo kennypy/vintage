@@ -25,6 +25,8 @@ export default [
         localStorage: 'readonly',
         btoa: 'readonly',
         setTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
         Uint8Array: 'readonly',
         Promise: 'readonly',
         Array: 'readonly',

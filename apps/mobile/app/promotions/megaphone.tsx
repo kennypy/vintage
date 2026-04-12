@@ -7,6 +7,8 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getUserListings } from '../../src/services/users';
 import { getUserDemoListings } from '../../src/services/demoStore';
+import { createMegafone } from '../../src/services/promotions';
+import { MEGAFONE_FREE_DAYS } from '@vintage/shared';
 
 interface ActiveListing {
   id: string;
@@ -22,6 +24,7 @@ export default function MegaphoneScreen() {
   const [activeListings, setActiveListings] = useState<ActiveListing[]>([]);
   const [loadingListings, setLoadingListings] = useState(false);
   const [boostedId, setBoostedId] = useState<string | null>(null);
+  const [boosting, setBoosting] = useState(false);
 
   const fetchActiveListings = useCallback(async () => {
     if (!user?.id) return;
@@ -56,11 +59,32 @@ export default function MegaphoneScreen() {
   };
 
   const handleBoost = (listing: ActiveListing) => {
-    setBoostedId(listing.id);
-    setShowListings(false);
     Alert.alert(
-      'Megafone ativado!',
-      `"${listing.title}" será destacado para mais compradores por 24h.`,
+      'Confirmar Megafone',
+      `Ativar megafone gratuito para "${listing.title}"?\n\nSeu anúncio será destacado por ${MEGAFONE_FREE_DAYS} dias.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            setBoosting(true);
+            try {
+              await createMegafone(listing.id);
+              setBoostedId(listing.id);
+              setShowListings(false);
+              Alert.alert(
+                'Megafone ativado!',
+                `"${listing.title}" será destacado para mais compradores por ${MEGAFONE_FREE_DAYS} dias.`,
+              );
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : 'Não foi possível ativar o megafone. Tente novamente.';
+              Alert.alert('Erro', message);
+            } finally {
+              setBoosting(false);
+            }
+          },
+        },
+      ],
     );
   };
 
@@ -143,6 +167,7 @@ export default function MegaphoneScreen() {
                   <TouchableOpacity
                     style={[styles.listingRow, { borderBottomColor: theme.border }, boostedId === item.id && styles.listingRowBoosted]}
                     onPress={() => handleBoost(item)}
+                    disabled={boosting}
                   >
                     {item.imageUrl ? (
                       <Image source={{ uri: item.imageUrl }} style={styles.listingThumb} transition={200} cachePolicy="memory-disk" />

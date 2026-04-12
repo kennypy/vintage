@@ -111,6 +111,7 @@ function AppShell() {
         <Stack.Screen name="conta/verificacao" options={{ title: 'Verificação' }} />
         <Stack.Screen name="conta/configuracoes" options={{ title: 'Configurações' }} />
         <Stack.Screen name="conta/ajuda" options={{ title: 'Ajuda' }} />
+        <Stack.Screen name="dispute/[orderId]" options={{ title: 'Abrir disputa' }} />
       </Stack>
     </NavThemeProvider>
   );

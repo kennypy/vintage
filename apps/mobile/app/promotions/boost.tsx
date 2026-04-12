@@ -7,6 +7,7 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { createBump } from '../../src/services/promotions';
 import { getUserListings } from '../../src/services/users';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { BUMP_PRICE_BRL, BUMP_DURATION_DAYS } from '@vintage/shared';
 
 const PLANS = [
   { name: '1 dia', price: 'R$ 4,90', highlight: false },
@@ -45,19 +46,35 @@ export default function BoostScreen() {
     }
   };
 
-  const handleBoost = async (listingId: string) => {
-    setBoosting(true);
-    try {
-      await createBump(listingId);
-      setShowPicker(false);
-      Alert.alert('Impulsionado!', 'Seu anúncio agora aparece no topo das buscas.', [
-        { text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') },
-      ]);
-    } catch {
-      Alert.alert('Erro', 'Não foi possível impulsionar o anúncio. Tente novamente.');
-    } finally {
-      setBoosting(false);
-    }
+  const handleBoost = (listingId: string) => {
+    const priceFormatted = BUMP_PRICE_BRL.toFixed(2).replace('.', ',');
+    Alert.alert(
+      'Confirmar pagamento',
+      `Confirmar pagamento de R$ ${priceFormatted}?\n\nSeu anúncio será impulsionado por ${BUMP_DURATION_DAYS} dias.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            setBoosting(true);
+            try {
+              await createBump(listingId);
+              setShowPicker(false);
+              Alert.alert(
+                'Impulsionado!',
+                `Seu anúncio aparece no topo das buscas por ${BUMP_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
+                [{ text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') }],
+              );
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : 'Não foi possível impulsionar o anúncio. Tente novamente.';
+              Alert.alert('Erro', message);
+            } finally {
+              setBoosting(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (

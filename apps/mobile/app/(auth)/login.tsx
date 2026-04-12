@@ -85,8 +85,9 @@ export default function LoginScreen() {
     try {
       await signIn(email, password);
       router.replace('/(tabs)');
-    } catch (_error) {
-      Alert.alert('Erro ao entrar', 'Email ou senha incorretos. Tente novamente.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Email ou senha incorretos. Tente novamente.';
+      Alert.alert('Erro ao entrar', message);
     } finally {
       setLoading(false);
     }

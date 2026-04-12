@@ -36,7 +36,7 @@ export interface Payout {
 }
 
 export async function getBalance(): Promise<WalletBalance> {
-  return apiFetch<WalletBalance>('/wallet/balance');
+  return apiFetch<WalletBalance>('/wallet');
 }
 
 export async function getTransactions(page?: number): Promise<TransactionsResponse> {

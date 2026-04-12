@@ -3,7 +3,10 @@ import { ApiProperty } from '@nestjs/swagger';
 
 enum Carrier {
   CORREIOS = 'CORREIOS',
+  SEDEX = 'SEDEX',
+  PAC = 'PAC',
   JADLOG = 'JADLOG',
+  KANGU = 'KANGU',
 }
 
 export class ShipOrderDto {

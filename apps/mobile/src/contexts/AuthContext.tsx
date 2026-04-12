@@ -112,21 +112,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(response.user);
       registerForPushNotifications().catch(() => {});
     } catch (error) {
-      if (__DEV__) console.error('[signIn] login failed, falling back to demo:', String(error));
-      // Fall back to demo mode for any error (API unavailable, wrong credentials, etc.)
-      // so users can always test the app regardless of server state
-      const existing = await getDemoUser();
-      if (existing && existing.email === email) {
-        setUser(demoUserToAuthUser(existing));
-        setDemoActive(true);
+      if (isNetworkError(error)) {
+        if (__DEV__) console.warn('[signIn] network error, falling back to demo:', String(error));
+        // API unreachable (no internet, timeout, server down) — fall back to demo mode
+        const existing = await getDemoUser();
+        if (existing && existing.email === email) {
+          setUser(demoUserToAuthUser(existing));
+          setDemoActive(true);
+        } else {
+          const demoUser = await createDemoUser(
+            email.split('@')[0] ?? 'Usuário',
+            email,
+            '00000000000',
+          );
+          setUser(demoUserToAuthUser(demoUser));
+          setDemoActive(true);
+        }
       } else {
-        const demoUser = await createDemoUser(
-          email.split('@')[0] ?? 'Usuário',
-          email,
-          '00000000000',
-        );
-        setUser(demoUserToAuthUser(demoUser));
-        setDemoActive(true);
+        // API returned a real error (wrong password, invalid email, etc.) — propagate it
+        // so the login screen can display the error message to the user
+        throw error;
       }
     }
   }, []);

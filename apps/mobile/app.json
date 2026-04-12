@@ -7,6 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "vintage",
+    "privacyUrl": "https://vintage.br/privacidade",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
