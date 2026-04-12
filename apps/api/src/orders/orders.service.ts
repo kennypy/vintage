@@ -7,6 +7,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -20,6 +21,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private coupons: CouponsService,
+    private notifications: NotificationsService,
   ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
@@ -154,6 +156,17 @@ export class OrdersService {
       return createdOrder;
     });
 
+    // Notify seller about new order (fire-and-forget)
+    this.notifications
+      .createNotification(
+        order.sellerId,
+        'order',
+        'Nova venda!',
+        `${order.buyer.name} comprou "${order.listing.title}"`,
+        { orderId: order.id },
+      )
+      .catch(() => {});
+
     return order;
   }
 
@@ -237,7 +250,7 @@ export class OrdersService {
       throw new BadRequestException('Pedido precisa estar pago para ser enviado');
     }
 
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: {
         status: 'SHIPPED',
@@ -255,6 +268,19 @@ export class OrdersService {
         seller: { select: { id: true, name: true } },
       },
     });
+
+    // Notify buyer that order shipped
+    this.notifications
+      .createNotification(
+        updated.buyerId,
+        'order',
+        'Pedido enviado!',
+        `Seu pedido "${updated.listing.title}" foi enviado. Rastreio: ${dto.trackingCode}`,
+        { orderId: updated.id, trackingCode: dto.trackingCode },
+      )
+      .catch(() => {});
+
+    return updated;
   }
 
   /**
@@ -278,7 +304,7 @@ export class OrdersService {
     const disputeDeadline = new Date(now);
     disputeDeadline.setDate(disputeDeadline.getDate() + DISPUTE_WINDOW_DAYS);
 
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: {
         status: 'DELIVERED',
@@ -295,6 +321,19 @@ export class OrdersService {
         seller: { select: { id: true, name: true } },
       },
     });
+
+    // Notify buyer about delivery
+    this.notifications
+      .createNotification(
+        updated.buyerId,
+        'order',
+        'Pedido entregue!',
+        `Seu pedido "${updated.listing.title}" foi entregue. Confirme o recebimento.`,
+        { orderId: updated.id },
+      )
+      .catch(() => {});
+
+    return updated;
   }
 
   /**
@@ -326,7 +365,7 @@ export class OrdersService {
    * auto-confirm cron, and dispute resolution (seller wins).
    */
   async releaseEscrow(orderId: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
         where: { id: orderId },
         data: {
@@ -372,6 +411,19 @@ export class OrdersService {
 
       return order;
     });
+
+    // Notify seller that funds were released
+    this.notifications
+      .createNotification(
+        result.sellerId,
+        'order',
+        'Pagamento liberado!',
+        `R$ ${Number(result.itemPriceBrl).toFixed(2).replace('.', ',')} da venda "${result.listing.title}" foi creditado na sua carteira.`,
+        { orderId: result.id },
+      )
+      .catch(() => {});
+
+    return result;
   }
 
   /**

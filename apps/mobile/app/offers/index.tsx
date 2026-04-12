@@ -36,6 +36,7 @@ export default function OffersScreen() {
       setOffers(response.items);
     } catch (_error) {
       setOffers([]);
+      Alert.alert('Erro', 'Não foi possível carregar os dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -52,7 +53,7 @@ export default function OffersScreen() {
     setRefreshing(false);
   }, [fetchOffers]);
 
-  const handleAccept = async (offer: Offer) => {
+  const handleAccept = useCallback(async (offer: Offer) => {
     Alert.alert(
       'Aceitar oferta',
       `Aceitar oferta de R$ ${formatBrl(offer.amountBrl)} de ${offer.buyer.name}?`,
@@ -72,9 +73,9 @@ export default function OffersScreen() {
         },
       ],
     );
-  };
+  }, []);
 
-  const handleReject = async (offer: Offer) => {
+  const handleReject = useCallback(async (offer: Offer) => {
     Alert.alert(
       'Recusar oferta',
       `Recusar oferta de R$ ${formatBrl(offer.amountBrl)}?`,
@@ -94,9 +95,9 @@ export default function OffersScreen() {
         },
       ],
     );
-  };
+  }, []);
 
-  const renderOffer = ({ item }: { item: Offer }) => (
+  const renderOffer = useCallback(({ item }: { item: Offer }) => (
     <View style={[styles.offerCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.offerHeader}>
         <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] ?? colors.neutral[400]) + '20' }]}>
@@ -133,7 +134,7 @@ export default function OffersScreen() {
         </View>
       )}
     </View>
-  );
+  ), [theme, activeTab, handleReject, handleAccept]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -181,6 +182,10 @@ export default function OffersScreen() {
               </Text>
             </View>
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
         />
       )}
     </View>

@@ -13,6 +13,13 @@ jest.mock('next/link', () => {
   };
 });
 
+jest.mock('next/image', () => {
+  return function MockImage(props: Record<string, unknown>) {
+    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+    return <img {...props} />;
+  };
+});
+
 const mockListing = {
   id: 'abc-123',
   title: 'Vestido Midi Farm Estampado',

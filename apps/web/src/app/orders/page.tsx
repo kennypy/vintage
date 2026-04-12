@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet } from '@/lib/api';
@@ -54,6 +55,7 @@ export default function OrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'compras' | 'vendas'>('compras');
 
   useEffect(() => {
@@ -69,7 +71,10 @@ export default function OrdersPage() {
       .then((res) => {
         setOrders(Array.isArray(res) ? res : (res.data ?? []));
       })
-      .catch(() => setOrders([]))
+      .catch(() => {
+        setOrders([]);
+        setError('Não foi possível carregar os dados. Tente novamente.');
+      })
       .finally(() => setLoading(false));
   }, [router, tab]);
 
@@ -77,11 +82,14 @@ export default function OrdersPage() {
     setTab(newTab);
     setLoading(true);
     setOrders([]);
+    setError(null);
   };
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Meus pedidos</h1>
+
+      {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
@@ -141,12 +149,14 @@ export default function OrdersPage() {
               href={`/orders/${order.id}`}
               className="flex gap-4 bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition"
             >
-              <div className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
+              <div className="relative w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden">
                 {order.listing?.imageUrl ? (
-                  <img
+                  <Image
                     src={order.listing.imageUrl}
                     alt={order.listing.title ?? 'Produto'}
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
+                    sizes="64px"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-400 text-2xl">

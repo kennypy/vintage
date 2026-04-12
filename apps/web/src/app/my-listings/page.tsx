@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiDelete, apiPatch } from '@/lib/api';
@@ -150,9 +151,9 @@ export default function MyListingsPage() {
             return (
               <div key={listing.id} className="bg-white border border-gray-200 rounded-xl p-4">
                 <div className="flex gap-4">
-                  <Link href={`/listings/${listing.id}`} className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                  <Link href={`/listings/${listing.id}`} className="relative w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
                     {imgUrl ? (
-                      <img src={imgUrl} alt={listing.title} className="w-full h-full object-cover" />
+                      <Image src={imgUrl} alt={listing.title} fill className="object-cover" sizes="80px" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-300">
                         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">

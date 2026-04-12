@@ -1,7 +1,8 @@
 import {
-  View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, Dimensions,
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, Dimensions,
   ActivityIndicator, Alert, TextInput, Modal, Share,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +13,7 @@ import { getListing } from '../../src/services/listings';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
 import { getDemoListing, DEMO_PHOTOS, startDemoConversation } from '../../src/services/demoStore';
+import { BUYER_PROTECTION_FIXED_BRL, BUYER_PROTECTION_RATE } from '@vintage/shared';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -159,7 +161,7 @@ export default function ListingDetailScreen() {
     );
   }
 
-  const buyerProtectionFee = 3.5 + listing.priceBrl * 0.05;
+  const buyerProtectionFee = BUYER_PROTECTION_FIXED_BRL + listing.priceBrl * BUYER_PROTECTION_RATE;
   const subtotal = listing.priceBrl + buyerProtectionFee;
 
   return (
@@ -188,7 +190,7 @@ export default function ListingDetailScreen() {
                     showsVerticalScrollIndicator={false}
                     centerContent
                   >
-                    <Image source={{ uri: img.url }} style={styles.image} resizeMode="cover" />
+                    <Image source={{ uri: img.url }} style={styles.image} contentFit="cover" transition={200} cachePolicy="memory-disk" />
                   </ScrollView>
                 ))}
               </ScrollView>

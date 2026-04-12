@@ -22,13 +22,22 @@ function AppShell() {
 
   const inAuthGroup = segments[0] === '(auth)';
 
+  // Screens that guests may view without signing in
+  const isGuestAllowed =
+    segments[0] === '(tabs)' &&
+    (segments[1] === 'index' || segments[1] === 'search');
+
+  // Listing detail is also guest-accessible
+  const isListingDetail = segments[0] === 'listing';
+  const isSellerProfile = segments[0] === 'seller';
+
   // When auth state settles and user lands somewhere they shouldn't be, redirect.
   useEffect(() => {
     if (isLoading) return;
-    if (!isAuthenticated && !inAuthGroup) {
+    if (!isAuthenticated && !inAuthGroup && !isGuestAllowed && !isListingDetail && !isSellerProfile) {
       router.replace('/(auth)/login');
     }
-  }, [isAuthenticated, isLoading, inAuthGroup, router]);
+  }, [isAuthenticated, isLoading, inAuthGroup, isGuestAllowed, isListingDetail, isSellerProfile, router]);
 
   // Apply full-screen (hide Android navigation bar) when preference is set
   useEffect(() => {

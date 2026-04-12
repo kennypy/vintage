@@ -144,6 +144,10 @@ export default function ReviewsScreen() {
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.3}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

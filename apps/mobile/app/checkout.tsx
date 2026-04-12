@@ -11,6 +11,7 @@ import { useTheme } from '../src/contexts/ThemeContext';
 import { createOrder } from '../src/services/orders';
 import { getAddresses, Address } from '../src/services/addresses';
 import { validateCoupon, CouponValidationResult } from '../src/services/coupons';
+import { BUYER_PROTECTION_FIXED_BRL, BUYER_PROTECTION_RATE } from '@vintage/shared';
 
 type PaymentMethod = 'pix' | 'credit_card' | 'boleto';
 
@@ -55,8 +56,9 @@ export default function CheckoutScreen() {
 
   const itemPrice = params.priceBrl ? parseFloat(params.priceBrl) : 89.9;
   const listingTitle = params.title ?? 'Item';
+  // Shipping cost estimate — real cost is calculated by the API when the order is created
   const shippingCost = 18.9;
-  const buyerProtectionFee = 3.5 + itemPrice * 0.05;
+  const buyerProtectionFee = BUYER_PROTECTION_FIXED_BRL + itemPrice * BUYER_PROTECTION_RATE;
   const subtotal = itemPrice + shippingCost + buyerProtectionFee;
   const discount = couponResult?.discountBrl ?? 0;
   const total = Math.max(0, subtotal - discount);

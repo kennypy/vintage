@@ -186,6 +186,10 @@ export default function WalletScreen() {
             </Text>
           </View>
         }
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
 
       {/* Payout Modal */}

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Image, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 
 export interface PresetAvatar {
@@ -44,7 +45,7 @@ function parsePreset(uri: string): PresetAvatar | null {
   return PRESET_AVATARS.find((p) => `preset:${p.id}` === uri) ?? null;
 }
 
-export function Avatar({ uri, name, size = 48 }: AvatarProps) {
+export const Avatar = React.memo(function Avatar({ uri, name, size = 48 }: AvatarProps) {
   const borderRadius = size / 2;
 
   if (uri?.startsWith('preset:')) {
@@ -65,7 +66,9 @@ export function Avatar({ uri, name, size = 48 }: AvatarProps) {
       <Image
         source={{ uri }}
         style={[styles.base, { width: size, height: size, borderRadius }]}
-        resizeMode="cover"
+        contentFit="cover"
+        transition={200}
+        cachePolicy="memory-disk"
       />
     );
   }
@@ -89,7 +92,7 @@ export function Avatar({ uri, name, size = 48 }: AvatarProps) {
       <Ionicons name="person" size={size * 0.55} color="#9ca3af" />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   base: {

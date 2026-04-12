@@ -8,10 +8,12 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
   BUYER_PROTECTION_RATE: 0.05,
+  DISPUTE_WINDOW_DAYS: 2,
 }));
 
 const mockTx = {
@@ -37,6 +39,10 @@ const mockTx = {
 
 const mockCoupons = {
   validate: jest.fn(),
+};
+
+const mockNotifications = {
+  createNotification: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockPrisma = {
@@ -66,6 +72,7 @@ describe('OrdersService', () => {
         OrdersService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CouponsService, useValue: mockCoupons },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 
@@ -97,10 +104,14 @@ describe('OrdersService', () => {
       mockTx.listing.findUnique.mockResolvedValue(mockListing);
       const createdOrder = {
         id: 'order-1',
+        sellerId: 'seller-1',
         totalBrl: new Decimal('130.50'),
         itemPriceBrl: new Decimal('100'),
         shippingCostBrl: new Decimal('22.50'),
         buyerProtectionFeeBrl: new Decimal('8.50'),
+        listing: { title: 'Vestido vintage' },
+        buyer: { id: 'buyer-1', name: 'Maria' },
+        seller: { id: 'seller-1', name: 'João' },
       };
       mockTx.order.create.mockResolvedValue(createdOrder);
       mockTx.listing.update.mockResolvedValue({});
@@ -196,8 +207,12 @@ describe('OrdersService', () => {
       });
       const shippedOrder = {
         id: 'order-1',
+        buyerId: 'buyer-1',
         status: 'SHIPPED',
         trackingCode: 'BR123456789',
+        listing: { title: 'Vestido vintage' },
+        buyer: { id: 'buyer-1', name: 'Maria' },
+        seller: { id: 'seller-1', name: 'João' },
       };
       mockPrisma.order.update.mockResolvedValue(shippedOrder);
 

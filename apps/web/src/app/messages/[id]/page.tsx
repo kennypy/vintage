@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
@@ -128,12 +129,15 @@ export default function ConversationPage() {
         <Link href="/messages" className="text-sm text-brand-600 hover:text-brand-700">
           ←
         </Link>
-        <div className="w-9 h-9 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold overflow-hidden flex-shrink-0">
+        <div className="relative w-9 h-9 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold overflow-hidden flex-shrink-0">
           {conversation.otherUser.avatarUrl ? (
-            <img
+            <Image
               src={conversation.otherUser.avatarUrl}
               alt={conversation.otherUser.name}
-              className="w-full h-full object-cover"
+              width={36}
+              height={36}
+              className="rounded-full object-cover"
+              sizes="36px"
             />
           ) : (
             conversation.otherUser.name.charAt(0)
@@ -158,10 +162,13 @@ export default function ConversationPage() {
           href={`/listings/${conversation.listing.id}`}
           className="flex gap-3 bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4 hover:bg-gray-100 transition"
         >
-          <img
+          <Image
             src={conversation.listing.imageUrl}
             alt={conversation.listing.title}
-            className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+            width={48}
+            height={48}
+            className="rounded-lg object-cover flex-shrink-0"
+            sizes="48px"
           />
           <div>
             <p className="text-xs font-medium text-gray-900 line-clamp-1">

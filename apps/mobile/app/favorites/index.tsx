@@ -5,6 +5,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { colors } from '../../src/theme/colors';
@@ -45,7 +46,7 @@ export default function FavoritesScreen() {
       }
       setHasMore(pageNum < data.totalPages);
     } catch {
-      // silently fail
+      Alert.alert('Erro', 'Não foi possível carregar os dados. Tente novamente.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -88,6 +89,26 @@ export default function FavoritesScreen() {
     await toggleFavorite(listingId);
   }, [toggleFavorite]);
 
+  const renderItem = useCallback(({ item }: { item: FavoriteListing }) => {
+    const imageUrl = item.images?.sort((a, b) => a.position - b.position)[0]?.url;
+    return (
+      <View style={styles.cardWrapper}>
+        <ListingCard
+          id={item.id}
+          title={item.title}
+          priceBrl={item.priceBrl}
+          imageUrl={imageUrl}
+          condition={item.condition}
+          size={item.size}
+          sellerName={item.seller?.name ?? ''}
+          sellerVerified={item.seller?.verified}
+          favorited
+          onToggleFavorite={() => handleUnfavorite(item.id)}
+        />
+      </View>
+    );
+  }, [handleUnfavorite]);
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: theme.background }]}>
@@ -112,25 +133,7 @@ export default function FavoritesScreen() {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <FlatList
         data={listings}
-        renderItem={({ item }) => {
-          const imageUrl = item.images?.sort((a, b) => a.position - b.position)[0]?.url;
-          return (
-            <View style={styles.cardWrapper}>
-              <ListingCard
-                id={item.id}
-                title={item.title}
-                priceBrl={item.priceBrl}
-                imageUrl={imageUrl}
-                condition={item.condition}
-                size={item.size}
-                sellerName={item.seller?.name ?? ''}
-                sellerVerified={item.seller?.verified}
-                favorited
-                onToggleFavorite={() => handleUnfavorite(item.id)}
-              />
-            </View>
-          );
-        }}
+        renderItem={renderItem}
         keyExtractor={(item) => item.id}
         numColumns={2}
         columnWrapperStyle={styles.row}
@@ -144,6 +147,10 @@ export default function FavoritesScreen() {
         }
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.3}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

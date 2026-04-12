@@ -2,7 +2,7 @@
   "expo": {
     "name": "Vintage.br",
     "slug": "vintage-br",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,10 +16,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "br.vintage.app",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Vintage.br precisa da câmera para tirar fotos dos seus itens.",
         "NSPhotoLibraryUsageDescription": "Vintage.br precisa acessar suas fotos para criar anúncios.",
-        "NSFaceIDUsageDescription": "Use Face ID para acessar sua conta de forma segura."
+        "NSFaceIDUsageDescription": "Use Face ID para acessar sua conta de forma segura.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -28,6 +30,7 @@
         "backgroundColor": "#1a1a2e"
       },
       "package": "br.vintage.app",
+      "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",

@@ -7,6 +7,7 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
 import { getAllDemoConversations } from '../../src/services/demoStore';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 function formatTimeAgo(dateString: string): string {
   const now = new Date();
@@ -22,7 +23,35 @@ function formatTimeAgo(dateString: string): string {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
+function InboxAuthGate() {
+  const router = useRouter();
+  const { theme } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Ionicons name="chatbubble-outline" size={48} color={colors.primary[500]} />
+      <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginTop: 16, textAlign: 'center' }}>
+        Entre para ver suas mensagens
+      </Text>
+      <Text style={{ fontSize: 14, color: theme.textSecondary, marginTop: 8, textAlign: 'center' }}>
+        Faça login para conversar com vendedores e compradores.
+      </Text>
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
+        style={{ marginTop: 24, backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Entrar / Cadastrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function InboxScreen() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <InboxAuthGate />;
+  return <InboxScreenContent />;
+}
+
+function InboxScreenContent() {
   const router = useRouter();
   const { theme } = useTheme();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -56,9 +85,44 @@ export default function InboxScreen() {
     setRefreshing(false);
   }, [fetchConversations]);
 
-  const handleConversationPress = (conversation: Conversation) => {
+  const handleConversationPress = useCallback((conversation: Conversation) => {
     router.push(`/conversation/${conversation.id}?participantName=${encodeURIComponent(conversation.participant.name)}`);
-  };
+  }, [router]);
+
+  const renderItem = useCallback(({ item }: { item: Conversation }) => (
+    <TouchableOpacity
+      style={[styles.conversationItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
+      onPress={() => handleConversationPress(item)}
+    >
+      <View style={styles.avatar}>
+        <View style={[styles.avatarPlaceholder, { backgroundColor: theme.inputBg }]}>
+          <Ionicons name="person" size={20} color={theme.textTertiary} />
+        </View>
+        {item.unreadCount > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadText}>{item.unreadCount}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.conversationContent}>
+        <View style={styles.conversationHeader}>
+          <Text style={[styles.participantName, { color: theme.text }, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
+            {item.participant.name}
+          </Text>
+          <Text style={[styles.timeText, { color: theme.textTertiary }]}>{formatTimeAgo(item.lastMessageAt)}</Text>
+        </View>
+        <Text style={styles.listingTitle} numberOfLines={1}>
+          {item.listingTitle}
+        </Text>
+        <Text
+          style={[styles.lastMessage, { color: theme.textSecondary }, item.unreadCount > 0 && styles.unreadMessage]}
+          numberOfLines={1}
+        >
+          {item.lastMessage}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  ), [theme, handleConversationPress]);
 
   if (loading) {
     return (
@@ -73,40 +137,7 @@ export default function InboxScreen() {
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.conversationItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
-            onPress={() => handleConversationPress(item)}
-          >
-            <View style={styles.avatar}>
-              <View style={[styles.avatarPlaceholder, { backgroundColor: theme.inputBg }]}>
-                <Ionicons name="person" size={20} color={theme.textTertiary} />
-              </View>
-              {item.unreadCount > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadText}>{item.unreadCount}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.conversationContent}>
-              <View style={styles.conversationHeader}>
-                <Text style={[styles.participantName, { color: theme.text }, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
-                  {item.participant.name}
-                </Text>
-                <Text style={[styles.timeText, { color: theme.textTertiary }]}>{formatTimeAgo(item.lastMessageAt)}</Text>
-              </View>
-              <Text style={styles.listingTitle} numberOfLines={1}>
-                {item.listingTitle}
-              </Text>
-              <Text
-                style={[styles.lastMessage, { color: theme.textSecondary }, item.unreadCount > 0 && styles.unreadMessage]}
-                numberOfLines={1}
-              >
-                {item.lastMessage}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={renderItem}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -119,6 +150,10 @@ export default function InboxScreen() {
             </Text>
           </View>
         }
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

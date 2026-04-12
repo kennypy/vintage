@@ -13,6 +13,28 @@ import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { containsProhibitedContent } from '@vintage/shared';
 
+function AuthGate() {
+  const router = useRouter();
+  const { theme } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.background, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Ionicons name="lock-closed-outline" size={48} color={colors.primary[500]} />
+      <Text style={{ fontSize: 18, fontWeight: '600', color: theme.text, marginTop: 16, textAlign: 'center' }}>
+        Entre para vender
+      </Text>
+      <Text style={{ fontSize: 14, color: theme.textSecondary, marginTop: 8, textAlign: 'center' }}>
+        Crie sua conta ou faça login para começar a vender suas peças.
+      </Text>
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
+        style={{ marginTop: 24, backgroundColor: colors.primary[600], paddingHorizontal: 32, paddingVertical: 14, borderRadius: 12 }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 16 }}>Entrar / Cadastrar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const CONDITIONS = [
   { value: 'NEW_WITH_TAGS', label: 'Novo com etiqueta' },
   { value: 'NEW_WITHOUT_TAGS', label: 'Novo sem etiqueta' },
@@ -108,6 +130,12 @@ interface UploadedPhoto {
 }
 
 export default function SellScreen() {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <AuthGate />;
+  return <SellScreenContent />;
+}
+
+function SellScreenContent() {
   const router = useRouter();
   const { user } = useAuth();
   const { theme } = useTheme();
@@ -245,7 +273,7 @@ export default function SellScreen() {
               applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor, capturedCategory, capturedSize);
             }
           } catch (err) {
-            console.error('[uploadListingImage] failed:', String(err));
+            if (__DEV__) console.error('[uploadListingImage] failed:', String(err));
             Alert.alert('Erro no upload', String(err));
             setPhotos((prev) =>
               prev.map((p) =>
@@ -377,7 +405,7 @@ export default function SellScreen() {
             await setListingVideo(listingId, videoUrl);
           } catch (_videoErr) {
             // Non-fatal: listing created, video attach failed silently
-            console.warn('[setListingVideo] failed:', String(_videoErr));
+            if (__DEV__) console.warn('[setListingVideo] failed:', String(_videoErr));
           }
         }
       } catch (_apiError) {

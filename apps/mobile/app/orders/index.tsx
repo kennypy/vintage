@@ -60,7 +60,7 @@ export default function OrdersScreen() {
     setRefreshing(false);
   }, [fetchOrders]);
 
-  const renderOrder = ({ item }: { item: Order }) => (
+  const renderOrder = useCallback(({ item }: { item: Order }) => (
     <TouchableOpacity
       style={[styles.orderCard, { backgroundColor: theme.card, borderColor: theme.border }]}
       onPress={() => router.push(`/orders/${item.id}`)}
@@ -95,7 +95,7 @@ export default function OrdersScreen() {
         </View>
       )}
     </TouchableOpacity>
-  );
+  ), [theme, router]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -121,6 +121,10 @@ export default function OrdersScreen() {
               </Text>
             </View>
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
         />
       )}
     </View>

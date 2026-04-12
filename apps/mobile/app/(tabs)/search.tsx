@@ -1,5 +1,5 @@
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, ActivityIndicator,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +53,7 @@ export default function SearchScreen() {
   const [results, setResults] = useState<ReturnType<typeof mapListingToCard>[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const performSearch = useCallback(async (
@@ -126,6 +127,16 @@ export default function SearchScreen() {
     setHasSearched(false);
     setLoading(false);
   };
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await performSearch(query, selectedCategory, selectedCondition, selectedSize);
+    setRefreshing(false);
+  }, [query, selectedCategory, selectedCondition, selectedSize, performSearch]);
+
+  const renderItem = useCallback(({ item }: { item: ReturnType<typeof mapListingToCard> }) => (
+    <ListingCard {...item} />
+  ), []);
 
   const hasActiveFilters = !!(selectedCategory || selectedCondition || selectedSize);
   const isInSearchMode = hasSearched || query.length > 0 || hasActiveFilters;
@@ -254,14 +265,21 @@ export default function SearchScreen() {
           numColumns={2}
           keyExtractor={(item) => item.id}
           columnWrapperStyle={styles.row}
-          renderItem={({ item }) => <ListingCard {...item} />}
+          renderItem={renderItem}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
               <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum resultado encontrado</Text>
             </View>
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
         />
       )}
     </View>

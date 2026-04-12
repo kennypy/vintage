@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
@@ -108,6 +108,10 @@ export default function SellerProfileScreen() {
     }
   };
 
+  const renderItem = useCallback(({ item }: { item: any }) => (
+    <ListingCard {...item} />
+  ), []);
+
   if (loading || !profile) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
@@ -209,7 +213,7 @@ export default function SellerProfileScreen() {
       numColumns={2}
       keyExtractor={(item) => item.id}
       columnWrapperStyle={styles.row}
-      renderItem={({ item }) => <ListingCard {...item} />}
+      renderItem={renderItem}
       ListHeaderComponent={headerComponent}
       contentContainerStyle={styles.listContent}
       refreshControl={
@@ -221,6 +225,10 @@ export default function SellerProfileScreen() {
           <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum anúncio publicado</Text>
         </View>
       }
+      removeClippedSubviews={true}
+      maxToRenderPerBatch={10}
+      windowSize={11}
+      initialNumToRender={8}
     />
   );
 }

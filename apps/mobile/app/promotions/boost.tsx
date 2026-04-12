@@ -1,7 +1,12 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList, ActivityIndicator, Modal } from 'react-native';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
+import { createBump } from '../../src/services/promotions';
+import { getUserListings } from '../../src/services/users';
+import { useAuth } from '../../src/contexts/AuthContext';
 
 const PLANS = [
   { name: '1 dia', price: 'R$ 4,90', highlight: false },
@@ -9,8 +14,51 @@ const PLANS = [
   { name: '7 dias', price: 'R$ 19,90', highlight: false },
 ];
 
+interface ListingItem {
+  id: string;
+  title: string;
+  priceBrl: number;
+  images?: { url: string }[];
+}
+
 export default function BoostScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
+  const { user } = useAuth();
+  const [showPicker, setShowPicker] = useState(false);
+  const [listings, setListings] = useState<ListingItem[]>([]);
+  const [loadingListings, setLoadingListings] = useState(false);
+  const [boosting, setBoosting] = useState(false);
+
+  const openPicker = async () => {
+    setShowPicker(true);
+    setLoadingListings(true);
+    try {
+      if (!user?.id) return;
+      const data = await getUserListings(user.id);
+      const active = (data.data ?? data).filter((l: ListingItem & { status?: string }) => l.status === 'ACTIVE');
+      setListings(active);
+    } catch {
+      Alert.alert('Erro', 'Não foi possível carregar seus anúncios.');
+    } finally {
+      setLoadingListings(false);
+    }
+  };
+
+  const handleBoost = async (listingId: string) => {
+    setBoosting(true);
+    try {
+      await createBump(listingId);
+      setShowPicker(false);
+      Alert.alert('Impulsionado!', 'Seu anúncio agora aparece no topo das buscas.', [
+        { text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') },
+      ]);
+    } catch {
+      Alert.alert('Erro', 'Não foi possível impulsionar o anúncio. Tente novamente.');
+    } finally {
+      setBoosting(false);
+    }
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
@@ -67,10 +115,57 @@ export default function BoostScreen() {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.ctaButton}>
+      <TouchableOpacity style={styles.ctaButton} onPress={openPicker}>
         <Text style={styles.ctaText}>Escolher anúncio para impulsionar</Text>
       </TouchableOpacity>
       <View style={{ height: 40 }} />
+
+      {/* Listing picker modal */}
+      <Modal visible={showPicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Escolha o anúncio</Text>
+              <TouchableOpacity onPress={() => setShowPicker(false)}>
+                <Ionicons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+            {loadingListings ? (
+              <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary[500]} />
+            ) : listings.length === 0 ? (
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                Você não tem anúncios ativos para impulsionar.
+              </Text>
+            ) : (
+              <FlatList
+                data={listings}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.listingItem, { borderColor: theme.border }]}
+                    onPress={() => handleBoost(item.id)}
+                    disabled={boosting}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      <Text style={[styles.listingPrice, { color: colors.primary[600] }]}>
+                        R$ {Number(item.priceBrl).toFixed(2).replace('.', ',')}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+                  </TouchableOpacity>
+                )}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                windowSize={11}
+                initialNumToRender={8}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -109,4 +204,21 @@ const styles = StyleSheet.create({
     paddingVertical: 16, borderRadius: 12, alignItems: 'center',
   },
   ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700' },
+  emptyText: { textAlign: 'center', marginTop: 40, fontSize: 14 },
+  listingItem: {
+    flexDirection: 'row', alignItems: 'center', padding: 14,
+    borderBottomWidth: 1, gap: 12,
+  },
+  listingTitle: { fontSize: 14, fontWeight: '500' },
+  listingPrice: { fontSize: 13, fontWeight: '600', marginTop: 2 },
 });

@@ -9,6 +9,10 @@ import {
   disableDemoMode,
   DemoUser,
 } from '../services/demoStore';
+import {
+  registerForPushNotifications,
+  configureForegroundNotifications,
+} from '../services/pushNotifications';
 
 interface AuthContextType {
   user: (AuthUser & Partial<UserProfile>) | null;
@@ -73,6 +77,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    configureForegroundNotifications();
+
     async function bootstrap() {
       try {
         // Only restore real authenticated sessions (valid JWT token).
@@ -82,6 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (token) {
           const profile = await getProfile();
           setUser(profile as AuthUser & Partial<UserProfile>);
+          // Register push token on app launch for returning users
+          registerForPushNotifications().catch(() => {});
         }
       } catch (_error) {
         setUser(null);
@@ -102,8 +110,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await loginService(email, password);
       setUser(response.user);
+      registerForPushNotifications().catch(() => {});
     } catch (error) {
-      console.error('[signIn] login failed, falling back to demo:', String(error));
+      if (__DEV__) console.error('[signIn] login failed, falling back to demo:', String(error));
       // Fall back to demo mode for any error (API unavailable, wrong credentials, etc.)
       // so users can always test the app regardless of server state
       const existing = await getDemoUser();
@@ -127,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await registerService(name, email, cpf, password);
       setDemoActive(false);
       setUser(response.user);
+      registerForPushNotifications().catch(() => {});
     } catch (error) {
       if (isNetworkError(error)) {
         // API unavailable — create local demo user with provided details

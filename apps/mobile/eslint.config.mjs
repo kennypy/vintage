@@ -32,6 +32,7 @@ export default [
         FormData: 'readonly',
         AbortController: 'readonly',
         AbortSignal: 'readonly',
+        __DEV__: 'readonly',
       },
     },
     plugins: {

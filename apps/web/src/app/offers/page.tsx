@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { apiGet, apiPatch } from '@/lib/api';
 
 interface Offer {
@@ -134,9 +135,9 @@ export default function OffersPage() {
           {offers.map((offer) => (
             <div key={offer.id} className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="flex gap-4">
-                <Link href={`/listings/${offer.listingId}`} className="w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                <Link href={`/listings/${offer.listingId}`} className="relative w-16 h-16 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
                   {offer.listingImageUrl ? (
-                    <img src={offer.listingImageUrl} alt={offer.listingTitle} className="w-full h-full object-cover" />
+                    <Image src={offer.listingImageUrl} alt={offer.listingTitle} fill sizes="64px" className="object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-300">
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

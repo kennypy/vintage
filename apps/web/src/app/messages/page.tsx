@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet } from '@/lib/api';
@@ -45,6 +46,7 @@ export default function MessagesPage() {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const token =
@@ -58,13 +60,18 @@ export default function MessagesPage() {
       .then((res) => {
         setConversations(Array.isArray(res) ? res : (res.data ?? []));
       })
-      .catch(() => setConversations([]))
+      .catch(() => {
+        setConversations([]);
+        setError('Não foi possível carregar os dados. Tente novamente.');
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Mensagens</h1>
+
+      {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       {loading ? (
         <div className="space-y-3">
@@ -96,12 +103,15 @@ export default function MessagesPage() {
             >
               {/* Avatar */}
               <div className="relative flex-shrink-0">
-                <div className="w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold overflow-hidden">
+                <div className="relative w-12 h-12 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold overflow-hidden">
                   {conv.otherUser.avatarUrl ? (
-                    <img
+                    <Image
                       src={conv.otherUser.avatarUrl}
                       alt={conv.otherUser.name}
-                      className="w-full h-full object-cover"
+                      width={48}
+                      height={48}
+                      className="rounded-full object-cover"
+                      sizes="48px"
                     />
                   ) : (
                     conv.otherUser.name.charAt(0)

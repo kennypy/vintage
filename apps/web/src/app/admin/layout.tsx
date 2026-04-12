@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 
 const NAV_ITEMS = [
   { href: '/admin', label: 'Painel', icon: '~' },
+  { href: '/admin/moderation', label: 'Moderação', icon: '~' },
   { href: '/admin/features', label: 'Feature Toggles', icon: '~' },
   { href: '/admin/users', label: 'Usuarios', icon: '~' },
   { href: '/admin/analytics', label: 'Vendas & Analytics', icon: '~' },
