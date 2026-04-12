@@ -1,10 +1,31 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
+import { createSpotlight } from '../../src/services/promotions';
 
 export default function HighlightScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
+  const [activating, setActivating] = useState(false);
+
+  const handleActivate = async () => {
+    setActivating(true);
+    try {
+      await createSpotlight();
+      Alert.alert(
+        'Destaque ativado!',
+        'Seu perfil agora tem o selo de loja em destaque por 7 dias.',
+        [{ text: 'Ver meu perfil', onPress: () => router.push('/(tabs)/profile') }],
+      );
+    } catch {
+      Alert.alert('Erro', 'Não foi possível ativar o destaque. Tente novamente.');
+    } finally {
+      setActivating(false);
+    }
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
@@ -42,8 +63,8 @@ export default function HighlightScreen() {
             <Text style={[styles.priceLabel, { color: theme.textSecondary }]}>Por apenas</Text>
             <Text style={[styles.price, { color: theme.text }]}>R$ 29,90<Text style={[styles.pricePer, { color: theme.textSecondary }]}>/mês</Text></Text>
           </View>
-          <TouchableOpacity style={styles.ctaButton}>
-            <Text style={styles.ctaText}>Ativar destaque</Text>
+          <TouchableOpacity style={[styles.ctaButton, activating && { opacity: 0.6 }]} onPress={handleActivate} disabled={activating}>
+            <Text style={styles.ctaText}>{activating ? 'Ativando...' : 'Ativar destaque'}</Text>
           </TouchableOpacity>
         </View>
         <Text style={[styles.cancelNote, { color: theme.textTertiary }]}>Cancele a qualquer momento</Text>
