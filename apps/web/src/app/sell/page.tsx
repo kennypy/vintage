@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiPost, apiPostForm } from '@/lib/api';
 
@@ -228,10 +229,12 @@ export default function SellPage() {
             <div className="flex gap-2 flex-wrap mb-3">
               {photos.map((photo, index) => (
                 <div key={index} className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
-                  <img
+                  <Image
                     src={photo.previewUrl}
                     alt={`Foto ${index + 1}`}
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
+                    sizes="80px"
                   />
                   {photo.uploading && (
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center">

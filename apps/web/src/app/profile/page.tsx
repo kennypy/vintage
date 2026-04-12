@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { apiGet, apiPost, apiPut, apiDelete, clearAuthToken } from '@/lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ export default function ProfilePage() {
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold text-xl">
             {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.name} className="w-full h-full rounded-full object-cover" />
+              <Image src={user.avatarUrl} alt={user.name} width={56} height={56} className="rounded-full object-cover" />
             ) : (
               user.name.charAt(0).toUpperCase()
             )}

@@ -1,6 +1,6 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal, FlatList, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal, FlatList } from 'react-native';
+import { Image } from 'expo-image';
 import { useState, useCallback } from 'react';
-import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -145,7 +145,7 @@ export default function MegaphoneScreen() {
                     onPress={() => handleBoost(item)}
                   >
                     {item.imageUrl ? (
-                      <Image source={{ uri: item.imageUrl }} style={styles.listingThumb} />
+                      <Image source={{ uri: item.imageUrl }} style={styles.listingThumb} transition={200} cachePolicy="memory-disk" />
                     ) : (
                       <View style={[styles.listingThumb, styles.listingThumbPlaceholder, { backgroundColor: theme.inputBg }]}>
                         <Ionicons name="image-outline" size={20} color={theme.textTertiary} />
@@ -163,6 +163,10 @@ export default function MegaphoneScreen() {
                   </TouchableOpacity>
                 )}
                 style={styles.listingList}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                windowSize={11}
+                initialNumToRender={8}
               />
             )}
           </View>

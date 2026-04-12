@@ -112,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(response.user);
       registerForPushNotifications().catch(() => {});
     } catch (error) {
-      console.error('[signIn] login failed, falling back to demo:', String(error));
+      if (__DEV__) console.error('[signIn] login failed, falling back to demo:', String(error));
       // Fall back to demo mode for any error (API unavailable, wrong credentials, etc.)
       // so users can always test the app regardless of server state
       const existing = await getDemoUser();

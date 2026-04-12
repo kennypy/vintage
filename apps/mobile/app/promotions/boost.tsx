@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList, ActivityIndicator, Modal } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
@@ -157,6 +157,10 @@ export default function BoostScreen() {
                     <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
                   </TouchableOpacity>
                 )}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                windowSize={11}
+                initialNumToRender={8}
               />
             )}
           </View>

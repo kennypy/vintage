@@ -273,7 +273,7 @@ function SellScreenContent() {
               applyAiSuggestions(response.suggestions, capturedTitle, capturedBrand, capturedColor, capturedCategory, capturedSize);
             }
           } catch (err) {
-            console.error('[uploadListingImage] failed:', String(err));
+            if (__DEV__) console.error('[uploadListingImage] failed:', String(err));
             Alert.alert('Erro no upload', String(err));
             setPhotos((prev) =>
               prev.map((p) =>
@@ -405,7 +405,7 @@ function SellScreenContent() {
             await setListingVideo(listingId, videoUrl);
           } catch (_videoErr) {
             // Non-fatal: listing created, video attach failed silently
-            console.warn('[setListingVideo] failed:', String(_videoErr));
+            if (__DEV__) console.warn('[setListingVideo] failed:', String(_videoErr));
           }
         }
       } catch (_apiError) {

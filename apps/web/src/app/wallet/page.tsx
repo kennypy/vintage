@@ -52,6 +52,7 @@ export default function WalletPage() {
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showPayout, setShowPayout] = useState(false);
   const [pixKey, setPixKey] = useState('');
   const [pixKeyType, setPixKeyType] = useState<'cpf' | 'email' | 'phone' | 'random'>('cpf');
@@ -66,8 +67,14 @@ export default function WalletPage() {
     }
 
     Promise.all([
-      apiGet<WalletBalance>('/wallet').catch(() => ({ availableBrl: 0, pendingBrl: 0, totalBrl: 0 })),
-      apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => []),
+      apiGet<WalletBalance>('/wallet').catch(() => {
+        setError('Não foi possível carregar os dados. Tente novamente.');
+        return { availableBrl: 0, pendingBrl: 0, totalBrl: 0 };
+      }),
+      apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => {
+        setError('Não foi possível carregar os dados. Tente novamente.');
+        return [];
+      }),
     ]).then(([bal, txns]) => {
       setBalance(bal);
       setTransactions(Array.isArray(txns) ? txns : (txns.items ?? []));
@@ -122,6 +129,8 @@ export default function WalletPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Carteira</h1>
+
+      {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       {/* Balance cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">

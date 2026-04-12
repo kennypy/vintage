@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import { apiGet } from '@/lib/api';
 
 interface Review {
@@ -112,7 +113,7 @@ function ReviewsPage() {
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-semibold text-sm flex-shrink-0 overflow-hidden">
                   {review.reviewerAvatarUrl ? (
-                    <img src={review.reviewerAvatarUrl} alt={review.reviewerName} className="w-full h-full object-cover" />
+                    <Image src={review.reviewerAvatarUrl} alt={review.reviewerName} width={40} height={40} className="rounded-full object-cover" />
                   ) : (
                     review.reviewerName.charAt(0).toUpperCase()
                   )}

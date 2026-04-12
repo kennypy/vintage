@@ -39,6 +39,7 @@ export default function NotificationsPage() {
   const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
@@ -58,7 +59,10 @@ export default function NotificationsPage() {
           setUnreadCount(res.unreadCount ?? 0);
         }
       })
-      .catch(() => setNotifications([]))
+      .catch(() => {
+        setNotifications([]);
+        setError('Não foi possível carregar os dados. Tente novamente.');
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -103,6 +107,8 @@ export default function NotificationsPage() {
           </button>
         )}
       </div>
+
+      {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       {loading ? (
         <div className="space-y-3">

@@ -75,6 +75,14 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, [fetchListings]);
 
+  const renderItem = useCallback(({ item }: { item: (typeof listings)[number] }) => (
+    <ListingCard
+      {...item}
+      favorited={isFavorited(item.id)}
+      onToggleFavorite={() => toggleFavorite(item.id)}
+    />
+  ), [isFavorited, toggleFavorite]);
+
   if (loading) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
@@ -93,18 +101,16 @@ export default function HomeScreen() {
         numColumns={2}
         keyExtractor={(item) => item.id}
         columnWrapperStyle={styles.row}
-        renderItem={({ item }) => (
-          <ListingCard
-            {...item}
-            favorited={isFavorited(item.id)}
-            onToggleFavorite={() => toggleFavorite(item.id)}
-          />
-        )}
+        renderItem={renderItem}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

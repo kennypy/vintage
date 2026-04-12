@@ -4,12 +4,12 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   Alert,
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
@@ -121,7 +121,7 @@ export default function MyListingsScreen() {
   const formatPrice = (price: number) =>
     price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  const renderListing = ({ item }: { item: MyListing }) => {
+  const renderListing = useCallback(({ item }: { item: MyListing }) => {
     const statusInfo = STATUS_LABELS[item.status] ?? STATUS_LABELS.ACTIVE;
     const imageUrl = item.images?.sort((a, b) => a.position - b.position)[0]?.url;
 
@@ -129,7 +129,7 @@ export default function MyListingsScreen() {
       <View style={[styles.listingCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <View style={styles.listingRow}>
           {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.thumbnail} />
+            <Image source={{ uri: imageUrl }} style={styles.thumbnail} transition={200} cachePolicy="memory-disk" />
           ) : (
             <View style={[styles.thumbnail, styles.thumbnailPlaceholder, { backgroundColor: theme.inputBg }]}>
               <Ionicons name="image-outline" size={24} color={theme.textTertiary} />
@@ -173,7 +173,7 @@ export default function MyListingsScreen() {
         </View>
       </View>
     );
-  };
+  }, [theme, router, handleDelete]);
 
   if (loading) {
     return (
@@ -216,6 +216,10 @@ export default function MyListingsScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary[500]} />
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
         />
       )}
     </View>

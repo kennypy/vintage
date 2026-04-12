@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
@@ -142,12 +143,14 @@ export default function OrderDetailPage() {
       {order.listing && (
         <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
           <div className="flex gap-4">
-            <div className="w-24 h-24 bg-gray-100 rounded-xl flex-shrink-0 overflow-hidden">
+            <div className="relative w-24 h-24 bg-gray-100 rounded-xl flex-shrink-0 overflow-hidden">
               {order.listing.imageUrl ? (
-                <img
+                <Image
                   src={order.listing.imageUrl}
                   alt={order.listing.title}
-                  className="w-full h-full object-cover"
+                  fill
+                  className="object-cover"
+                  sizes="96px"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-400 text-3xl">
@@ -220,9 +223,9 @@ export default function OrderDetailPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 space-y-3">
         {order.seller && (
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold text-sm flex-shrink-0">
+            <div className="relative w-9 h-9 bg-brand-100 rounded-full flex items-center justify-center text-brand-600 font-bold text-sm flex-shrink-0 overflow-hidden">
               {order.seller.avatarUrl ? (
-                <img src={order.seller.avatarUrl} alt={order.seller.name} className="w-full h-full rounded-full object-cover" />
+                <Image src={order.seller.avatarUrl} alt={order.seller.name} width={36} height={36} className="rounded-full object-cover" sizes="36px" />
               ) : (
                 order.seller.name.charAt(0)
               )}

@@ -85,9 +85,44 @@ function InboxScreenContent() {
     setRefreshing(false);
   }, [fetchConversations]);
 
-  const handleConversationPress = (conversation: Conversation) => {
+  const handleConversationPress = useCallback((conversation: Conversation) => {
     router.push(`/conversation/${conversation.id}?participantName=${encodeURIComponent(conversation.participant.name)}`);
-  };
+  }, [router]);
+
+  const renderItem = useCallback(({ item }: { item: Conversation }) => (
+    <TouchableOpacity
+      style={[styles.conversationItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
+      onPress={() => handleConversationPress(item)}
+    >
+      <View style={styles.avatar}>
+        <View style={[styles.avatarPlaceholder, { backgroundColor: theme.inputBg }]}>
+          <Ionicons name="person" size={20} color={theme.textTertiary} />
+        </View>
+        {item.unreadCount > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadText}>{item.unreadCount}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.conversationContent}>
+        <View style={styles.conversationHeader}>
+          <Text style={[styles.participantName, { color: theme.text }, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
+            {item.participant.name}
+          </Text>
+          <Text style={[styles.timeText, { color: theme.textTertiary }]}>{formatTimeAgo(item.lastMessageAt)}</Text>
+        </View>
+        <Text style={styles.listingTitle} numberOfLines={1}>
+          {item.listingTitle}
+        </Text>
+        <Text
+          style={[styles.lastMessage, { color: theme.textSecondary }, item.unreadCount > 0 && styles.unreadMessage]}
+          numberOfLines={1}
+        >
+          {item.lastMessage}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  ), [theme, handleConversationPress]);
 
   if (loading) {
     return (
@@ -102,40 +137,7 @@ function InboxScreenContent() {
       <FlatList
         data={conversations}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.conversationItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
-            onPress={() => handleConversationPress(item)}
-          >
-            <View style={styles.avatar}>
-              <View style={[styles.avatarPlaceholder, { backgroundColor: theme.inputBg }]}>
-                <Ionicons name="person" size={20} color={theme.textTertiary} />
-              </View>
-              {item.unreadCount > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadText}>{item.unreadCount}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.conversationContent}>
-              <View style={styles.conversationHeader}>
-                <Text style={[styles.participantName, { color: theme.text }, item.unreadCount > 0 && styles.unreadName]} numberOfLines={1}>
-                  {item.participant.name}
-                </Text>
-                <Text style={[styles.timeText, { color: theme.textTertiary }]}>{formatTimeAgo(item.lastMessageAt)}</Text>
-              </View>
-              <Text style={styles.listingTitle} numberOfLines={1}>
-                {item.listingTitle}
-              </Text>
-              <Text
-                style={[styles.lastMessage, { color: theme.textSecondary }, item.unreadCount > 0 && styles.unreadMessage]}
-                numberOfLines={1}
-              >
-                {item.lastMessage}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={renderItem}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -148,6 +150,10 @@ function InboxScreenContent() {
             </Text>
           </View>
         }
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
@@ -43,6 +43,7 @@ export default function NotificationsScreen() {
       setUnreadCount(response.unreadCount);
     } catch (_error) {
       setNotifications([]);
+      Alert.alert('Erro', 'Não foi possível carregar os dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,7 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   }, [fetchNotifications]);
 
-  const handleNotificationPress = async (notification: AppNotification) => {
+  const handleNotificationPress = useCallback(async (notification: AppNotification) => {
     if (!notification.read) {
       try {
         await markRead(notification.id);
@@ -70,7 +71,38 @@ export default function NotificationsScreen() {
         // Silently fail
       }
     }
-  };
+  }, []);
+
+  const renderNotification = useCallback(({ item }: { item: AppNotification }) => (
+    <TouchableOpacity
+      style={[
+        styles.notificationItem,
+        { backgroundColor: item.read ? theme.card : colors.primary[50] + '50', borderBottomColor: theme.border },
+      ]}
+      onPress={() => handleNotificationPress(item)}
+    >
+      <View style={[
+        styles.iconContainer,
+        { backgroundColor: !item.read ? colors.primary[100] : theme.inputBg },
+      ]}>
+        <Ionicons
+          name={(NOTIFICATION_ICONS[item.type] ?? 'notifications-outline') as any}
+          size={22}
+          color={!item.read ? colors.primary[600] : theme.textTertiary}
+        />
+      </View>
+      <View style={styles.notificationContent}>
+        <Text style={[styles.notificationTitle, { color: theme.text }, !item.read && styles.notificationTitleUnread]}>
+          {item.title}
+        </Text>
+        <Text style={[styles.notificationBody, { color: theme.textSecondary }]} numberOfLines={2}>
+          {item.body}
+        </Text>
+        <Text style={[styles.notificationTime, { color: theme.textTertiary }]}>{formatTimeAgo(item.createdAt)}</Text>
+      </View>
+      {!item.read && <View style={styles.unreadDot} />}
+    </TouchableOpacity>
+  ), [theme, handleNotificationPress]);
 
   const handleMarkAllRead = async () => {
     try {
@@ -104,36 +136,7 @@ export default function NotificationsScreen() {
       <FlatList
         data={notifications}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.notificationItem,
-              { backgroundColor: item.read ? theme.card : colors.primary[50] + '50', borderBottomColor: theme.border },
-            ]}
-            onPress={() => handleNotificationPress(item)}
-          >
-            <View style={[
-              styles.iconContainer,
-              { backgroundColor: !item.read ? colors.primary[100] : theme.inputBg },
-            ]}>
-              <Ionicons
-                name={(NOTIFICATION_ICONS[item.type] ?? 'notifications-outline') as any}
-                size={22}
-                color={!item.read ? colors.primary[600] : theme.textTertiary}
-              />
-            </View>
-            <View style={styles.notificationContent}>
-              <Text style={[styles.notificationTitle, { color: theme.text }, !item.read && styles.notificationTitleUnread]}>
-                {item.title}
-              </Text>
-              <Text style={[styles.notificationBody, { color: theme.textSecondary }]} numberOfLines={2}>
-                {item.body}
-              </Text>
-              <Text style={[styles.notificationTime, { color: theme.textTertiary }]}>{formatTimeAgo(item.createdAt)}</Text>
-            </View>
-            {!item.read && <View style={styles.unreadDot} />}
-          </TouchableOpacity>
-        )}
+        renderItem={renderNotification}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -146,6 +149,10 @@ export default function NotificationsScreen() {
             </Text>
           </View>
         }
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
     </View>
   );

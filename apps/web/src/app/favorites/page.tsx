@@ -26,6 +26,7 @@ export default function FavoritesPage() {
   const router = useRouter();
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -41,7 +42,10 @@ export default function FavoritesPage() {
         setListings(list);
         setFavoritedIds(new Set(list.map((l) => l.id)));
       })
-      .catch(() => setListings([]))
+      .catch(() => {
+        setListings([]);
+        setError('Não foi possível carregar os dados. Tente novamente.');
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -61,6 +65,8 @@ export default function FavoritesPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Favoritos</h1>
+
+      {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">

@@ -259,6 +259,10 @@ export default function EditProfileScreen() {
                   <Text style={[styles.presetLabel, { color: theme.textSecondary }]}>{item.label}</Text>
                 </TouchableOpacity>
               )}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              windowSize={11}
+              initialNumToRender={8}
             />
 
             <Text style={[styles.presetGroupLabel, { color: theme.textSecondary }]}>Masculino</Text>
@@ -279,6 +283,10 @@ export default function EditProfileScreen() {
                   <Text style={[styles.presetLabel, { color: theme.textSecondary }]}>{item.label}</Text>
                 </TouchableOpacity>
               )}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={10}
+              windowSize={11}
+              initialNumToRender={8}
             />
           </View>
         </View>

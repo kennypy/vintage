@@ -48,7 +48,7 @@ export default function AddressesScreen() {
       const data = await getAddresses();
       setAddresses(data);
     } catch (_error) {
-      // silently fail
+      Alert.alert('Erro', 'Não foi possível carregar os dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -197,6 +197,10 @@ export default function AddressesScreen() {
               </TouchableOpacity>
             ) : null
           }
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
         />
       )}
 

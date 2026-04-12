@@ -1,22 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-
-/** Days after which a listing with no activity is auto-paused */
-const STALE_LISTING_DAYS = 90;
-
-/** Days after which a paused listing is auto-deleted (soft) */
-const PAUSED_CLEANUP_DAYS = 180;
+import { CronLockService } from '../common/services/cron-lock.service';
 
 @Injectable()
 export class ListingsCronService {
   private readonly logger = new Logger(ListingsCronService.name);
 
+  /** Days after which a listing with no activity is auto-paused */
+  private readonly staleListingDays: number;
+
+  /** Days after which a paused listing is auto-deleted (soft) */
+  private readonly pausedCleanupDays: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
-  ) {}
+    private readonly config: ConfigService,
+    private readonly cronLock: CronLockService,
+  ) {
+    this.staleListingDays = this.config.get<number>('STALE_LISTING_DAYS', 90);
+    this.pausedCleanupDays = this.config.get<number>('PAUSED_CLEANUP_DAYS', 180);
+  }
 
   /**
    * Auto-pause ACTIVE listings that have had no updates in 90 days.
@@ -25,8 +32,10 @@ export class ListingsCronService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async autoStaleListings() {
+    if (!(await this.cronLock.acquire('listings:autoStale'))) return;
+
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - STALE_LISTING_DAYS);
+    cutoff.setDate(cutoff.getDate() - this.staleListingDays);
 
     const staleListings = await this.prisma.listing.findMany({
       where: {
@@ -40,7 +49,7 @@ export class ListingsCronService {
     if (staleListings.length === 0) return;
 
     this.logger.log(
-      `Auto-pausing ${staleListings.length} stale listings (>${STALE_LISTING_DAYS} days without update)`,
+      `Auto-pausing ${staleListings.length} stale listings (>${this.staleListingDays} days without update)`,
     );
 
     for (const listing of staleListings) {
@@ -73,8 +82,10 @@ export class ListingsCronService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async cleanupPausedListings() {
+    if (!(await this.cronLock.acquire('listings:cleanupPaused'))) return;
+
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - PAUSED_CLEANUP_DAYS);
+    cutoff.setDate(cutoff.getDate() - this.pausedCleanupDays);
 
     const oldPausedListings = await this.prisma.listing.findMany({
       where: {
@@ -88,7 +99,7 @@ export class ListingsCronService {
     if (oldPausedListings.length === 0) return;
 
     this.logger.log(
-      `Removing ${oldPausedListings.length} paused listings (>${PAUSED_CLEANUP_DAYS} days)`,
+      `Removing ${oldPausedListings.length} paused listings (>${this.pausedCleanupDays} days)`,
     );
 
     for (const listing of oldPausedListings) {
@@ -112,6 +123,8 @@ export class ListingsCronService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async expirePromotions() {
+    if (!(await this.cronLock.acquire('listings:expirePromotions'))) return;
+
     const now = new Date();
 
     const expired = await this.prisma.listing.findMany({

@@ -1,6 +1,8 @@
 'use client';
 
+import React, { memo } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { apiPost } from '@/lib/api';
 
 export interface ListingCardProps {
@@ -19,7 +21,7 @@ function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-export default function ListingCard({
+function ListingCard({
   id,
   title,
   price,
@@ -48,10 +50,12 @@ export default function ListingCard({
     <Link href={`/listings/${id}`} className="group block relative">
       <div className="relative aspect-[4/5] bg-gray-100 rounded-xl overflow-hidden mb-2">
         {imageUrl ? (
-          <img
+          <Image
             src={imageUrl}
             alt={title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            fill
+            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-300">
@@ -96,3 +100,5 @@ export default function ListingCard({
     </Link>
   );
 }
+
+export default memo(ListingCard);

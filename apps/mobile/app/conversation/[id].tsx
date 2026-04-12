@@ -510,6 +510,10 @@ export default function ConversationScreen() {
         contentContainerStyle={styles.messagesList}
         onEndReached={loadMore}
         onEndReachedThreshold={0.3}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
       />
       {isTyping && (
         <View style={[styles.typingContainer, { backgroundColor: theme.background }]}>

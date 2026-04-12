@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
@@ -140,9 +141,9 @@ function CheckoutPage() {
       <div className="space-y-6">
         {/* Item summary */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 flex gap-4">
-          <div className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+          <div className="relative w-20 h-20 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
             {imageUrl ? (
-              <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
+              <Image src={imageUrl} alt={title} fill className="object-cover" sizes="80px" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-gray-300">
                 <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">

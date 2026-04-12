@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from './orders.service';
+import { CronLockService } from '../common/services/cron-lock.service';
 import { SHIPPING_DEADLINE_DAYS } from '@vintage/shared';
 
 @Injectable()
@@ -12,6 +13,7 @@ export class OrdersCronService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
+    private readonly cronLock: CronLockService,
   ) {}
 
   /**
@@ -21,6 +23,8 @@ export class OrdersCronService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async autoConfirmOrders() {
+    if (!(await this.cronLock.acquire('orders:autoConfirm'))) return;
+
     const now = new Date();
 
     const expiredOrders = await this.prisma.order.findMany({
@@ -56,6 +60,8 @@ export class OrdersCronService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async autoCancelUnshippedOrders() {
+    if (!(await this.cronLock.acquire('orders:autoCancelUnshipped'))) return;
+
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - SHIPPING_DEADLINE_DAYS);
 

@@ -21,6 +21,7 @@ const mockPrisma = {
     findUnique: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    aggregate: jest.fn(),
   },
   promotion: {
     findFirst: jest.fn(),
@@ -34,6 +35,9 @@ const mockPrisma = {
   },
   walletTransaction: {
     create: jest.fn(),
+  },
+  favorite: {
+    count: jest.fn(),
   },
   $transaction: jest.fn(),
 };
@@ -285,23 +289,84 @@ describe('PromotionsService', () => {
       );
     });
 
-    it('should return stats for own promotion', async () => {
+    it('should return real stats for listing-specific promotion', async () => {
       mockPrisma.promotion.findUnique.mockResolvedValue({
         id: 'promo-1',
         userId: 'user-1',
         type: 'BUMP',
+        listingId: 'listing-1',
         startsAt: new Date(),
         endsAt: new Date(Date.now() + 86400000),
-        listing: null,
+        listing: { id: 'listing-1', viewCount: 42 },
       });
+      mockPrisma.favorite.count.mockResolvedValue(7);
 
       const result = await service.getPromotionStats('promo-1', 'user-1');
 
       expect(result.promotionId).toBe('promo-1');
       expect(result.type).toBe('BUMP');
-      expect(result).toHaveProperty('views');
-      expect(result).toHaveProperty('clicks');
-      expect(result).toHaveProperty('favorites');
+      expect(result.views).toBe(42);
+      expect(result.clicks).toBe(0);
+      expect(result.favorites).toBe(7);
+      expect(mockPrisma.favorite.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            listingId: 'listing-1',
+          }),
+        }),
+      );
+    });
+
+    it('should return aggregated stats for spotlight promotion (no listing)', async () => {
+      mockPrisma.promotion.findUnique.mockResolvedValue({
+        id: 'promo-2',
+        userId: 'user-1',
+        type: 'SPOTLIGHT',
+        listingId: null,
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 86400000),
+        listing: null,
+      });
+      mockPrisma.listing.aggregate.mockResolvedValue({
+        _sum: { viewCount: 150 },
+      });
+      mockPrisma.favorite.count.mockResolvedValue(12);
+
+      const result = await service.getPromotionStats('promo-2', 'user-1');
+
+      expect(result.promotionId).toBe('promo-2');
+      expect(result.type).toBe('SPOTLIGHT');
+      expect(result.views).toBe(150);
+      expect(result.clicks).toBe(0);
+      expect(result.favorites).toBe(12);
+      expect(mockPrisma.listing.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { sellerId: 'user-1', status: 'ACTIVE' },
+          _sum: { viewCount: true },
+        }),
+      );
+    });
+
+    it('should return 0 views when aggregate sum is null', async () => {
+      mockPrisma.promotion.findUnique.mockResolvedValue({
+        id: 'promo-3',
+        userId: 'user-1',
+        type: 'SPOTLIGHT',
+        listingId: null,
+        startsAt: new Date(),
+        endsAt: new Date(Date.now() + 86400000),
+        listing: null,
+      });
+      mockPrisma.listing.aggregate.mockResolvedValue({
+        _sum: { viewCount: null },
+      });
+      mockPrisma.favorite.count.mockResolvedValue(0);
+
+      const result = await service.getPromotionStats('promo-3', 'user-1');
+
+      expect(result.views).toBe(0);
+      expect(result.favorites).toBe(0);
+      expect(result.clicks).toBe(0);
     });
   });
 });

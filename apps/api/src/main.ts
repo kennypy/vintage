@@ -1,11 +1,13 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
+
+const logger = new Logger('Bootstrap');
 
 function runMigrations() {
   try {
@@ -15,7 +17,7 @@ function runMigrations() {
       timeout: 60_000,
     });
   } catch (e) {
-    console.error('[migrations] prisma migrate deploy failed:', String(e).slice(0, 300));
+    logger.error(`prisma migrate deploy failed: ${String(e).slice(0, 300)}`);
     // Non-fatal in development — server still starts, stale columns cause runtime errors
   }
 }
@@ -99,9 +101,9 @@ async function bootstrap() {
 
   const port = config.get<number>('PORT', 3001);
   await app.listen(port);
-  console.log(`🚀 Vintage.br API running on port ${port}`);
+  logger.log(`Vintage.br API running on port ${port}`);
   if (nodeEnv !== 'production') {
-    console.log(`📚 Swagger docs: http://localhost:${port}/docs`);
+    logger.log(`Swagger docs: http://localhost:${port}/docs`);
   }
 }
 

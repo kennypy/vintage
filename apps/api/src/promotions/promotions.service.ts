@@ -278,15 +278,51 @@ export class PromotionsService {
       throw new ForbiddenException('Você não tem acesso a esta promoção');
     }
 
-    // Mock stats for now
+    let views: number;
+    let favorites: number;
+
+    if (promotion.listingId && promotion.listing) {
+      // Listing-specific promotion (BUMP or MEGAFONE): use the listing's viewCount
+      views = promotion.listing.viewCount;
+
+      // Count favorites added during the promotion period
+      favorites = await this.prisma.favorite.count({
+        where: {
+          listingId: promotion.listingId,
+          createdAt: {
+            gte: promotion.startsAt,
+            lte: promotion.endsAt,
+          },
+        },
+      });
+    } else {
+      // SPOTLIGHT promotion: aggregate across all user's active listings
+      const viewAgg = await this.prisma.listing.aggregate({
+        where: { sellerId: userId, status: 'ACTIVE' },
+        _sum: { viewCount: true },
+      });
+      views = viewAgg._sum.viewCount ?? 0;
+
+      // Count favorites on any of the user's listings during the promotion period
+      favorites = await this.prisma.favorite.count({
+        where: {
+          listing: { sellerId: userId },
+          createdAt: {
+            gte: promotion.startsAt,
+            lte: promotion.endsAt,
+          },
+        },
+      });
+    }
+
     return {
       promotionId: promotion.id,
       type: promotion.type,
       startsAt: promotion.startsAt,
       endsAt: promotion.endsAt,
-      views: Math.floor(Math.random() * 500) + 50,
-      clicks: Math.floor(Math.random() * 100) + 10,
-      favorites: Math.floor(Math.random() * 20) + 2,
+      views,
+      clicks: 0,
+      favorites,
     };
   }
 }

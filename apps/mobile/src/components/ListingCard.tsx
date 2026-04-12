@@ -1,4 +1,6 @@
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -24,7 +26,7 @@ const CONDITION_LABELS: Record<string, string> = {
   SATISFACTORY: 'Satisfatório',
 };
 
-export function ListingCard({
+export const ListingCard = React.memo(function ListingCard({
   id, title, priceBrl, imageUrl, sellerName, sellerVerified,
   condition, size, favorited, onToggleFavorite,
 }: ListingCardProps) {
@@ -38,7 +40,7 @@ export function ListingCard({
     >
       <View style={styles.imageContainer}>
         {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: imageUrl }} style={styles.image} contentFit="cover" transition={200} cachePolicy="memory-disk" />
         ) : (
           <View style={[styles.image, styles.placeholder]}>
             <Ionicons name="image-outline" size={32} color={colors.neutral[300]} />
@@ -75,7 +77,7 @@ export function ListingCard({
       </View>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {

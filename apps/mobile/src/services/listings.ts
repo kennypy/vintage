@@ -240,7 +240,7 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   const csrfToken = await getCsrfToken();
 
   const token = await getToken();
-  console.log('[upload] token present:', !!token, '| csrf present:', !!csrfToken);
+  if (__DEV__) console.log('[upload] token present:', !!token, '| csrf present:', !!csrfToken);
 
   // FileSystem.uploadAsync handles Android content:// URIs correctly,
   // avoiding the "Network request failed" error that raw fetch+FormData causes.
@@ -259,7 +259,7 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   );
 
   if (result.status < 200 || result.status >= 300) {
-    console.log('[upload] error status:', result.status, '| body:', result.body);
+    if (__DEV__) console.log('[upload] error status:', result.status, '| body:', result.body);
     let message = 'Upload falhou';
     try { message = (JSON.parse(result.body) as { message?: string }).message ?? message; } catch { /* ignore */ }
     throw new Error(message);

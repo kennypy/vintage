@@ -7,7 +7,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 
 export default function TabLayout() {
   const { theme } = useTheme();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isLoading } = useAuth();
 
   // Show a loading spinner while auth state is resolving.
   // Once resolved, render tabs — guests can browse Home and Search.

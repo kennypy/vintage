@@ -18,9 +18,25 @@ function sanitizeHtml(input: string): string {
   return input.replace(/<[^>]*>/g, '');
 }
 
+/**
+ * Parse allowed CORS origins from environment variables.
+ * CORS_ORIGINS: comma-separated list (takes priority)
+ * WEB_URL: single web origin fallback
+ * Defaults to localhost dev origins when neither is set.
+ */
+function parseCorsOrigins(): string[] {
+  if (process.env.CORS_ORIGINS) {
+    return process.env.CORS_ORIGINS.split(',').map((o) => o.trim());
+  }
+  if (process.env.WEB_URL) {
+    return [process.env.WEB_URL];
+  }
+  return ['http://localhost:3000', 'http://localhost:8081'];
+}
+
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:8081'],
+    origin: parseCorsOrigins(),
     credentials: true,
   },
   namespace: '/chat',
@@ -94,6 +110,8 @@ export class MessagesGateway
       const filtered = socketIds.filter((id) => id !== client.id);
       if (filtered.length === 0) {
         this.userSockets.delete(userId);
+        // Clean up tracked conversations to prevent memory leak
+        this.userConversations.delete(userId);
         // User is fully offline
         this.server.emit('userOffline', { userId });
       } else {

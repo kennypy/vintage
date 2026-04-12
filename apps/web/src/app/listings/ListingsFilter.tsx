@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 
 export interface FilterState {
   category: string;
@@ -50,7 +50,7 @@ function ChipButton({
   );
 }
 
-export default function ListingsFilter({ onFilterChange }: ListingsFilterProps) {
+function ListingsFilter({ onFilterChange }: ListingsFilterProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedCondition, setSelectedCondition] = useState<string>('');
   const [selectedSize, setSelectedSize] = useState<string>('');
@@ -217,3 +217,5 @@ export default function ListingsFilter({ onFilterChange }: ListingsFilterProps) 
     </>
   );
 }
+
+export default memo(ListingsFilter);

@@ -36,7 +36,7 @@ const FAQ_SECTIONS: FaqSection[] = [
       },
       {
         q: 'Posso parcelar a compra?',
-        a: 'No momento aceitamos PIX e pagamento a vista. Parcelamento via cartao estara disponivel em breve.',
+        a: 'Aceitamos PIX, cartao de credito (com parcelamento em ate 12x) e boleto bancario.',
       },
       {
         q: 'Como funciona o frete?',
