@@ -231,10 +231,16 @@ export class MercadoPagoClient {
    */
   verifyWebhookSignature(payload: string, signature: string): boolean {
     if (!this.webhookSecret) {
-      this.logger.warn(
-        'Webhook secret not configured — skipping signature verification in dev mode',
+      if (this.nodeEnv === 'development') {
+        this.logger.warn(
+          'Webhook secret not configured — skipping verification (development only)',
+        );
+        return true;
+      }
+      this.logger.error(
+        'MERCADOPAGO_WEBHOOK_SECRET not configured — rejecting webhook',
       );
-      return true;
+      return false;
     }
 
     const expectedSig = crypto

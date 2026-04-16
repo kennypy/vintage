@@ -2,7 +2,7 @@
 // Vintage.br — Shared Validation Utilities
 // ============================================================
 
-import { CEP_REGEX, CPF_REGEX, MIN_OFFER_PERCENTAGE } from './constants';
+import { CEP_REGEX, CNPJ_REGEX, CPF_REGEX, MIN_OFFER_PERCENTAGE } from './constants';
 
 /**
  * Validate CPF using Modulo 11 algorithm.
@@ -109,4 +109,57 @@ export function isValidBrazilianPhone(phone: string): boolean {
  */
 export function matchesCPFFormat(cpf: string): boolean {
   return CPF_REGEX.test(cpf);
+}
+
+/**
+ * Validate CNPJ using Modulo 11 algorithm.
+ * Returns true if the CNPJ is valid.
+ */
+export function isValidCNPJ(cnpj: string): boolean {
+  const cleaned = cnpj.replace(/\D/g, '');
+
+  if (cleaned.length !== 14) return false;
+
+  // Reject known invalid patterns (all same digits)
+  if (/^(\d)\1{13}$/.test(cleaned)) return false;
+
+  // First check digit (weights: 5,4,3,2,9,8,7,6,5,4,3,2)
+  const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(cleaned.charAt(i)) * weights1[i];
+  }
+  let remainder = sum % 11;
+  const digit1 = remainder < 2 ? 0 : 11 - remainder;
+  if (digit1 !== parseInt(cleaned.charAt(12))) return false;
+
+  // Second check digit (weights: 6,5,4,3,2,9,8,7,6,5,4,3,2)
+  const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  sum = 0;
+  for (let i = 0; i < 13; i++) {
+    sum += parseInt(cleaned.charAt(i)) * weights2[i];
+  }
+  remainder = sum % 11;
+  const digit2 = remainder < 2 ? 0 : 11 - remainder;
+  if (digit2 !== parseInt(cleaned.charAt(13))) return false;
+
+  return true;
+}
+
+/**
+ * Format CNPJ as XX.XXX.XXX/XXXX-XX
+ */
+export function formatCNPJ(cnpj: string): string {
+  const cleaned = cnpj.replace(/\D/g, '');
+  return cleaned.replace(
+    /(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,
+    '$1.$2.$3/$4-$5',
+  );
+}
+
+/**
+ * Validate CNPJ format matches regex.
+ */
+export function matchesCNPJFormat(cnpj: string): boolean {
+  return CNPJ_REGEX.test(cnpj);
 }

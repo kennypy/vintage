@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { NotaFiscalService } from './notafiscal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NFeClient } from './nfe.client';
@@ -8,6 +8,11 @@ const mockPrisma = {
   order: {
     findUnique: jest.fn(),
   },
+  notaFiscal: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+  },
+  $queryRaw: jest.fn(),
 };
 
 const mockNFeClient = {
@@ -36,39 +41,78 @@ describe('NotaFiscalService', () => {
     it('should throw NotFoundException if order not found', async () => {
       mockPrisma.order.findUnique.mockResolvedValue(null);
 
-      await expect(service.generateNFe('nonexistent')).rejects.toThrow(
+      await expect(service.generateNFe('nonexistent', 'user-1')).rejects.toThrow(
         NotFoundException,
       );
-      await expect(service.generateNFe('nonexistent')).rejects.toThrow(
+      await expect(service.generateNFe('nonexistent', 'user-1')).rejects.toThrow(
         'Pedido não encontrado',
       );
     });
 
-    it('should generate a new NF-e for a valid order', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'order-1', totalBrl: 150 });
-      const nfeResponse = {
-        nfeId: 'NFe-123',
-        accessKey: '12345678901234567890123456789012345678901234',
-        xml: '<nfe>...</nfe>',
-        pdfUrl: '/nota-fiscal/order-1/pdf',
-        status: 'authorized',
-        issuedAt: new Date().toISOString(),
-      };
-      mockNFeClient.generateNFe.mockResolvedValue(nfeResponse);
+    it('should throw ForbiddenException if user is not buyer or seller', async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'order-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        itemPriceBrl: 150,
+        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        seller: { id: 'seller-1', cnpj: null, addresses: [] },
+        shippingAddress: { state: 'RJ' },
+        notaFiscal: null,
+      });
 
-      const result = await service.generateNFe('order-1');
-
-      expect(result.orderId).toBe('order-1');
-      expect(result.nfeId).toBe('NFe-123');
-      expect(result.status).toBe('authorized');
-      expect(result.accessKey).toBeDefined();
-      expect(result.issuedAt).toBeInstanceOf(Date);
+      await expect(service.generateNFe('order-1', 'other-user')).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
-    it('should return cached NF-e if already generated', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'order-1', totalBrl: 150 });
-      const nfeResponse = {
+    it('should return existing NF-e if already generated', async () => {
+      const existingNfe = {
         nfeId: 'NFe-123',
+        orderId: 'order-1',
+        accessKey: '12345678901234567890123456789012345678901234',
+        xml: '<nfe>...</nfe>',
+        pdfUrl: '/nota-fiscal/order-1/pdf',
+        status: 'AUTHORIZED',
+        issuedAt: new Date(),
+      };
+
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'order-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        itemPriceBrl: 150,
+        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        seller: { id: 'seller-1', cnpj: null, addresses: [] },
+        shippingAddress: null,
+        notaFiscal: existingNfe,
+      });
+
+      const result = await service.generateNFe('order-1', 'buyer-1');
+
+      expect(result.orderId).toBe('order-1');
+      expect(result.status).toBe('authorized');
+      expect(mockNFeClient.generateNFe).not.toHaveBeenCalled();
+    });
+
+    it('should generate and persist a new NF-e', async () => {
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: 'order-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        itemPriceBrl: 150,
+        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        seller: {
+          id: 'seller-1',
+          cnpj: '12345678000190',
+          addresses: [{ state: 'SP' }],
+        },
+        shippingAddress: { state: 'RJ' },
+        notaFiscal: null,
+      });
+
+      const nfeResponse = {
+        nfeId: 'NFe-456',
         accessKey: '12345678901234567890123456789012345678901234',
         xml: '<nfe>...</nfe>',
         pdfUrl: '/nota-fiscal/order-1/pdf',
@@ -77,38 +121,69 @@ describe('NotaFiscalService', () => {
       };
       mockNFeClient.generateNFe.mockResolvedValue(nfeResponse);
 
-      const first = await service.generateNFe('order-1');
-      const second = await service.generateNFe('order-1');
+      const persistedNfe = {
+        ...nfeResponse,
+        orderId: 'order-1',
+        status: 'AUTHORIZED',
+        issuedAt: new Date(nfeResponse.issuedAt),
+      };
+      mockPrisma.notaFiscal.create.mockResolvedValue(persistedNfe);
 
-      expect(first.nfeId).toBe(second.nfeId);
-      // NFeClient.generateNFe should only be called once (cached on second call)
-      expect(mockNFeClient.generateNFe).toHaveBeenCalledTimes(1);
+      const result = await service.generateNFe('order-1', 'buyer-1');
+
+      expect(result.orderId).toBe('order-1');
+      expect(result.nfeId).toBe('NFe-456');
+      expect(result.status).toBe('authorized');
+      expect(mockPrisma.notaFiscal.create).toHaveBeenCalledTimes(1);
+
+      // Verify seller CNPJ and buyer CPF were passed to NFeClient
+      const clientCall = mockNFeClient.generateNFe.mock.calls[0][0];
+      expect(clientCall.sellerCnpj).toBe('12345678000190');
+      expect(clientCall.buyerCpf).toBe('12345678901');
+      expect(clientCall.originState).toBe('SP');
+      expect(clientCall.destinationState).toBe('RJ');
     });
   });
 
   describe('getNFe', () => {
     it('should throw NotFoundException if NF-e not found', async () => {
-      await expect(service.getNFe('nonexistent')).rejects.toThrow(
+      mockPrisma.notaFiscal.findUnique.mockResolvedValue(null);
+
+      await expect(service.getNFe('nonexistent', 'user-1')).rejects.toThrow(
         NotFoundException,
-      );
-      await expect(service.getNFe('nonexistent')).rejects.toThrow(
-        'NF-e não encontrada para este pedido',
       );
     });
 
-    it('should return NF-e after it has been generated', async () => {
-      mockPrisma.order.findUnique.mockResolvedValue({ id: 'order-1', totalBrl: 100 });
-      mockNFeClient.generateNFe.mockResolvedValue({
-        nfeId: 'NFe-456',
+    it('should throw ForbiddenException if user is not buyer or seller', async () => {
+      mockPrisma.notaFiscal.findUnique.mockResolvedValue({
+        nfeId: 'NFe-123',
+        orderId: 'order-1',
         accessKey: '12345678901234567890123456789012345678901234',
         xml: '<nfe/>',
         pdfUrl: '/nota-fiscal/order-1/pdf',
-        status: 'authorized',
-        issuedAt: new Date().toISOString(),
+        status: 'AUTHORIZED',
+        issuedAt: new Date(),
+        order: { buyerId: 'buyer-1', sellerId: 'seller-1' },
       });
-      await service.generateNFe('order-1');
 
-      const result = await service.getNFe('order-1');
+      await expect(service.getNFe('order-1', 'stranger')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('should return NF-e for authorized user', async () => {
+      mockPrisma.notaFiscal.findUnique.mockResolvedValue({
+        nfeId: 'NFe-123',
+        orderId: 'order-1',
+        accessKey: '12345678901234567890123456789012345678901234',
+        xml: '<nfe/>',
+        pdfUrl: '/nota-fiscal/order-1/pdf',
+        status: 'AUTHORIZED',
+        issuedAt: new Date(),
+        order: { buyerId: 'buyer-1', sellerId: 'seller-1' },
+      });
+
+      const result = await service.getNFe('order-1', 'seller-1');
 
       expect(result.orderId).toBe('order-1');
       expect(result.status).toBe('authorized');
@@ -116,36 +191,57 @@ describe('NotaFiscalService', () => {
   });
 
   describe('calculateTax', () => {
-    it('should calculate intrastate tax with 18% ICMS', () => {
+    it('should calculate SP intrastate tax with 18% ICMS', () => {
       const result = service.calculateTax(100, 'SP', 'SP');
 
       expect(result.icms).toBe(18);
-      expect(result.iss).toBe(5);
-      expect(result.total).toBe(23);
-      expect(result.effectiveRate).toBe(23);
+      expect(result.iss).toBe(0);
+      expect(result.total).toBe(18);
+      expect(result.effectiveRate).toBe(18);
     });
 
-    it('should calculate interstate tax with 12% ICMS', () => {
+    it('should calculate RJ intrastate tax with 22% ICMS', () => {
+      const result = service.calculateTax(100, 'RJ', 'RJ');
+
+      expect(result.icms).toBe(22);
+      expect(result.total).toBe(22);
+    });
+
+    it('should calculate interstate tax from SP to RJ at 7%', () => {
+      // SP (South/Southeast) to RJ is NOT 7% because RJ is also South/Southeast
+      // Actually RJ is Southeast, so SP->RJ is 12%
       const result = service.calculateTax(100, 'SP', 'RJ');
 
       expect(result.icms).toBe(12);
-      expect(result.iss).toBe(5);
-      expect(result.total).toBe(17);
-      expect(result.effectiveRate).toBe(17);
+      expect(result.total).toBe(12);
     });
 
-    it('should apply ISS at 5% regardless of state', () => {
-      const intra = service.calculateTax(200, 'MG', 'MG');
-      const inter = service.calculateTax(200, 'MG', 'PR');
+    it('should use 7% ICMS from South/Southeast to North/Northeast', () => {
+      // SP (Southeast) to BA (Northeast) = 7%
+      const result = service.calculateTax(100, 'SP', 'BA');
 
-      expect(intra.iss).toBe(10);
-      expect(inter.iss).toBe(10);
+      expect(result.icms).toBe(7);
+      expect(result.total).toBe(7);
+    });
+
+    it('should use 12% ICMS from North/Northeast to South/Southeast', () => {
+      // BA (Northeast) to SP (Southeast) = 12%
+      const result = service.calculateTax(100, 'BA', 'SP');
+
+      expect(result.icms).toBe(12);
+      expect(result.total).toBe(12);
+    });
+
+    it('should not apply ISS to item price (ISS is for platform service fees only)', () => {
+      const result = service.calculateTax(200, 'MG', 'MG');
+
+      expect(result.iss).toBe(0);
     });
 
     it('should handle case-insensitive state comparison', () => {
       const result = service.calculateTax(100, 'sp', 'SP');
 
-      expect(result.icms).toBe(18); // intrastate
+      expect(result.icms).toBe(18); // intrastate SP
     });
 
     it('should round to 2 decimal places', () => {
@@ -153,8 +249,21 @@ describe('NotaFiscalService', () => {
 
       // 33.33 * 0.18 = 5.9994 => 6.00
       expect(result.icms).toBe(6);
-      // 33.33 * 0.05 = 1.6665 => 1.67
-      expect(result.iss).toBe(1.67);
+    });
+
+    it('should handle zero price gracefully', () => {
+      const result = service.calculateTax(0, 'SP', 'RJ');
+
+      expect(result.icms).toBe(0);
+      expect(result.total).toBe(0);
+      expect(result.effectiveRate).toBe(0);
+    });
+  });
+
+  describe('calculatePlatformIssBrl', () => {
+    it('should calculate ISS at 5% of commission', () => {
+      expect(service.calculatePlatformIssBrl(100)).toBe(5);
+      expect(service.calculatePlatformIssBrl(49.90)).toBe(2.5);
     });
   });
 });

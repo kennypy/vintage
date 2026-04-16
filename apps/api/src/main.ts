@@ -36,13 +36,40 @@ async function bootstrap() {
 
   // Security: fail if critical secrets use defaults in production
   if (nodeEnv === 'production') {
-    const jwtSecret = config.get<string>('JWT_SECRET');
-    if (!jwtSecret || jwtSecret === 'CHANGE_ME_IN_PRODUCTION') {
-      throw new Error('JWT_SECRET must be set to a secure value in production');
+    const requiredSecrets = [
+      { key: 'JWT_SECRET', label: 'JWT signing secret' },
+      { key: 'CSRF_SECRET', label: 'CSRF protection secret' },
+      { key: 'MERCADOPAGO_ACCESS_TOKEN', label: 'Mercado Pago access token' },
+      { key: 'MERCADOPAGO_WEBHOOK_SECRET', label: 'Mercado Pago webhook secret' },
+      { key: 'NFE_API_KEY', label: 'NF-e API key' },
+      { key: 'CORREIOS_TOKEN', label: 'Correios API token' },
+      { key: 'DATABASE_URL', label: 'Database connection string' },
+    ];
+
+    const missing: string[] = [];
+    for (const { key, label } of requiredSecrets) {
+      const value = config.get<string>(key);
+      if (!value || value === 'CHANGE_ME_IN_PRODUCTION') {
+        missing.push(`  - ${key} (${label})`);
+      }
     }
-    const csrfSecret = config.get<string>('CSRF_SECRET');
-    if (!csrfSecret || csrfSecret === 'CHANGE_ME_IN_PRODUCTION') {
-      throw new Error('CSRF_SECRET must be set to a secure value in production');
+    if (missing.length > 0) {
+      throw new Error(
+        `Missing required production secrets:\n${missing.join('\n')}`,
+      );
+    }
+
+    const optionalSecrets = [
+      'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS',
+      'FIREBASE_SERVICE_ACCOUNT_JSON',
+      'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+      'APPLE_CLIENT_ID',
+      'S3_ACCESS_KEY', 'S3_SECRET_KEY',
+    ];
+    for (const key of optionalSecrets) {
+      if (!config.get<string>(key)) {
+        logger.warn(`Optional secret ${key} is not set — related features will be unavailable`);
+      }
     }
   }
 

@@ -102,6 +102,7 @@ export class OrdersService {
           buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
           discountBrl: discountBrl > 0 ? new Decimal(discountBrl.toFixed(2)) : undefined,
           couponId: couponId ?? undefined,
+          shippingAddressId: dto.addressId,
           paymentMethod: isFreeOrder ? 'FREE' : dto.paymentMethod,
           installments: isFreeOrder ? 1 : installments,
         },
