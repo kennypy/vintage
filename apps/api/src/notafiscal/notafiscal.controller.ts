@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { NotaFiscalService } from './notafiscal.service';
 
 @ApiTags('nota-fiscal')
@@ -29,15 +30,21 @@ export class NotaFiscalController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Gerar NF-e para pedido' })
-  generateNFe(@Param('orderId') orderId: string) {
-    return this.notaFiscalService.generateNFe(orderId);
+  generateNFe(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.notaFiscalService.generateNFe(orderId, user.id);
   }
 
   @Get(':orderId')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Consultar NF-e do pedido' })
-  getNFe(@Param('orderId') orderId: string) {
-    return this.notaFiscalService.getNFe(orderId);
+  getNFe(
+    @Param('orderId') orderId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.notaFiscalService.getNFe(orderId, user.id);
   }
 }

@@ -106,12 +106,21 @@ export enum ClothingSize {
   XXG = 'XXG',
 }
 
+export enum NFeStatus {
+  PENDING = 'pending',
+  AUTHORIZED = 'authorized',
+  REJECTED = 'rejected',
+  CANCELLED = 'cancelled',
+}
+
 // --- API Types ---
 
 export interface User {
   id: string;
   email: string;
   cpf: string;
+  cnpj?: string;
+  cnpjVerified?: boolean;
   name: string;
   phone: string | null;
   avatarUrl: string | null;
@@ -190,6 +199,7 @@ export interface Order {
   paymentId: string | null;
   shippingLabelUrl: string | null;
   trackingCode: string | null;
+  shippingAddressId: string | null;
   carrier: Carrier | null;
   installments: number;
   shippedAt: string | null;
@@ -282,6 +292,24 @@ export interface Address {
   state: string;
   cep: string;
   isDefault: boolean;
+}
+
+export interface NotaFiscal {
+  id: string;
+  orderId: string;
+  nfeId: string | null;
+  accessKey: string | null;
+  pdfUrl: string | null;
+  status: NFeStatus;
+  sellerCnpj: string | null;
+  buyerCpf: string | null;
+  originState: string;
+  destinationState: string;
+  icmsBrl: number;
+  issBrl: number;
+  totalTaxBrl: number;
+  issuedAt: string | null;
+  createdAt: string;
 }
 
 export interface Notification {

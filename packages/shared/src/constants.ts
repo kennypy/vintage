@@ -69,3 +69,6 @@ export const CEP_REGEX = /^\d{5}-?\d{3}$/;
 
 // CPF regex (with or without formatting)
 export const CPF_REGEX = /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/;
+
+// CNPJ regex (with or without formatting)
+export const CNPJ_REGEX = /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/;

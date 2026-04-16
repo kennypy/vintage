@@ -17,6 +17,8 @@ model User {
   email            String    @unique
   passwordHash     String
   cpf              String?   @unique
+  cnpj             String?   @unique
+  cnpjVerified     Boolean   @default(false)
   name             String
   phone            String?
   avatarUrl        String?
@@ -207,6 +209,7 @@ model Order {
   shippingLabelUrl      String?
   trackingCode          String?
   carrier               Carrier?
+  shippingAddressId     String?
   installments          Int           @default(1)
   shippedAt             DateTime?
   deliveredAt           DateTime?
@@ -215,13 +218,15 @@ model Order {
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  buyer        User           @relation("OrderBuyer", fields: [buyerId], references: [id])
-  seller       User           @relation("OrderSeller", fields: [sellerId], references: [id])
-  listing      Listing        @relation(fields: [listingId], references: [id])
-  coupon       Coupon?        @relation(fields: [couponId], references: [id])
-  conversation Conversation?
-  reviews      Review[]
-  dispute      Dispute?
+  buyer           User           @relation("OrderBuyer", fields: [buyerId], references: [id])
+  seller          User           @relation("OrderSeller", fields: [sellerId], references: [id])
+  listing         Listing        @relation(fields: [listingId], references: [id])
+  coupon          Coupon?        @relation(fields: [couponId], references: [id])
+  shippingAddress Address?       @relation(fields: [shippingAddressId], references: [id])
+  conversation    Conversation?
+  reviews         Review[]
+  dispute         Dispute?
+  notaFiscal      NotaFiscal?
 
   @@index([buyerId])
   @@index([sellerId])
@@ -466,9 +471,36 @@ model Address {
   cep          String  @db.VarChar(9)
   isDefault    Boolean @default(false)
 
-  user User @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  orders Order[]
 
   @@index([userId])
+}
+
+// --- Nota Fiscal (NF-e) ---
+
+model NotaFiscal {
+  id               String      @id @default(cuid())
+  orderId          String      @unique
+  nfeId            String?
+  accessKey        String?     @db.VarChar(44)
+  xml              String?     @db.Text
+  pdfUrl           String?
+  status           NFeStatus   @default(PENDING)
+  sellerCnpj       String?
+  buyerCpf         String?
+  originState      String      @db.VarChar(2)
+  destinationState String      @db.VarChar(2)
+  icmsBrl          Decimal     @db.Decimal(10, 2)
+  issBrl           Decimal     @db.Decimal(10, 2)
+  totalTaxBrl      Decimal     @db.Decimal(10, 2)
+  issuedAt         DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
 }
 
 // --- Promotions ---
@@ -775,6 +807,13 @@ enum ListingStatus {
   SOLD
   DELETED
   SUSPENDED
+}
+
+enum NFeStatus {
+  PENDING
+  AUTHORIZED
+  REJECTED
+  CANCELLED
 }
 
 enum OrderStatus {
