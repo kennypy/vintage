@@ -11,7 +11,9 @@
     "lint": "turbo lint",
     "test": "turbo test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -31,6 +33,10 @@
   "dependencies": {
     "@types/qrcode": "1.5.6",
     "otplib": "13.4.0",
-    "qrcode": "1.5.4"
-  }
+    "qrcode": "1.5.4",
+    "expo": "~54.0.33",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
+  },
+  "version": "1.0.0"
 }
