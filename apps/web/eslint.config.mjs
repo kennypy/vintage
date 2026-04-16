@@ -46,6 +46,10 @@ export default [
         atob: 'readonly',
         confirm: 'readonly',
         prompt: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        module: 'readonly',
+        require: 'readonly',
       },
     },
     plugins: {
