@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Linking, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import { colors } from '../../src/theme/colors';
@@ -34,6 +35,7 @@ async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
 }
 
 export default function ConfiguracoesScreen() {
+  const router = useRouter();
   const { theme, mode, setMode, fullScreen, setFullScreen } = useTheme();
   const { signOut } = useAuth();
 
@@ -158,10 +160,18 @@ export default function ConfiguracoesScreen() {
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Privacidade</Text>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
-          onPress={() => Alert.alert('Alterar senha', 'Em breve você poderá alterar sua senha por aqui.')}
+          onPress={() => router.push('/conta/alterar-senha')}
         >
           <Ionicons name="lock-closed-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Alterar senha</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/conta/seguranca')}
+        >
+          <Ionicons name="shield-checkmark-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Segurança e 2FA</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
         <TouchableOpacity

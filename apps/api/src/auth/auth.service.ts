@@ -517,6 +517,97 @@ export class AuthService {
     };
   }
 
+  /**
+   * Change the password of an authenticated user after verifying the current password.
+   * Also invalidates any outstanding reset tokens.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Senha atual incorreta');
+    }
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('A nova senha deve ser diferente da atual');
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+    // Invalidate any outstanding reset tokens so a stolen reset link is neutralized.
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    return { success: true, message: 'Senha alterada com sucesso.' };
+  }
+
+  /**
+   * Issue a password-reset token and email it. Always returns a neutral success
+   * message (even when the email is unknown) to prevent user enumeration.
+   */
+  async forgotPassword(email: string) {
+    const neutralResponse = {
+      success: true,
+      message: 'Se este email estiver cadastrado, enviaremos instruções em instantes.',
+    };
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.deletedAt || user.isBanned) {
+      return neutralResponse;
+    }
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await this.prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash, expiresAt },
+    });
+    // Fire-and-forget email — caller doesn't need to wait
+    this.emailService.sendPasswordResetEmail(user.email, user.name, rawToken).catch(() => {
+      // Logged inside the email service
+    });
+    return neutralResponse;
+  }
+
+  /**
+   * Redeem a password-reset token and set a new password. Tokens are single-use
+   * and expire after 1 hour. We compare by sha256 hash so the DB never stores
+   * the raw token.
+   */
+  async resetPassword(rawToken: string, newPassword: string) {
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const record = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Link de redefinição inválido ou expirado');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: record.userId } });
+    if (!user || user.deletedAt) {
+      throw new BadRequestException('Link de redefinição inválido');
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      // Invalidate any other outstanding tokens for this user
+      this.prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null, id: { not: record.id } },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+    return { success: true, message: 'Senha redefinida com sucesso.' };
+  }
+
   async adminSetup(userId: string, setupKey: string) {
     const envKey = this.config.get<string>('ADMIN_SETUP_KEY');
     if (!envKey) {

@@ -8,6 +8,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyTwoFaDto, ConfirmLoginTwoFaDto } from './dto/two-fa.dto';
+import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { GoogleProfile } from './google.strategy';
@@ -16,6 +17,9 @@ import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
 
 /** 2FA endpoints: 5 requests per 15 minutes (per tracker, typically IP or API key). */
 const TWOFA_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
+
+/** Password reset endpoints: 5 requests per 15 minutes to prevent enumeration spam. */
+const PASSWORD_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
 
 @ApiTags('auth')
 @Controller('auth')
@@ -163,6 +167,29 @@ export class AuthController {
     }
     const profile = await this.authService.verifyGoogleIdToken(body.idToken);
     return this.authService.socialLogin('google', profile);
+  }
+
+  @Post('forgot-password')
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiOperation({ summary: 'Solicitar redefinição de senha por email' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiOperation({ summary: 'Redefinir senha com token recebido por email' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Alterar senha (requer senha atual)' })
+  changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
+    return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
   }
 
   @Post('admin-setup')

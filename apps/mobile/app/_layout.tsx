@@ -1,7 +1,7 @@
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { Platform, View, ActivityIndicator } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Platform, View, ActivityIndicator, AppState, type AppStateStatus } from 'react-native';
 import {
   DarkTheme,
   DefaultTheme,
@@ -12,13 +12,29 @@ import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
+import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
   const { theme, fullScreen } = useTheme();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, refreshUser } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+
+  // When the app returns to the foreground, revalidate auth state so a token
+  // that expired while backgrounded forces the user back to login instead of
+  // leaving them with broken API calls.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = appState.current;
+      appState.current = next;
+      if (prev.match(/inactive|background/) && next === 'active' && isAuthenticated) {
+        refreshUser().catch(() => { /* token refresh handled by apiFetch */ });
+      }
+    });
+    return () => sub.remove();
+  }, [isAuthenticated, refreshUser]);
 
   const inAuthGroup = segments[0] === '(auth)';
 
@@ -111,6 +127,11 @@ function AppShell() {
         <Stack.Screen name="conta/verificacao" options={{ title: 'Verificação' }} />
         <Stack.Screen name="conta/configuracoes" options={{ title: 'Configurações' }} />
         <Stack.Screen name="conta/ajuda" options={{ title: 'Ajuda' }} />
+        <Stack.Screen name="conta/alterar-senha" options={{ title: 'Alterar senha' }} />
+        <Stack.Screen name="conta/seguranca" options={{ title: 'Segurança' }} />
+        <Stack.Screen name="(auth)/forgot-password" options={{ title: 'Esqueci a senha' }} />
+        <Stack.Screen name="(auth)/reset-password" options={{ title: 'Nova senha' }} />
+        <Stack.Screen name="listing/edit/[id]" options={{ title: 'Editar anúncio' }} />
         <Stack.Screen name="dispute/[orderId]" options={{ title: 'Abrir disputa' }} />
       </Stack>
     </NavThemeProvider>
@@ -119,14 +140,16 @@ function AppShell() {
 
 export default function RootLayout() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <FeatureFlagsProvider>
-          <FavoritesProvider>
-            <AppShell />
-          </FavoritesProvider>
-        </FeatureFlagsProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <FeatureFlagsProvider>
+            <FavoritesProvider>
+              <AppShell />
+            </FavoritesProvider>
+          </FeatureFlagsProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

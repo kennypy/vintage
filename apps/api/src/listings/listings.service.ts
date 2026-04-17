@@ -302,6 +302,15 @@ export class ListingsService {
       };
     }
 
+    // Allow ACTIVE <-> PAUSED toggle and marking as SOLD
+    if (dto.status !== undefined) {
+      const allowed = ['ACTIVE', 'PAUSED', 'SOLD'] as const;
+      if (!allowed.includes(dto.status as typeof allowed[number])) {
+        throw new BadRequestException('Status inválido');
+      }
+      data.status = dto.status;
+    }
+
     return this.prisma.listing.update({
       where: { id },
       data,

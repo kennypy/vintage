@@ -1,0 +1,332 @@
+# Vintage.br — Onboarding de Serviços de Terceiros
+
+Este documento lista, em ordem de execução, todos os cadastros externos
+necessários para o Vintage.br operar em produção. Marque cada item como
+concluído (`[x]`) antes de liberar o deploy.
+
+---
+
+## 1. Pagamentos — Mercado Pago
+
+### 1.1. Criação da conta
+
+1. https://www.mercadopago.com.br/developers → **Criar conta empresarial**.
+2. Ative **PIX automático** e **PIX por Copia e Cola** no painel da conta.
+3. Em **Minhas aplicações → Criar aplicação**:
+   - **Nome**: Vintage.br
+   - **Solução**: Pagamentos online
+   - **Plataforma**: e-commerce + mobile
+
+### 1.2. Credenciais
+
+- **Público-chave (Client ID)**: `APP_USR-xxxx` → `MERCADOPAGO_PUBLIC_KEY`.
+- **Access Token de produção**: `APP_USR-yyyy` → `MERCADOPAGO_ACCESS_TOKEN`.
+- **Access Token sandbox**: `TEST-zzzz` → use no staging.
+
+### 1.3. Webhook
+
+1. Em **Notificações → Configurar webhooks**, adicione:
+   - URL: `https://api.vintage.br/api/v1/payments/webhook`
+   - Eventos: `payment.created`, `payment.updated`.
+2. Copie o **Secret** → `MERCADOPAGO_WEBHOOK_SECRET` no Fly.
+3. Teste com **Simulador de notificações** no painel.
+
+### 1.4. Split / Marketplace
+
+- O Vintage.br retém 10% de comissão. Implementado via **Split Payments**
+  (Mercado Pago Marketplace). Solicite a ativação do recurso em
+  developers.mercadopago.com.br → Support (leva 1–2 dias úteis).
+- Durante o onboarding, o Mercado Pago pede:
+  - CNPJ da Vintage.br
+  - Estatuto social / Contrato social
+  - Volume projetado (R$/mês)
+
+### 1.5. Homologação
+
+Antes de ir para produção, execute o fluxo E2E em sandbox:
+- [ ] Criar preferência de pagamento.
+- [ ] Receber webhook de `payment.approved`.
+- [ ] Simular refund.
+- [ ] Verificar que o saldo do vendedor cresce e a comissão fica na conta
+      master.
+
+---
+
+## 2. Correios
+
+### 2.1. Contrato Correios (recomendado para volumes >100 envios/mês)
+
+1. Acesse https://www.correios.com.br → **Para sua empresa**.
+2. Contrate um **Cliente Contrato** (ex.: SEDEX + PAC) — requer CNPJ e
+   histórico bancário.
+3. Anote:
+   - **Código administrativo** → `CORREIOS_ADMIN_CODE`
+   - **Contrato** → `CORREIOS_CONTRACT`
+   - **Cartão de postagem** → `CORREIOS_POSTING_CARD`
+   - **Usuário/senha SIGEP Web** → `CORREIOS_USER`, `CORREIOS_PASSWORD`
+
+### 2.2. API CWS (Correios Web Services)
+
+- API de cálculo de preço/prazo e rastreio: https://cws.correios.com.br
+- OAuth2: solicite `client_id` e `client_secret` pelo SIGEP.
+- Endpoint base: `https://api.correios.com.br` → `CORREIOS_API_URL`.
+
+### 2.3. Teste
+
+```bash
+curl -X POST "$API_URL/shipping/rates" \
+  -H 'Content-Type: application/json' \
+  -d '{"originCep":"01310-100","destinationCep":"20040-020","weightG":500}'
+```
+
+---
+
+## 3. Jadlog (alternativa / backup aos Correios)
+
+1. https://www.jadlog.com.br/JadlogEcommerce → Cadastrar.
+2. Solicite token API em `integracao@jadlog.com.br`.
+3. Variáveis:
+   - `JADLOG_TOKEN`
+   - `JADLOG_CONTRACT_NUMBER`
+4. Teste: `POST /shipping/rates?carrier=jadlog` retorna cotação.
+
+---
+
+## 4. Google Sign In (OAuth)
+
+### 4.1. Google Cloud Console
+
+1. https://console.cloud.google.com → Criar projeto **Vintage.br**.
+2. **APIs & Services → OAuth consent screen**:
+   - User Type: **External**
+   - App name: Vintage.br
+   - Support email: `suporte@vintage.br`
+   - Authorized domains: `vintage.br`
+   - Scopes: `email`, `profile`, `openid`.
+3. **Credentials → Create OAuth client ID**:
+   - **Web application**:
+     - Origins: `https://vintage.br`, `https://www.vintage.br`
+     - Redirect URIs: `https://api.vintage.br/api/v1/auth/google/callback`
+     - Guarde como `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
+   - **iOS**:
+     - Bundle ID: `br.vintage.app`
+     - Guarde como `GOOGLE_CLIENT_ID_IOS`.
+   - **Android**:
+     - Package: `br.vintage.app`
+     - SHA-1: rode `npx eas-cli@latest credentials` → pegue fingerprint Android → colar.
+     - Guarde como `GOOGLE_CLIENT_ID_ANDROID`.
+
+### 4.2. Publicar
+
+Para liberar mais de 100 usuários de teste, envie o app para verificação.
+Prazo: 2–6 semanas; até lá, é possível operar em modo *Testing* com
+usuários convidados.
+
+---
+
+## 5. Apple Sign In
+
+### 5.1. Apple Developer
+
+1. https://developer.apple.com → Certificates, IDs & Profiles.
+2. **Identifiers → App ID**: já criado (`br.vintage.app`). Habilite
+   **Sign In with Apple** na aba Capabilities.
+3. **Identifiers → Services ID**: crie um Service ID para o web flow, ex.
+   `br.vintage.web`. Configure *Domains and Subdomains*:
+   - `vintage.br`
+   - Return URL: `https://api.vintage.br/api/v1/auth/apple/callback`
+4. **Keys → Create a Key**: habilite Sign In with Apple.
+   - Baixe o arquivo `.p8` e **guarde em local seguro** (não commita).
+   - Anote:
+     - `APPLE_TEAM_ID` (10 chars)
+     - `APPLE_KEY_ID` (10 chars)
+     - `APPLE_CLIENT_ID` — `br.vintage.app` para iOS nativo, `br.vintage.web`
+       para o web flow.
+     - `APPLE_PRIVATE_KEY` — conteúdo do `.p8` (inclua `\n`).
+
+### 5.2. Testes
+
+- iOS simulador: Sign In with Apple só funciona em device físico ou
+  simulador logado com uma conta Apple de teste.
+
+---
+
+## 6. Email transacional — Resend
+
+1. https://resend.com → Sign up com conta empresarial.
+2. **Domains → Add domain** `vintage.br`. Copie os registros DKIM/SPF/DMARC
+   para o Cloudflare DNS.
+3. Aguarde verificação (~10 min).
+4. **API Keys → Create API Key** com permissão `Send emails`.
+   - Nome: `vintage-api-prod`
+   - Guarde como `RESEND_API_KEY`.
+
+### Templates
+
+Os templates transacionais vivem em `apps/api/src/email/*.ts`. O fluxo de
+reset de senha usa o template `sendPasswordResetEmail`.
+
+### Limites
+
+- Plano free: 100 emails/dia, domínio único.
+- Plano Pro (US$ 20/mês): 50 000/mês, múltiplos domínios, dedicado IP
+  opcional.
+
+---
+
+## 7. Push notifications
+
+### 7.1. iOS — APNs via Expo
+
+1. https://developer.apple.com → Keys → Create Key com **Apple Push
+   Notifications service (APNs)**.
+2. Baixe o `.p8`.
+3. No EAS:
+   ```bash
+   npx eas-cli@latest credentials
+   # → iOS → Push Notifications: Add a new key
+   ```
+   Ele guarda o `.p8` criptografado nos servers Expo.
+
+### 7.2. Android — FCM
+
+1. https://console.firebase.google.com → Criar projeto **vintage-br**.
+2. Adicione um app Android com package `br.vintage.app`.
+3. Baixe `google-services.json` e **coloque em `apps/mobile/`**, nunca
+   commitando (já está no `.gitignore`).
+4. Em **Project Settings → Cloud Messaging**, copie a **Server Key (legacy)
+   OU Service Account (v1)** para o EAS:
+   ```bash
+   npx eas-cli@latest credentials
+   # → Android → FCM V1 service account
+   ```
+
+### 7.3. Envio do servidor
+
+Usamos o **Expo Push API** (apps/api → `push/` module). Tokens são salvos na
+tabela `DeviceToken`. Crie a env `EXPO_ACCESS_TOKEN` no Fly para evitar
+rate limit do endpoint anônimo.
+
+---
+
+## 8. Busca — Meilisearch
+
+Detalhado em `DEPLOYMENT.md` §3. Requer apenas:
+
+- `MEILISEARCH_HOST`
+- `MEILISEARCH_API_KEY` (master key — uso apenas server-side; gere uma
+  Search Key específica para front-end se/quando implementarmos busca
+  client-side).
+
+---
+
+## 9. Storage S3 — Cloudflare R2
+
+Detalhado em `DEPLOYMENT.md` §4. Variáveis:
+
+- `S3_ENDPOINT`
+- `S3_REGION=auto`
+- `S3_BUCKET=vintage-listings`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_PUBLIC_URL=https://cdn.vintage.br`
+- `PRESIGNED_URL_EXPIRY=900`
+
+---
+
+## 10. DNS e CDN — Cloudflare
+
+1. Crie conta em https://cloudflare.com, adicione `vintage.br`.
+2. Aponte os nameservers do registro .br (registro.br) para os NS do
+   Cloudflare.
+3. Zona DNS:
+
+   | Tipo  | Nome  | Valor                          | Proxy |
+   |------|------|---------------------------------|-------|
+   | A    | `@`   | → IP da Vercel                   | ✅     |
+   | CNAME| `www` | `vintage.br`                    | ✅     |
+   | CNAME| `api` | `vintage-api.fly.dev`           | ✅     |
+   | CNAME| `cdn` | `<account>.r2.cloudflarestorage.com` | ✅ |
+   | TXT  | `@`   | SPF + DMARC + DKIM Resend       | —     |
+
+4. **SSL/TLS → Full (strict)**.
+5. **Rules → Page Rules**:
+   - `vintage.br/api/*` → Cache: Bypass.
+   - `cdn.vintage.br/*` → Cache: Cache everything (Edge TTL 30 dias).
+6. **WAF → Managed Rules**: ligar OWASP Core Ruleset.
+7. **Bot Management → Super Bot Fight Mode** (plano Pro).
+
+---
+
+## 11. Monitoramento e observabilidade
+
+### 11.1. Sentry
+
+1. https://sentry.io → Create project `vintage-api` (platform Node.js).
+2. Copie **DSN** → `SENTRY_DSN_API`.
+3. Repita para `vintage-web` (Next.js) e `vintage-mobile` (React Native).
+4. Configure `SENTRY_ENV=production` e `SENTRY_RELEASE=$(git rev-parse HEAD)`.
+
+### 11.2. Logtail / Axiom (logs centralizados)
+
+Opcional; útil para auditoria LGPD. Exporte logs estruturados JSON do Fly
+via Log Shipping.
+
+### 11.3. Uptime
+
+- **Better Stack Uptime** (gratuito para 10 monitores):
+  - `GET https://api.vintage.br/api/v1/health` a cada 1 min.
+  - `GET https://vintage.br/` a cada 5 min.
+- PagerDuty → Slack `#alerts`.
+
+---
+
+## 12. Fiscal e legal (Brasil)
+
+### 12.1. CNPJ e MEI/ME/LTDA
+
+- Para emitir nota fiscal de comissão, é necessário CNPJ.
+- Categoria sugerida: **CNAE 6311-9/00 — Tratamento de dados, serviços de
+  aplicações e outros serviços de informação**.
+
+### 12.2. Emissão de Nota Fiscal de Serviço (NFS-e)
+
+- Integração via **Focus NFe** (https://focusnfe.com.br) é a opção mais
+  prática — ver `apps/api/src/notafiscal/` para o connector.
+- Variáveis:
+  - `FOCUS_NFE_TOKEN`
+  - `FOCUS_NFE_COMPANY_ID`
+- Em cada venda concluída, emitimos NFS-e de serviço (comissão) para o
+  vendedor.
+
+### 12.3. LGPD
+
+- **DPO**: indique um responsável (pode ser o CTO). Email público:
+  `dpo@vintage.br`.
+- **Relatório de Impacto (RIPD)**: obrigatório; documente em
+  `docs/lgpd/RIPD.md`.
+- **Portal de direitos do titular**: já implementado em `/conta/privacidade`
+  (acesso, retificação, exclusão).
+
+### 12.4. Termo de Serviço e Política de Privacidade
+
+- Mantidos em `https://vintage.br/termos` e `https://vintage.br/privacidade`.
+- Versionados via `TOS_VERSION` (yyyy-mm-dd); sempre que mudar, o usuário
+  precisa re-aceitar no próximo login (implementado em `auth.service.ts`).
+
+---
+
+## 13. Checklist final — antes do lançamento
+
+- [ ] Mercado Pago em produção e webhook recebendo.
+- [ ] Correios + Jadlog respondendo cálculos reais.
+- [ ] Google OAuth aprovado para produção.
+- [ ] Apple Sign In testado em device físico.
+- [ ] Resend DKIM verificado.
+- [ ] APNs e FCM configurados no EAS.
+- [ ] Sentry capturando erros em staging.
+- [ ] Uptime monitor ativo e alertando.
+- [ ] CNPJ ativo e integrado ao Focus NFe.
+- [ ] Política de privacidade aprovada pelo jurídico.
+- [ ] 3 usuários beta completaram uma compra real.
+- [ ] `npm audit --production` sem HIGH/CRITICAL.

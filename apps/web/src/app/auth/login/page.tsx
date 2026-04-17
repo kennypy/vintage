@@ -73,6 +73,12 @@ export default function LoginPage() {
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </button>
+
+          <div className="text-center">
+            <Link href="/auth/forgot-password" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
+              Esqueceu a senha?
+            </Link>
+          </div>
         </form>
 
         {/* TODO(Phase 9): Re-enable Google / Apple OAuth after Google Cloud Console and Apple Developer setup. */}

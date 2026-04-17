@@ -21,6 +21,7 @@ import {
   Address,
   CreateAddressData,
 } from '../../src/services/addresses';
+import { lookupCep } from '../../src/services/shipping';
 
 const BRAZILIAN_STATES = [
   'AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT',
@@ -42,6 +43,7 @@ export default function AddressesScreen() {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [cep, setCep] = useState('');
+  const [cepLookupLoading, setCepLookupLoading] = useState(false);
 
   const fetchAddresses = useCallback(async () => {
     try {
@@ -76,6 +78,23 @@ export default function AddressesScreen() {
       return `${digits.slice(0, 5)}-${digits.slice(5)}`;
     }
     return digits;
+  };
+
+  const handleCepChange = async (value: string) => {
+    const formatted = formatCep(value);
+    setCep(formatted);
+    const digits = formatted.replace(/\D/g, '');
+    if (digits.length === 8) {
+      setCepLookupLoading(true);
+      const lookup = await lookupCep(digits);
+      setCepLookupLoading(false);
+      if (lookup) {
+        if (!street) setStreet(lookup.street);
+        if (!neighborhood) setNeighborhood(lookup.neighborhood);
+        if (!city) setCity(lookup.city);
+        if (!state) setState(lookup.state);
+      }
+    }
   };
 
   const handleAdd = async () => {
@@ -217,7 +236,12 @@ export default function AddressesScreen() {
           </View>
 
           <TextInput style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]} value={label} onChangeText={setLabel} placeholder="Apelido (ex: Casa, Trabalho)" placeholderTextColor={theme.textTertiary} />
-          <TextInput style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]} value={cep} onChangeText={(v) => setCep(formatCep(v))} placeholder="CEP (XXXXX-XXX)" placeholderTextColor={theme.textTertiary} keyboardType="numeric" maxLength={9} />
+          <View style={styles.cepRow}>
+            <TextInput style={[styles.input, styles.cepInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]} value={cep} onChangeText={handleCepChange} placeholder="CEP (XXXXX-XXX)" placeholderTextColor={theme.textTertiary} keyboardType="numeric" maxLength={9} accessibilityLabel="CEP" />
+            {cepLookupLoading && (
+              <View style={styles.cepSpinner}><ActivityIndicator size="small" color={colors.primary[500]} /></View>
+            )}
+          </View>
           <TextInput style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]} value={street} onChangeText={setStreet} placeholder="Rua / Avenida" placeholderTextColor={theme.textTertiary} />
           <View style={styles.row}>
             <TextInput style={[styles.input, styles.inputSmall, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]} value={number} onChangeText={setNumber} placeholder="Número" placeholderTextColor={theme.textTertiary} keyboardType="numeric" />
@@ -307,4 +331,7 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  cepRow: { position: 'relative' },
+  cepInput: { paddingRight: 40 },
+  cepSpinner: { position: 'absolute', right: 14, top: 14 },
 });

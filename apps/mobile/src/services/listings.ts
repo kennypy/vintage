@@ -149,12 +149,16 @@ export async function createListing(data: CreateListingData): Promise<Listing> {
   });
 }
 
+export interface UpdateListingData extends Partial<CreateListingData> {
+  status?: 'ACTIVE' | 'PAUSED' | 'SOLD' | 'DELETED';
+}
+
 export async function updateListing(
   id: string,
-  data: Partial<CreateListingData>,
+  data: UpdateListingData,
 ): Promise<Listing> {
   return apiFetch<Listing>(`/listings/${encodeURIComponent(id)}`, {
-    method: 'PUT',
+    method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
@@ -309,6 +313,6 @@ export async function uploadListingVideo(uri: string): Promise<UploadVideoRespon
 export async function setListingVideo(listingId: string, videoUrl: string, durationSeconds?: number): Promise<void> {
   await apiFetch<void>(`/listings/${encodeURIComponent(listingId)}/video`, {
     method: 'PUT',
-    body: { videoUrl, durationSeconds },
+    body: JSON.stringify({ videoUrl, durationSeconds }),
   });
 }

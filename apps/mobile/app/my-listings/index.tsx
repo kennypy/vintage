@@ -159,12 +159,24 @@ export default function MyListingsScreen() {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => router.push(`/listing/${item.id}`)}
+                accessibilityLabel="Ver anúncio"
+                accessibilityRole="button"
               >
                 <Ionicons name="eye-outline" size={18} color={colors.primary[500]} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.actionButton}
+                onPress={() => router.push(`/listing/edit/${item.id}`)}
+                accessibilityLabel="Editar anúncio"
+                accessibilityRole="button"
+              >
+                <Ionicons name="create-outline" size={18} color={colors.primary[500]} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.actionButton}
                 onPress={() => handleDelete(item)}
+                accessibilityLabel="Excluir anúncio"
+                accessibilityRole="button"
               >
                 <Ionicons name="trash-outline" size={18} color={colors.error[500]} />
               </TouchableOpacity>
