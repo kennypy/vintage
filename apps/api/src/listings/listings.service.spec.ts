@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -50,6 +51,12 @@ describe('ListingsService', () => {
       providers: [
         ListingsService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((k) => (k === 'ALLOWED_IMAGE_HOSTS' ? '*' : undefined)),
+          },
+        },
       ],
     }).compile();
 

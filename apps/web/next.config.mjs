@@ -1,8 +1,3 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 /**
  * Security headers applied to every response. Matches the requirements in
  * CLAUDE.md §Security Standards.
@@ -35,26 +30,10 @@ const securityHeaders = [
   },
 ];
 
-const localReactPath = path.resolve(__dirname, 'node_modules/react');
-const localReactDomPath = path.resolve(__dirname, 'node_modules/react-dom');
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@vintage/shared'],
-  // Force Next's webpack + SWC resolvers to use web-local React 18, never the
-  // monorepo-root React 19 that's hoisted for the mobile workspace.
-  webpack(config) {
-    config.resolve = config.resolve || {};
-    config.resolve.alias = {
-      ...(config.resolve.alias || {}),
-      react: localReactPath,
-      'react-dom': localReactDomPath,
-      'react/jsx-runtime': path.join(localReactPath, 'jsx-runtime.js'),
-      'react/jsx-dev-runtime': path.join(localReactPath, 'jsx-dev-runtime.js'),
-    };
-    return config;
-  },
   images: {
     remotePatterns: [
       {

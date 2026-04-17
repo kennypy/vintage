@@ -33,9 +33,10 @@ async function fetchListing(id: string): Promise<ListingMetadata | null> {
 export async function generateMetadata({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }): Promise<Metadata> {
-  const listing = await fetchListing(params.id);
+  const { id } = await params;
+  const listing = await fetchListing(id);
 
   if (!listing) {
     return {
@@ -85,10 +86,11 @@ export async function generateMetadata({
   };
 }
 
-export default function ListingDetailPage({
+export default async function ListingDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <ListingDetailClient id={params.id} />;
+  const { id } = await params;
+  return <ListingDetailClient id={id} />;
 }

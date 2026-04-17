@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { MercadoPagoClient } from './mercadopago.client';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
@@ -23,6 +24,7 @@ export class PaymentsService {
     private readonly mercadoPago: MercadoPagoClient,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
   ) {
     this.nodeEnv = this.configService.get<string>(
       'NODE_ENV',
@@ -122,38 +124,19 @@ export class PaymentsService {
 
   async handleWebhook(payload: Record<string, unknown>, signature?: string) {
     const payloadStr = JSON.stringify(payload);
-    const isProduction = this.nodeEnv !== 'development';
 
-    // In production, REQUIRE the signature header
+    // Signature is MANDATORY in every environment. Dev may configure a
+    // known-value webhook secret (e.g. MERCADOPAGO_WEBHOOK_SECRET=test-secret-dev)
+    // but the signature still has to verify.
     if (!signature) {
-      if (isProduction) {
-        this.logger.warn(
-          'Webhook rejected: missing signature header in production',
-        );
-        throw new UnauthorizedException(
-          'Assinatura do webhook ausente.',
-        );
-      }
-      // In development, log warning but allow
-      this.logger.warn(
-        'Webhook signature missing — allowing in development mode',
-      );
+      this.logger.warn('Webhook rejected: missing signature header');
+      throw new UnauthorizedException('Assinatura do webhook ausente.');
     }
 
-    // Always verify signature when present
-    if (signature) {
-      const valid = this.mercadoPago.verifyWebhookSignature(
-        payloadStr,
-        signature,
-      );
-      if (!valid) {
-        this.logger.warn(
-          'Webhook rejected: invalid signature',
-        );
-        throw new UnauthorizedException(
-          'Assinatura do webhook inválida.',
-        );
-      }
+    const valid = this.mercadoPago.verifyWebhookSignature(payloadStr, signature);
+    if (!valid) {
+      this.logger.warn('Webhook rejected: invalid signature');
+      throw new UnauthorizedException('Assinatura do webhook inválida.');
     }
 
     // Validate payload structure: must have action and data fields
@@ -204,15 +187,56 @@ export class PaymentsService {
       return;
     }
 
-    // Verify payment amount matches order total (when available from gateway)
+    // Verify payment amount matches order total. A mismatch is a potentially
+    // fraudulent event — flag the order, notify admins, and reject outright.
     const paymentDetails = await this.mercadoPago.getPaymentStatus(paymentId);
     if (paymentDetails.transaction_amount !== undefined) {
       const orderTotal = Number(order.totalBrl);
       if (Math.abs(paymentDetails.transaction_amount - orderTotal) > 0.01) {
+        const reason = `Payment amount mismatch: paid R$${paymentDetails.transaction_amount}, expected R$${orderTotal}`;
         this.logger.error(
-          `Payment amount mismatch for order ${order.id}: paid R$${paymentDetails.transaction_amount}, expected R$${orderTotal}. Flagged for manual review.`,
+          `${reason} for order ${order.id}. Flagged for manual review.`,
         );
-        return;
+
+        // Record the anomaly for manual review (fire-and-forget log write)
+        try {
+          await this.prisma.paymentFlag.create({
+            data: {
+              orderId: order.id,
+              paymentId: String(paymentId),
+              reason,
+            },
+          });
+        } catch (err) {
+          this.logger.warn(
+            `Failed to record PaymentFlag for order ${order.id}: ${String(err).slice(0, 200)}`,
+          );
+        }
+
+        // Notify admins via the notifications channel — non-blocking.
+        try {
+          const admins = await this.prisma.user.findMany({
+            where: { role: 'ADMIN' },
+            select: { id: true },
+          });
+          for (const admin of admins) {
+            this.notifications
+              .createNotification(
+                admin.id,
+                'ADMIN_PAYMENT_FLAG',
+                'Pagamento com valor divergente',
+                reason,
+                { orderId: order.id, paymentId },
+              )
+              .catch(() => {});
+          }
+        } catch {
+          // never let admin notification failure affect webhook response
+        }
+
+        throw new BadRequestException(
+          'Valor pago não corresponde ao valor do pedido. Pagamento marcado para revisão.',
+        );
       }
     }
 

@@ -53,6 +53,8 @@ export class ReviewsService {
   }
 
   async getUserReviews(userId: string, page: number = 1, pageSize: number = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (page - 1) * pageSize;
     const [rows, total] = await Promise.all([
       this.prisma.review.findMany({

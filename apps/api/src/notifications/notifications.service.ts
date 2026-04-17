@@ -11,7 +11,7 @@ export class NotificationsService {
 
   async getNotifications(userId: string, page: number = 1, pageSize: number = 20) {
     const p = Math.max(1, Number(page) || 1);
-    const ps = Math.max(1, Number(pageSize) || 20);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (p - 1) * ps;
     const [items, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({

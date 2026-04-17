@@ -101,9 +101,15 @@ async function bootstrap() {
     }),
   );
 
-  // CORS — explicit allowlist with wildcard rejection
-  const rawCorsOrigin = config.get<string>('CORS_ORIGIN', 'http://localhost:3000');
-  const corsOrigins = rawCorsOrigin
+  // CORS — explicit allowlist with wildcard rejection.
+  // Production MUST provide CORS_ORIGIN. In non-prod, fall back to localhost dev origins.
+  const rawCorsOrigin = config.get<string>('CORS_ORIGIN', '');
+  if (nodeEnv === 'production' && !rawCorsOrigin) {
+    throw new Error(
+      'CORS_ORIGIN must be set in production (comma-separated allowlist).',
+    );
+  }
+  const corsOrigins = (rawCorsOrigin || (nodeEnv !== 'production' ? 'http://localhost:3000' : ''))
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);

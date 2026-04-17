@@ -30,9 +30,10 @@ async function fetchSeller(id: string): Promise<SellerMetadata | null> {
 export async function generateMetadata({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }): Promise<Metadata> {
-  const seller = await fetchSeller(params.id);
+  const { id } = await params;
+  const seller = await fetchSeller(id);
 
   if (!seller) {
     return {
@@ -74,10 +75,11 @@ export async function generateMetadata({
   };
 }
 
-export default function SellerProfilePage({
+export default async function SellerProfilePage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
-  return <SellerProfileClient id={params.id} />;
+  const { id } = await params;
+  return <SellerProfileClient id={id} />;
 }

@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { HashThrottlerGuard } from './common/guards/hash-throttler.guard';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { CommonModule } from './common/common.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -50,6 +51,7 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
         limit: 60, // 60 requests per minute
       },
     ]),
+    CommonModule,
     PrismaModule,
     AuthModule,
     UsersModule,

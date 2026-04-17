@@ -2,16 +2,19 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: vintage-postgres
+    env_file:
+      - path: .env.docker
+        required: false
     environment:
-      POSTGRES_USER: vintage
-      POSTGRES_PASSWORD: vintage
-      POSTGRES_DB: vintage_dev
+      POSTGRES_USER: ${POSTGRES_USER:-vintage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vintage}
+      POSTGRES_DB: ${POSTGRES_DB:-vintage_dev}
     ports:
       - '127.0.0.1:5434:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U vintage']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vintage}']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -19,12 +22,18 @@ services:
   redis:
     image: redis:7-alpine
     container_name: vintage-redis
+    env_file:
+      - path: .env.docker
+        required: false
+    # Redis requires a password — REDIS_PASSWORD must be provided via
+    # environment (e.g. .env.docker, CI secret store, or the shell).
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:-vintage_dev_redis_pw}']
     ports:
       - '127.0.0.1:6380:6379'
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:-vintage_dev_redis_pw}', 'ping']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -32,11 +41,16 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.11
     container_name: vintage-meilisearch
+    env_file:
+      - path: .env.docker
+        required: false
     environment:
-      MEILI_MASTER_KEY: vintage_dev_key
-      MEILI_ENV: development
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-vintage_dev_key}
+      MEILI_ENV: ${MEILI_ENV:-development}
+    # Bind to loopback only — search is never exposed to the public internet.
+    # Access from the API container goes over the Docker bridge by name.
     ports:
-      - '7700:7700'
+      - '127.0.0.1:7700:7700'
     volumes:
       - meilisearch-data:/meili_data
     healthcheck:

@@ -18,6 +18,9 @@ export class WalletService {
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Carteira não encontrada');
 
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    page = p; pageSize = ps;
     const skip = (page - 1) * pageSize;
     const [items, total] = await Promise.all([
       this.prisma.walletTransaction.findMany({
@@ -36,11 +39,22 @@ export class WalletService {
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Carteira não encontrada');
 
+    // Guard against non-positive amounts (NaN, zero, negative)
+    if (!Number.isFinite(amountBrl) || amountBrl <= 0) {
+      throw new BadRequestException('Valor de saque inválido.');
+    }
+
     if (amountBrl < MIN_PAYOUT_BRL) {
       throw new BadRequestException(`Valor mínimo para saque: R$${MIN_PAYOUT_BRL}`);
     }
 
     const balance = Number(wallet.balanceBrl);
+
+    // Must have a positive balance before any payout can be requested
+    if (balance <= 0) {
+      throw new BadRequestException('Saldo insuficiente para solicitar saque.');
+    }
+
     if (amountBrl > balance) {
       throw new BadRequestException('Saldo insuficiente');
     }

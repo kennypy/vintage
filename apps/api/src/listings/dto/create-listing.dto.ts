@@ -19,7 +19,7 @@ export class CreateListingDto {
 
   @ApiProperty({ example: 'Vestido preto, usado 2 vezes, sem defeitos.' })
   @IsString()
-  @MaxLength(2000)
+  @MaxLength(10000)
   description!: string;
 
   @ApiProperty({ example: 'clxyz123' })
