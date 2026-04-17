@@ -24,6 +24,9 @@ apps/mobile/ios/
 *.mobileprovision
 *.orig.*
 
+# CI parity runner logs — one directory per run, never committed
+.ci-parity-logs/
+
 # Environment
 .env
 .env.local
