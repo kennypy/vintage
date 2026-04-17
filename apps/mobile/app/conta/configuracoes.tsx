@@ -184,6 +184,14 @@ export default function ConfiguracoesScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/conta/payout-methods')}
+        >
+          <Ionicons name="card-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Chaves PIX (saques)</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
           onPress={() => Alert.alert('Perfil privado', 'Em breve você poderá tornar seu perfil privado.')}
         >
           <Ionicons name="eye-off-outline" size={22} color={theme.textSecondary} />

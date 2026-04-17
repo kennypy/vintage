@@ -60,6 +60,7 @@ model User {
   ordersSeller      Order[]             @relation("OrderSeller")
   offers            Offer[]
   wallet            Wallet?
+  payoutMethods     PayoutMethod[]
   favorites         Favorite[]
   followersRel      Follow[]            @relation("Following")
   followingRel      Follow[]            @relation("Follower")
@@ -337,6 +338,32 @@ model WalletTransaction {
 
   @@index([walletId])
   @@index([createdAt])
+}
+
+// Saved destination for seller payouts. We only support PIX at launch —
+// additional types (TED, cross-border) can be added by extending the enum.
+// The `pixKey` is the raw value the payment processor needs and is never
+// returned by the API; responses always include a masked display form.
+model PayoutMethod {
+  id        String           @id @default(cuid())
+  userId    String
+  type      PayoutMethodType
+  // Raw PIX key. MUST NEVER be logged or serialised to API responses.
+  pixKey    String
+  // Optional user-facing label, e.g. "Conta principal".
+  label     String?
+  isDefault Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  // Unique on (userId, type, pixKey) — the same canonical value could be
+  // submitted as more than one `type` (e.g. a CPF string accidentally
+  // labelled as PIX_RANDOM). Keeping `type` in the key prevents that
+  // collision masquerading as a duplicate.
+  @@unique([userId, type, pixKey])
+  @@index([userId])
 }
 
 // --- Social ---
@@ -1071,4 +1098,13 @@ model EmailChangeToken {
 enum TwoFaMethod {
   TOTP
   SMS
+}
+
+// PIX key type, mirrors the Brazilian Banco Central classification.
+enum PayoutMethodType {
+  PIX_CPF
+  PIX_CNPJ
+  PIX_EMAIL
+  PIX_PHONE
+  PIX_RANDOM
 }

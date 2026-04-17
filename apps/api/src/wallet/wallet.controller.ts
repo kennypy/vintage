@@ -1,15 +1,20 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Patch, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { WalletService } from './wallet.service';
+import { PayoutMethodsService } from './payout-methods.service';
+import { CreatePayoutMethodDto, RequestPayoutDto } from './dto/payout-method.dto';
 
 @ApiTags('wallet')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('wallet')
 export class WalletController {
-  constructor(private readonly walletService: WalletService) {}
+  constructor(
+    private readonly walletService: WalletService,
+    private readonly payoutMethods: PayoutMethodsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Ver saldo da carteira' })
@@ -27,12 +32,47 @@ export class WalletController {
     return this.walletService.getTransactions(user.id, page, pageSize);
   }
 
+  // ── Saved PIX payout methods ────────────────────────────────────────
+
+  @Get('payout-methods')
+  @ApiOperation({ summary: 'Listar chaves PIX salvas (nunca retorna a chave bruta)' })
+  listPayoutMethods(@CurrentUser() user: AuthUser) {
+    return this.payoutMethods.list(user.id);
+  }
+
+  @Post('payout-methods')
+  @ApiOperation({ summary: 'Cadastrar nova chave PIX' })
+  createPayoutMethod(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreatePayoutMethodDto,
+  ) {
+    return this.payoutMethods.create(user.id, dto);
+  }
+
+  @Patch('payout-methods/:id/default')
+  @ApiOperation({ summary: 'Definir chave PIX como padrão' })
+  setDefaultPayoutMethod(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.payoutMethods.setDefault(user.id, id);
+  }
+
+  @Delete('payout-methods/:id')
+  @ApiOperation({ summary: 'Remover chave PIX salva' })
+  deletePayoutMethod(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    return this.payoutMethods.delete(user.id, id);
+  }
+
   @Post('payout')
-  @ApiOperation({ summary: 'Solicitar saque via PIX' })
+  @ApiOperation({ summary: 'Solicitar saque via PIX (exige chave PIX salva)' })
   requestPayout(
-    @Body() body: { amountBrl: number },
+    @Body() dto: RequestPayoutDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.walletService.requestPayout(user.id, body.amountBrl);
+    return this.walletService.requestPayout(user.id, dto.amountBrl, dto.payoutMethodId);
   }
 }
