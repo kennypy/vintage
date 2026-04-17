@@ -100,7 +100,6 @@ export default function WalletPage() {
     refreshAll()
       .catch(() => setError('Não foi possível carregar os dados. Tente novamente.'))
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const openPayoutForm = () => {
