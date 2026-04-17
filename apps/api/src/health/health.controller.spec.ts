@@ -58,6 +58,10 @@ describe('HealthController', () => {
   describe('ready', () => {
     it('should return ok when database is healthy', async () => {
       mockPrisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
+      mockRedisService.ping.mockResolvedValue(true);
+      mockConfigService.get.mockImplementation(
+        (k: string, def?: string) => (k === 'MEILISEARCH_HOST' ? '' : def ?? ''),
+      );
 
       const res = {
         status: jest.fn().mockReturnThis(),
@@ -70,13 +74,21 @@ describe('HealthController', () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'ok',
-          checks: { database: 'ok' },
+          checks: expect.objectContaining({
+            database: 'ok',
+            redis: 'ok',
+            meilisearch: 'skipped',
+          }),
         }),
       );
     });
 
     it('should return 503 degraded when database is down', async () => {
       mockPrisma.$queryRaw.mockRejectedValue(new Error('connection refused'));
+      mockRedisService.ping.mockResolvedValue(true);
+      mockConfigService.get.mockImplementation(
+        (k: string, def?: string) => (k === 'MEILISEARCH_HOST' ? '' : def ?? ''),
+      );
 
       const res = {
         status: jest.fn().mockReturnThis(),
@@ -89,7 +101,9 @@ describe('HealthController', () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'degraded',
-          checks: { database: 'error' },
+          checks: expect.objectContaining({
+            database: 'error',
+          }),
         }),
       );
     });
