@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { apiGet, apiPatch } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 interface Offer {
   id: string;
@@ -17,10 +18,6 @@ interface Offer {
   seller: { id: string; name: string };
   createdAt: string;
   expiresAt: string;
-}
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function formatDate(iso: string): string {
@@ -127,7 +124,7 @@ export default function OffersPage() {
             {tab === 'received' ? 'Nenhuma oferta recebida.' : 'Nenhuma oferta enviada.'}
           </p>
           <Link href="/listings" className="inline-block px-6 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition">
-            Explorar pecas
+            Explorar peças
           </Link>
         </div>
       ) : (

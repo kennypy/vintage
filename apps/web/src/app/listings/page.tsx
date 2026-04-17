@@ -19,10 +19,33 @@ interface ApiResponse {
 
 const SORT_OPTIONS = [
   { value: 'relevance', label: 'Mais relevantes' },
-  { value: 'price_asc', label: 'Menor preco' },
-  { value: 'price_desc', label: 'Maior preco' },
+  { value: 'price_asc', label: 'Menor preço' },
+  { value: 'price_desc', label: 'Maior preço' },
   { value: 'newest', label: 'Mais recentes' },
 ];
+
+/**
+ * Build a compact page-number array with ellipses.
+ * Always includes first and last, plus the 2 pages around the current.
+ */
+function buildPageNumbers(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const pages: (number | 'ellipsis')[] = [];
+  pages.push(1);
+
+  const start = Math.max(2, current - 2);
+  const end = Math.min(total - 1, current + 2);
+
+  if (start > 2) pages.push('ellipsis');
+  for (let i = start; i <= end; i += 1) pages.push(i);
+  if (end < total - 1) pages.push('ellipsis');
+
+  pages.push(total);
+  return pages;
+}
 
 export default function ListingsPage() {
   return (
@@ -190,36 +213,54 @@ function ListingsContent() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-10">
+            <div className="flex items-center justify-center gap-1 sm:gap-2 mt-10 flex-wrap">
+              <button
+                onClick={() => handlePageChange(1)}
+                disabled={page <= 1}
+                className="px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-transparent"
+                aria-label="Primeira página"
+              >
+                «
+              </button>
               <button
                 onClick={() => handlePageChange(page - 1)}
                 disabled={page <= 1}
-                className="px-3 py-2 text-sm text-gray-400 rounded-lg disabled:opacity-50"
+                className="px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 Anterior
               </button>
-              {Array.from({ length: Math.min(totalPages, 5) }).map((_, i) => {
-                const pageNum = i + 1;
-                return (
+              {buildPageNumbers(page, totalPages).map((item, idx) =>
+                item === 'ellipsis' ? (
+                  <span key={`ellipsis-${idx}`} className="px-2 text-sm text-gray-400">…</span>
+                ) : (
                   <button
-                    key={pageNum}
-                    onClick={() => handlePageChange(pageNum)}
+                    key={item}
+                    onClick={() => handlePageChange(item)}
                     className={`px-3 py-2 text-sm rounded-lg ${
-                      page === pageNum
+                      page === item
                         ? 'bg-brand-600 text-white'
                         : 'text-gray-700 hover:bg-gray-100'
                     }`}
+                    aria-current={page === item ? 'page' : undefined}
                   >
-                    {pageNum}
+                    {item}
                   </button>
-                );
-              })}
+                ),
+              )}
               <button
                 onClick={() => handlePageChange(page + 1)}
                 disabled={page >= totalPages}
-                className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:hover:bg-transparent"
               >
-                Proxima
+                Próxima
+              </button>
+              <button
+                onClick={() => handlePageChange(totalPages)}
+                disabled={page >= totalPages}
+                className="px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-transparent"
+                aria-label="Última página"
+              >
+                »
               </button>
             </div>
           )}

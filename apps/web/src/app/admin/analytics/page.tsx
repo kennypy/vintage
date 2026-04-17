@@ -157,8 +157,8 @@ export default function AnalyticsPage() {
               <span>{sales.total} vendas</span>
               <div className="space-x-2">
                 <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-3 py-1 border rounded disabled:opacity-40">Anterior</button>
-                <span>Pagina {page}</span>
-                <button disabled={!sales.hasMore} onClick={() => setPage((p) => p + 1)} className="px-3 py-1 border rounded disabled:opacity-40">Proxima</button>
+                <span>Página {page}</span>
+                <button disabled={!sales.hasMore} onClick={() => setPage((p) => p + 1)} className="px-3 py-1 border rounded disabled:opacity-40">Próxima</button>
               </div>
             </div>
           )}

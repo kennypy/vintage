@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 interface ListingData {
   id: string;
@@ -28,10 +29,6 @@ interface ListingData {
   sellerReviews?: number;
   shippingEstimate?: string;
   images?: Array<{ url: string } | string>;
-}
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function getImageUrl(img: { url: string } | string): string {
@@ -120,7 +117,7 @@ function Lightbox({ images, index, onClose }: { images: string[]; index: number;
         <button
           className="absolute right-4 text-white/80 hover:text-white"
           onClick={(e) => { e.stopPropagation(); next(); }}
-          aria-label="Proxima"
+          aria-label="Próxima"
         >
           <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -486,7 +483,7 @@ export default function ListingDetailClient({ id }: { id: string }) {
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowOfferModal(false)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-bold text-gray-900">Fazer oferta</h2>
-            <p className="text-sm text-gray-500">Preco atual: {formatBRL(getPrice(listing))}</p>
+            <p className="text-sm text-gray-500">Preço atual: {formatBRL(getPrice(listing))}</p>
             <div>
               <label className="text-sm text-gray-700 block mb-1">Valor da oferta (R$)</label>
               <input

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 interface WalletBalance {
   availableBrl: number;
@@ -17,10 +18,6 @@ interface WalletTransaction {
   description: string;
   status: 'completed' | 'pending' | 'failed';
   createdAt: string;
-}
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function formatDate(iso: string): string {
@@ -194,7 +191,7 @@ export default function WalletPage() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
             />
             {balance && (
-              <p className="text-xs text-gray-400 mt-1">Disponivel: {formatBRL(balance.availableBrl)}</p>
+              <p className="text-xs text-gray-400 mt-1">Disponível: {formatBRL(balance.availableBrl)}</p>
             )}
           </div>
           <div className="flex gap-2">

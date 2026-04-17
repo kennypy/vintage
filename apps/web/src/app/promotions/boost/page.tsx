@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
 import { BUMP_PRICE_BRL, BUMP_DURATION_DAYS } from '@vintage/shared';
+import { formatBRL } from '@/lib/i18n';
 
 interface Listing {
   id: string;
@@ -15,14 +16,10 @@ interface Listing {
   images?: Array<{ url: string } | string>;
 }
 
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 const BENEFITS = [
-  'Posicao de destaque nas buscas',
-  'Selo "Impulsionado" no anuncio',
-  'Relatorio de desempenho',
+  'Posição de destaque nas buscas',
+  'Selo "Impulsionado" no anúncio',
+  'Relatório de desempenho',
   'Mais visualizacoes garantidas',
 ];
 

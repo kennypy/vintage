@@ -4,6 +4,7 @@ import React, { memo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { apiPost } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 export interface ListingCardProps {
   id: string;
@@ -15,10 +16,6 @@ export interface ListingCardProps {
   imageUrl?: string;
   favorited?: boolean;
   onToggleFavorite?: (id: string, favorited: boolean) => void;
-}
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function ListingCard({

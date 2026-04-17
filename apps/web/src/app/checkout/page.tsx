@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 interface Address {
   id: string;
@@ -20,10 +21,6 @@ interface Address {
 }
 
 type PaymentMethod = 'pix' | 'credit_card' | 'boleto';
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
 
 export default function CheckoutPageWrapper() {
   return (
@@ -235,7 +232,7 @@ function CheckoutPage() {
               >
                 {[1, 2, 3, 6, 10, 12].map((n) => (
                   <option key={n} value={n}>
-                    {n}x de {formatBRL(total / n)}{n === 1 ? ' (a vista)' : ''}
+                    {n}x de {formatBRL(total / n)}{n === 1 ? ' (à vista)' : ''}
                   </option>
                 ))}
               </select>
