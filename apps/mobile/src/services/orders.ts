@@ -103,3 +103,9 @@ export async function confirmReceipt(id: string): Promise<Order> {
     method: 'PATCH',
   });
 }
+
+export async function cancelOrder(id: string): Promise<Order> {
+  return apiFetch<Order>(`/orders/${encodeURIComponent(id)}/cancel`, {
+    method: 'PATCH',
+  });
+}

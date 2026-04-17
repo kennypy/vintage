@@ -76,6 +76,13 @@ export class OrdersController {
     return this.ordersService.markDelivered(id);
   }
 
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Comprador cancela pedido aguardando pagamento' })
+  @ApiResponse({ status: 200, description: 'Pedido cancelado' })
+  cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.cancelByBuyer(id, user.id);
+  }
+
   @Patch(':id/confirm')
   @ApiOperation({ summary: 'Comprador confirma recebimento ("Tudo certo")' })
   @ApiResponse({ status: 200, description: 'Recebimento confirmado, fundos liberados' })

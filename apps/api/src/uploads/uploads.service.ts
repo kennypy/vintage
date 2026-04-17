@@ -276,6 +276,67 @@ export class UploadsService {
   }
 
   /**
+   * Upload a profile avatar. Square-crops to 512x512, stores under avatars/,
+   * and returns a presigned GET URL the client can persist via PATCH /users/:id.
+   */
+  async uploadAvatar(
+    file: Buffer,
+    filename: string,
+    mimeType: string,
+  ): Promise<{ url: string; key: string }> {
+    this.validateFileSize(file);
+    const detectedMime = this.validateMimeType(file);
+    this.logger.debug(
+      `Avatar MIME: ${detectedMime}, provided: ${mimeType}`,
+    );
+
+    const safeName = this.sanitizeFilename(filename);
+    const timestamp = Date.now();
+    const key = `avatars/${timestamp}-${safeName}.jpg`;
+
+    if (!this.s3Configured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('S3 storage not configured — cannot upload avatars in production');
+      }
+      const seed = timestamp % 1000;
+      return {
+        url: `https://picsum.photos/seed/${seed}/512/512`,
+        key,
+      };
+    }
+
+    try {
+      const processed = await sharp(file)
+        .resize({ width: 512, height: 512, fit: 'cover' })
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: processed,
+          ContentType: 'image/jpeg',
+          ServerSideEncryption: 'AES256',
+        }),
+      );
+
+      const url = await this.generatePresignedUrl(key);
+      return { url, key };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error(
+        `Failed to upload avatar: ${String(error).slice(0, 200)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao processar avatar. Tente novamente.',
+      );
+    }
+  }
+
+  /**
    * Generate a presigned GET URL with bounded expiry.
    */
   async generatePresignedUrl(key: string): Promise<string> {

@@ -608,6 +608,113 @@ export class AuthService {
     return { success: true, message: 'Senha redefinida com sucesso.' };
   }
 
+  /**
+   * Start an email-change flow. Requires the current password as a second factor
+   * (even if the user is still signed in) so a stolen session can't silently
+   * redirect recovery to the attacker's inbox. The confirmation link is sent
+   * to the NEW address; the old address receives a post-change notice when
+   * the token is redeemed.
+   */
+  async requestEmailChange(userId: string, newEmailRaw: string, password: string) {
+    const newEmail = newEmailRaw.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+    if (newEmail === user.email.toLowerCase()) {
+      throw new BadRequestException('O novo email é igual ao atual.');
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Senha incorreta');
+    }
+    const taken = await this.prisma.user.findUnique({ where: { email: newEmail } });
+    if (taken) {
+      throw new ConflictException('Este email já está em uso.');
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await this.prisma.$transaction([
+      // Invalidate any prior in-flight email-change tokens for this user
+      this.prisma.emailChangeToken.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.emailChangeToken.create({
+        data: { userId, newEmail, tokenHash, expiresAt },
+      }),
+    ]);
+
+    this.emailService
+      .sendEmailChangeConfirmation(newEmail, user.name, rawToken)
+      .catch(() => { /* logged in email service */ });
+
+    return {
+      success: true,
+      message: 'Enviamos um link de confirmação para o novo email.',
+    };
+  }
+
+  /**
+   * Redeem an email-change token. Single-use, 1-hour TTL. Also rechecks
+   * uniqueness at redemption time because someone else may have claimed
+   * the target address between request and confirm.
+   */
+  async confirmEmailChange(rawToken: string) {
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const record = await this.prisma.emailChangeToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Link inválido ou expirado.');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: record.userId } });
+    if (!user || user.deletedAt) {
+      throw new BadRequestException('Link inválido.');
+    }
+
+    const clash = await this.prisma.user.findUnique({ where: { email: record.newEmail } });
+    if (clash && clash.id !== user.id) {
+      // Someone else grabbed the address while the user was waiting.
+      await this.prisma.emailChangeToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      throw new ConflictException('Este email foi utilizado por outra conta. Solicite novamente.');
+    }
+
+    const oldEmail = user.email;
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: { email: record.newEmail },
+      }),
+      this.prisma.emailChangeToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      // Invalidate any outstanding password-reset tokens — old email no longer owns the account
+      this.prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    // Notify the previous address so the user can react quickly if compromised
+    this.emailService
+      .sendEmailChangeNoticeToOld(oldEmail, user.name, record.newEmail)
+      .catch(() => { /* logged in email service */ });
+
+    return {
+      success: true,
+      message: 'Email alterado com sucesso.',
+      newEmail: record.newEmail,
+    };
+  }
+
   async adminSetup(userId: string, setupKey: string) {
     const envKey = this.config.get<string>('ADMIN_SETUP_KEY');
     if (!envKey) {

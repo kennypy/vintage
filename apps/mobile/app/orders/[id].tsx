@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { getOrder, markShipped, confirmReceipt } from '../../src/services/orders';
+import { getOrder, markShipped, confirmReceipt, cancelOrder } from '../../src/services/orders';
 import type { Order, OrderStatus } from '../../src/services/orders';
 
 const CARRIERS = [
@@ -82,6 +82,34 @@ export default function OrderDetailScreen() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleCancelOrder = () => {
+    if (!order) return;
+    Alert.alert(
+      'Cancelar pedido',
+      'Tem certeza que deseja cancelar este pedido? Esta ação não pode ser desfeita.',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Cancelar pedido',
+          style: 'destructive',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              const updated = await cancelOrder(order.id);
+              setOrder(updated);
+              Alert.alert('Cancelado', 'Seu pedido foi cancelado.');
+            } catch (err) {
+              const msg = err instanceof Error && err.message ? err.message : 'Não foi possível cancelar o pedido.';
+              Alert.alert('Erro', msg);
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const handleConfirmReceipt = () => {
@@ -226,6 +254,21 @@ export default function OrderDetailScreen() {
       </View>
 
       {/* Actions */}
+      {order.status === 'pending_payment' && isBuyer && (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.disputeButton, actionLoading && styles.actionDisabled]}
+          onPress={handleCancelOrder}
+          disabled={actionLoading}
+          accessibilityRole="button"
+          accessibilityLabel="Cancelar pedido"
+        >
+          <Ionicons name="close-circle-outline" size={20} color={colors.neutral[0]} />
+          <Text style={styles.actionButtonText}>
+            {actionLoading ? 'Cancelando...' : 'Cancelar pedido'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {order.status === 'paid' && isSeller && (
         <TouchableOpacity
           style={[styles.actionButton, actionLoading && styles.actionDisabled]}
