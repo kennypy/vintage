@@ -106,7 +106,10 @@ export class UsersService {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.bio !== undefined && { bio: dto.bio }),
         ...(dto.phone !== undefined && { phone: dto.phone }),
-        ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl }),
+        // Empty string means "remove avatar" — persist NULL, not "".
+        ...(dto.avatarUrl !== undefined && {
+          avatarUrl: dto.avatarUrl === '' ? null : dto.avatarUrl,
+        }),
       },
       select: {
         id: true,

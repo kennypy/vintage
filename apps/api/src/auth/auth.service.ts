@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   ConflictException,
   BadRequestException,
@@ -36,6 +37,8 @@ export interface SocialProfile {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -650,7 +653,11 @@ export class AuthService {
 
     this.emailService
       .sendEmailChangeConfirmation(newEmail, user.name, rawToken)
-      .catch(() => { /* logged in email service */ });
+      .catch((err) => {
+        this.logger.error(
+          `Falha ao enviar email de confirmação de alteração para ${newEmail}: ${String(err).slice(0, 200)}`,
+        );
+      });
 
     return {
       success: true,
@@ -706,7 +713,11 @@ export class AuthService {
     // Notify the previous address so the user can react quickly if compromised
     this.emailService
       .sendEmailChangeNoticeToOld(oldEmail, user.name, record.newEmail)
-      .catch(() => { /* logged in email service */ });
+      .catch((err) => {
+        this.logger.error(
+          `Falha ao enviar aviso de alteração de email para ${oldEmail}: ${String(err).slice(0, 200)}`,
+        );
+      });
 
     return {
       success: true,
