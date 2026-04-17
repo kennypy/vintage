@@ -34,7 +34,7 @@ interface RequestOptions extends RequestInit {
   authenticated?: boolean;
 }
 
-const FETCH_TIMEOUT_MS = 20000;
+const FETCH_TIMEOUT_MS = 10000;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 

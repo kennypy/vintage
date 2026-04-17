@@ -55,15 +55,14 @@ function AppShell() {
     }
   }, [isAuthenticated, isLoading, inAuthGroup, isGuestAllowed, isListingDetail, isSellerProfile, router]);
 
-  // Apply full-screen (hide Android navigation bar) when preference is set
+  // Full-screen (hide Android navigation bar) when the user opts in.
+  // Expo SDK 54+ enables edge-to-edge by default, and setBehaviorAsync then
+  // warns + no-ops; only invoke these when the user actually toggled on,
+  // and swallow any runtime error.
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    if (fullScreen) {
-      NavigationBar.setVisibilityAsync('hidden');
-      NavigationBar.setBehaviorAsync('inset-swipe');
-    } else {
-      NavigationBar.setVisibilityAsync('visible');
-    }
+    if (Platform.OS !== 'android' || !fullScreen) return;
+    NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+    NavigationBar.setBehaviorAsync('inset-swipe').catch(() => {});
   }, [fullScreen]);
 
   // Show a spinner while auth state is determined.
