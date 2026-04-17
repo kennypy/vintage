@@ -54,7 +54,9 @@ describe('ListingsService', () => {
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((k) => (k === 'ALLOWED_IMAGE_HOSTS' ? '*' : undefined)),
+            get: jest.fn((k) =>
+              k === 'ALLOWED_IMAGE_HOSTS' ? 'img.example.com' : undefined,
+            ),
           },
         },
       ],
