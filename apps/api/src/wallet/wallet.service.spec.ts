@@ -118,16 +118,64 @@ describe('WalletService', () => {
   });
 
   describe('requestPayout', () => {
-    it('should deduct from wallet, record referenceId, and return new balance', async () => {
+    /**
+     * The service now uses an interactive $transaction that:
+     *   1. conditional updateMany (balance >= amount) — the race-safe debit
+     *   2. walletTransaction.create — ledger row
+     *   3. wallet.findUnique — re-read to return the authoritative new balance
+     * The mock must run the callback with a tx client that returns those
+     * values, and $transaction must resolve to whatever the callback returns.
+     */
+    const setupInteractiveTx = (
+      debitCount: number,
+      postDebitBalance: number,
+    ) => {
+      const tx = {
+        wallet: {
+          updateMany: jest.fn().mockResolvedValue({ count: debitCount }),
+          findUnique: jest.fn().mockResolvedValue({ balanceBrl: postDebitBalance }),
+        },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation(async (cb: unknown) => {
+        if (typeof cb === 'function') return (cb as (t: typeof tx) => unknown)(tx);
+        return undefined;
+      });
+      return tx;
+    };
+
+    it('should deduct from wallet via conditional updateMany and return new balance', async () => {
       const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 250.0 };
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
-      mockPrisma.$transaction.mockResolvedValue(undefined);
+      const tx = setupInteractiveTx(1, 150);
 
       const result = await service.requestPayout('user-1', 100, 'method-1');
 
       expect(result).toEqual({ success: true, newBalance: 150 });
       expect(mockPayoutMethods.getOwnedOrThrow).toHaveBeenCalledWith('user-1', 'method-1');
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      // Critical: the debit is gated by a balance predicate, not a blind decrement.
+      expect(tx.wallet.updateMany).toHaveBeenCalledWith({
+        where: { id: 'wallet-1', balanceBrl: { gte: 100 } },
+        data: { balanceBrl: { decrement: 100 } },
+      });
+      expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          walletId: 'wallet-1',
+          type: 'PAYOUT',
+          amountBrl: -100,
+          referenceId: 'method-1',
+        }),
+      });
+    });
+
+    it('throws BadRequest when the race-safe debit finds count=0 (concurrent withdraw drained the balance)', async () => {
+      const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 100.0 };
+      mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
+      setupInteractiveTx(0, 100);
+
+      await expect(service.requestPayout('user-1', 80, 'method-1')).rejects.toThrow(
+        /Saldo insuficiente/,
+      );
     });
 
     it('should reject if amount is below minimum', async () => {
