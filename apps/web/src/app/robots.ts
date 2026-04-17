@@ -7,7 +7,15 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: '/',
+        allow: [
+          '/',
+          '/privacidade',
+          '/termos',
+          '/diretrizes-comunidade',
+          '/ajuda',
+          '/sobre',
+          '/contato',
+        ],
         disallow: [
           '/admin/',
           '/checkout/',
@@ -20,7 +28,6 @@ export default function robots(): MetadataRoute.Robots {
           '/notifications/',
           '/offers/',
           '/sell/',
-          '/reviews/write/',
         ],
       },
     ],
