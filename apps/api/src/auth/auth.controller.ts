@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, UseGuards, Req, Res, BadRequestException, UnauthorizedException, Headers } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
@@ -12,6 +13,9 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 import { GoogleProfile } from './google.strategy';
 import { AppleStrategy } from './apple.strategy';
 import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
+
+/** 2FA endpoints: 5 requests per 15 minutes (per tracker, typically IP or API key). */
+const TWOFA_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
 
 @ApiTags('auth')
 @Controller('auth')
@@ -35,6 +39,17 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Post('accept-tos')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Registrar aceitação da versão atual dos Termos de Uso' })
+  acceptTos(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { tosVersion: string },
+  ) {
+    return this.authService.acceptTos(user.id, body?.tosVersion);
+  }
+
   @Post('login')
   @ApiOperation({ summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)' })
   login(
@@ -52,6 +67,7 @@ export class AuthController {
   }
 
   @Post('2fa/confirm-login')
+  @Throttle(TWOFA_THROTTLE)
   @ApiOperation({ summary: 'Confirmar login com código 2FA (após requiresTwoFa:true)' })
   confirmLoginWithTwoFa(@Body() dto: ConfirmLoginTwoFaDto) {
     return this.authService.confirmLoginWithTwoFa(dto.tempToken, dto.token);
@@ -59,6 +75,7 @@ export class AuthController {
 
   @Post('2fa/setup')
   @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Iniciar configuração do 2FA — retorna QR code e chave secreta' })
   setupTwoFa(@CurrentUser() user: AuthUser) {
@@ -67,6 +84,7 @@ export class AuthController {
 
   @Post('2fa/enable')
   @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ativar 2FA verificando o primeiro código TOTP' })
   enableTwoFa(@CurrentUser() user: AuthUser, @Body() dto: VerifyTwoFaDto) {
@@ -75,6 +93,7 @@ export class AuthController {
 
   @Post('2fa/disable')
   @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Desativar 2FA (requer código TOTP atual)' })
   disableTwoFa(@CurrentUser() user: AuthUser, @Body() dto: VerifyTwoFaDto) {

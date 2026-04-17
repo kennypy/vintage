@@ -13,35 +13,40 @@ datasource db {
 // --- Users ---
 
 model User {
-  id               String    @id @default(cuid())
-  email            String    @unique
-  passwordHash     String
-  cpf              String?   @unique
-  cnpj             String?   @unique
-  cnpjVerified     Boolean   @default(false)
-  name             String
-  phone            String?
-  avatarUrl        String?
-  bio              String?
-  verified         Boolean   @default(false)
-  cpfVerified      Boolean   @default(false)
-  twoFaEnabled     Boolean   @default(false)
-  twoFaSecret      String?   // Encrypted TOTP secret (null when 2FA disabled)
-  socialProvider   String?   // 'google', 'apple', or null
-  socialProviderId String?   // provider's unique user ID
-  coverPhotoUrl    String?
-  vacationMode     Boolean   @default(false)
-  vacationUntil    DateTime?
-  role             UserRole  @default(USER)
-  isBanned         Boolean   @default(false)
-  bannedAt         DateTime?
-  bannedReason     String?
-  ratingAvg        Float     @default(0)
-  ratingCount      Int       @default(0)
-  followerCount    Int       @default(0)
-  followingCount   Int       @default(0)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  passwordHash       String
+  cpf                String?   @unique
+  cnpj               String?   @unique
+  cnpjVerified       Boolean   @default(false)
+  name               String
+  phone              String?
+  avatarUrl          String?
+  bio                String?
+  verified           Boolean   @default(false)
+  cpfVerified        Boolean   @default(false)
+  twoFaEnabled       Boolean   @default(false)
+  twoFaSecret        String?   // Encrypted TOTP secret (null when 2FA disabled)
+  socialProvider     String?   // 'google', 'apple', or null
+  socialProviderId   String?   // provider's unique user ID
+  coverPhotoUrl      String?
+  vacationMode       Boolean   @default(false)
+  vacationUntil      DateTime?
+  role               UserRole  @default(USER)
+  isBanned           Boolean   @default(false)
+  bannedAt           DateTime?
+  bannedReason       String?
+  // Soft-delete / account deletion (LGPD + App Store / Play Store requirement)
+  deletedAt          DateTime?
+  // ToS / Privacy acceptance tracking (required at signup)
+  acceptedTosAt      DateTime?
+  acceptedTosVersion String?
+  ratingAvg          Float     @default(0)
+  ratingCount        Int       @default(0)
+  followerCount      Int       @default(0)
+  followingCount     Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Relations
   listings          Listing[]
@@ -67,10 +72,14 @@ model User {
   reports                Report[]
   loginEvents            LoginEvent[]
   authenticityRequests   AuthenticityRequest[]
+  deletionAuditLogs      DeletionAuditLog[]
+  blocksMade             UserBlock[]         @relation("UserBlocker")
+  blocksReceived         UserBlock[]         @relation("UserBlocked")
 
   @@index([email])
   @@index([cpf])
   @@index([socialProvider, socialProviderId])
+  @@index([deletedAt])
 }
 
 // --- Listings ---
@@ -211,6 +220,7 @@ model Order {
   carrier               Carrier?
   shippingAddressId     String?
   installments          Int           @default(1)
+  idempotencyKey        String?       // Client-supplied key to dedupe concurrent creations
   shippedAt             DateTime?
   deliveredAt           DateTime?
   confirmedAt           DateTime?
@@ -227,11 +237,28 @@ model Order {
   reviews         Review[]
   dispute         Dispute?
   notaFiscal      NotaFiscal?
+  paymentFlags    PaymentFlag[]
 
+  @@unique([buyerId, idempotencyKey])
   @@index([buyerId])
   @@index([sellerId])
   @@index([status])
   @@index([createdAt])
+}
+
+// --- Payment Flags (flagged for manual review, e.g. amount mismatch) ---
+model PaymentFlag {
+  id         String    @id @default(cuid())
+  orderId    String
+  paymentId  String?
+  reason     String    @db.Text
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([resolvedAt])
 }
 
 // --- Offers ---
@@ -391,11 +418,13 @@ model Review {
 model Report {
   id          String       @id @default(cuid())
   reporterId  String
-  targetType  String       // 'listing' or 'user'
+  targetType  String       // 'listing' | 'message' | 'user' | 'review'
   targetId    String
-  reason      String
+  reason      String       // 'spam' | 'counterfeit' | 'inappropriate' | 'fraud' | 'harassment' | 'other'
   description String?
   status      ReportStatus @default(PENDING)
+  resolvedBy  String?      // admin userId
+  resolvedAt  DateTime?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
@@ -405,6 +434,38 @@ model Report {
   @@index([reporterId])
   @@index([targetType, targetId])
   @@index([status])
+}
+
+// --- Blocks (user-to-user blocking) ---
+
+model UserBlock {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("UserBlocker", fields: [blockerId], references: [id])
+  blocked User @relation("UserBlocked", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+// --- Account Deletion Audit (LGPD + App Store) ---
+
+model DeletionAuditLog {
+  id             String    @id @default(cuid())
+  userId         String
+  reason         String?
+  deletedAt      DateTime  @default(now())
+  hardDeletedAt  DateTime?
+  dataExported   Boolean   @default(false)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([hardDeletedAt])
 }
 
 // --- Disputes ---

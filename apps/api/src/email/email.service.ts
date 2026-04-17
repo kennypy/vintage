@@ -157,6 +157,30 @@ export class EmailService {
     await this.send(to, subject, html);
   }
 
+  async sendDeletionConfirmationCode(
+    to: string,
+    name: string,
+    code: string,
+  ): Promise<void> {
+    const subject = 'Código de confirmação — Exclusão da conta Vintage.br';
+    const html = this.buildHtml(`
+      <h1 style="color: #333; font-size: 24px; margin-bottom: 16px;">Olá, ${this.escapeHtml(name)}</h1>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        Recebemos uma solicitação para excluir sua conta Vintage.br. Para confirmar, use o código abaixo dentro de 15 minutos:
+      </p>
+      <div style="background-color: #f9f9f9; padding: 24px; border-radius: 8px; margin: 24px 0; text-align: center;">
+        <p style="color: #e91e63; font-size: 32px; letter-spacing: 8px; font-weight: bold; margin: 0;">
+          ${this.escapeHtml(code)}
+        </p>
+      </div>
+      <p style="color: #555; font-size: 14px; line-height: 1.6;">
+        Se você não solicitou essa exclusão, ignore este email. Sua conta permanecerá ativa.
+      </p>
+    `);
+
+    await this.send(to, subject, html);
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     try {
       if (this.isDev || !this.transporter) {

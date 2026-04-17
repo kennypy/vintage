@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, MaxLength, Matches, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, Matches, IsOptional, IsBoolean, Equals } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { CPF_REGEX } from '@vintage/shared';
 
@@ -28,4 +28,18 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @ApiProperty({
+    description: 'Aceitação obrigatória dos Termos de Uso e Política de Privacidade',
+    example: true,
+  })
+  @IsBoolean({ message: 'Aceite dos termos é obrigatório' })
+  @Equals(true, { message: 'Você deve aceitar os Termos de Uso e a Política de Privacidade' })
+  acceptedTos!: boolean;
+
+  @ApiProperty({ example: '1.0.0' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(32)
+  tosVersion!: string;
 }

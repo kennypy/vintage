@@ -80,6 +80,8 @@ describe('AuthService', () => {
       cpf: '529.982.247-25',
       name: 'Maria Silva',
       phone: '+5511999999999',
+      acceptedTos: true,
+      tosVersion: '1.0.0',
     };
 
     it('should create user with hashed password, create wallet, and return tokens', async () => {

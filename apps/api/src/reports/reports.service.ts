@@ -1,13 +1,22 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateReportDto, ReportTargetType } from './dto/create-report.dto';
+import { ResolveReportDto, ResolveAction } from './dto/resolve-report.dto';
 
 @Injectable()
 export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+  private readonly DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
+
   constructor(private prisma: PrismaService) {}
 
   async createReport(reporterId: string, dto: CreateReportDto) {
-    // Validate target exists
+    // Validate target exists for each supported type
     if (dto.targetType === ReportTargetType.LISTING) {
       const listing = await this.prisma.listing.findUnique({
         where: { id: dto.targetId },
@@ -18,23 +27,42 @@ export class ReportsService {
     } else if (dto.targetType === ReportTargetType.USER) {
       const user = await this.prisma.user.findUnique({
         where: { id: dto.targetId },
+        select: { id: true, deletedAt: true },
       });
-      if (!user) {
+      if (!user || user.deletedAt) {
         throw new NotFoundException('Usuário não encontrado');
       }
+      if (user.id === reporterId) {
+        throw new BadRequestException('Você não pode denunciar a si mesmo');
+      }
+    } else if (dto.targetType === ReportTargetType.MESSAGE) {
+      const msg = await this.prisma.message.findUnique({
+        where: { id: dto.targetId },
+        select: { id: true },
+      });
+      if (!msg) throw new NotFoundException('Mensagem não encontrada');
+    } else if (dto.targetType === ReportTargetType.REVIEW) {
+      const rev = await this.prisma.review.findUnique({
+        where: { id: dto.targetId },
+        select: { id: true },
+      });
+      if (!rev) throw new NotFoundException('Avaliação não encontrada');
     }
 
-    // Prevent duplicate pending reports from same user on same target
+    // Reject duplicate report (same reporter + target) within 24h
+    const since = new Date(Date.now() - this.DEDUPE_WINDOW_MS);
     const duplicate = await this.prisma.report.findFirst({
       where: {
         reporterId,
         targetType: dto.targetType,
         targetId: dto.targetId,
-        status: 'PENDING',
+        createdAt: { gte: since },
       },
     });
     if (duplicate) {
-      throw new BadRequestException('Você já denunciou este conteúdo');
+      throw new BadRequestException(
+        'Você já denunciou este conteúdo nas últimas 24 horas. Nossa equipe está analisando.',
+      );
     }
 
     const report = await this.prisma.report.create({
@@ -48,42 +76,138 @@ export class ReportsService {
       },
     });
 
-    // Create a notification for each admin user about the new report
-    try {
-      const admins = await this.prisma.user.findMany({
-        where: { role: 'ADMIN' },
-        select: { id: true },
-      });
-      const notificationData = JSON.stringify({
-        reportId: report.id,
-        targetType: dto.targetType,
-        targetId: dto.targetId,
-        reason: dto.reason,
-      });
-      await Promise.all(
-        admins.map((admin) =>
-          this.prisma.notification.create({
-            data: {
-              userId: admin.id,
-              type: 'ADMIN_REPORT',
-              title: `Nova denúncia: ${dto.reason}`,
-              body: `Denúncia de ${dto.targetType} (${dto.targetId}): ${(dto.description || 'Sem descrição').slice(0, 200)}`,
-              data: notificationData,
-            },
-          }),
-        ),
-      );
-    } catch {
-      // Non-critical: notification creation failure should not block report
-    }
+    // Notify admins (non-blocking)
+    this.notifyAdmins(report.id, dto).catch((e) =>
+      this.logger.warn(
+        `Falha ao notificar admins: ${String(e).slice(0, 200)}`,
+      ),
+    );
 
-    return report;
+    return {
+      ...report,
+      message:
+        'Denúncia recebida. Nossa equipe de moderação responde em até 24 horas úteis.',
+    };
+  }
+
+  private async notifyAdmins(reportId: string, dto: CreateReportDto) {
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'ADMIN', isBanned: false, deletedAt: null },
+      select: { id: true },
+    });
+    const data = {
+      reportId,
+      targetType: dto.targetType,
+      targetId: dto.targetId,
+      reason: dto.reason,
+    };
+    await Promise.all(
+      admins.map((admin) =>
+        this.prisma.notification.create({
+          data: {
+            userId: admin.id,
+            type: 'ADMIN_REPORT',
+            title: `Nova denúncia: ${dto.reason}`,
+            body: `Denúncia de ${dto.targetType}: ${(
+              dto.description || 'Sem descrição'
+            ).slice(0, 200)}`,
+            data,
+          },
+        }),
+      ),
+    );
   }
 
   async getUserReports(userId: string) {
     return this.prisma.report.findMany({
       where: { reporterId: userId },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // --- Admin endpoints ---
+
+  async listReportsAdmin(
+    page: number,
+    pageSize: number,
+    status?: string,
+    targetType?: string,
+  ) {
+    const skip = (page - 1) * pageSize;
+    const where: Record<string, unknown> = {};
+    if (status) where.status = status.toUpperCase();
+    if (targetType) where.targetType = targetType;
+
+    const [items, total] = await Promise.all([
+      this.prisma.report.findMany({
+        where,
+        include: {
+          reporter: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.report.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+  }
+
+  async resolveReportAdmin(
+    reportId: string,
+    adminId: string,
+    dto: ResolveReportDto,
+  ) {
+    const report = await this.prisma.report.findUnique({
+      where: { id: reportId },
+    });
+    if (!report) throw new NotFoundException('Denúncia não encontrada');
+    if (report.status !== 'PENDING') {
+      throw new BadRequestException('Esta denúncia já foi revisada');
+    }
+
+    const newStatus =
+      dto.action === ResolveAction.DISMISS ? 'REVIEWED' : 'RESOLVED';
+
+    // Optionally hide the target
+    if (dto.action === ResolveAction.RESOLVE && dto.hideTarget) {
+      if (report.targetType === 'listing') {
+        await this.prisma.listing
+          .update({
+            where: { id: report.targetId },
+            data: { status: 'DELETED' },
+          })
+          .catch(() => undefined);
+      } else if (report.targetType === 'user') {
+        await this.prisma.user
+          .update({
+            where: { id: report.targetId },
+            data: {
+              isBanned: true,
+              bannedAt: new Date(),
+              bannedReason: `Banido por moderação: ${dto.note?.slice(0, 200) ?? report.reason}`,
+            },
+          })
+          .catch(() => undefined);
+      } else if (report.targetType === 'message') {
+        // Soft-delete: blank body. Hard-delete would break receipts.
+        await this.prisma.message
+          .update({
+            where: { id: report.targetId },
+            data: { body: '[Mensagem removida pela moderação]' },
+          })
+          .catch(() => undefined);
+      }
+    }
+
+    return this.prisma.report.update({
+      where: { id: reportId },
+      data: {
+        status: newStatus,
+        resolvedBy: adminId,
+        resolvedAt: new Date(),
+      },
     });
   }
 }

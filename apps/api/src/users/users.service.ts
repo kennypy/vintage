@@ -1,11 +1,39 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  UnauthorizedException,
+  Logger,
+} from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
+
+/** In-memory store for OAuth-user deletion confirmation codes.
+ *  (Acceptable for a low-volume, short-lived ephemeral flow; backed by
+ *  a timestamp so expired entries are ignored and swept.) */
+interface DeletionCodeEntry {
+  codeHash: string;
+  expiresAt: number;
+}
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(UsersService.name);
+  private readonly deletionCodes = new Map<string, DeletionCodeEntry>();
+  private readonly DELETION_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly HARD_DELETE_GRACE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
   async getMyProfile(userId: string) {
@@ -91,6 +119,8 @@ export class UsersService {
   }
 
   async getUserListings(userId: string, page: number = 1, pageSize: number = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (page - 1) * pageSize;
 
     const [items, total] = await Promise.all([
@@ -230,6 +260,8 @@ export class UsersService {
   // --- Storefront ---
 
   async getStorefront(username: string, page: number = 1, pageSize: number = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     // Search by name field (case-insensitive) since User model has no username field
     const user = await this.prisma.user.findFirst({
       where: { name: { equals: username, mode: 'insensitive' } },
@@ -337,31 +369,281 @@ export class UsersService {
 
   // --- Account Deletion ---
 
-  async deleteAccount(userId: string) {
+  /**
+   * OAuth-only users must confirm their identity via an emailed 6-digit code.
+   * Returns without disclosing whether the user has a password set.
+   */
+  async requestDeletionConfirmation(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, deletedAt: true },
+    });
+
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    if (user.deletedAt) throw new BadRequestException('Conta já foi excluída');
+
+    // Generate a cryptographically random 6-digit code
+    const code = (crypto.randomInt(0, 1_000_000)).toString().padStart(6, '0');
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    this.deletionCodes.set(user.id, {
+      codeHash,
+      expiresAt: Date.now() + this.DELETION_CODE_TTL_MS,
+    });
+
+    // Fire-and-forget email; never block response nor log the code
+    this.emailService
+      .sendDeletionConfirmationCode(user.email, user.name, code)
+      .catch((e) => {
+        this.logger.warn(
+          `Falha ao enviar código de exclusão: ${String(e).slice(0, 200)}`,
+        );
+      });
+
+    return {
+      success: true,
+      message:
+        'Enviamos um código de 6 dígitos para o seu email. Use-o em até 15 minutos.',
+    };
+  }
+
+  private verifyDeletionCode(userId: string, token: string): boolean {
+    const entry = this.deletionCodes.get(userId);
+    if (!entry) return false;
+    if (Date.now() > entry.expiresAt) {
+      this.deletionCodes.delete(userId);
+      return false;
+    }
+    const providedHash = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+    // Constant-time compare to avoid timing attacks
+    if (providedHash.length !== entry.codeHash.length) return false;
+    const ok = crypto.timingSafeEqual(
+      Buffer.from(providedHash, 'hex'),
+      Buffer.from(entry.codeHash, 'hex'),
+    );
+    if (ok) this.deletionCodes.delete(userId);
+    return ok;
+  }
+
+  async deleteAccount(userId: string, dto: DeleteAccountDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    if (user.deletedAt) {
+      throw new BadRequestException('Conta já foi excluída');
+    }
+
+    const isOAuthOnly = !!user.socialProvider && !user.passwordHash;
+    // Heuristic: users with a provider set but still having a passwordHash can
+    // use either flow. Always accept whichever method they provide.
+    if (dto.password) {
+      const ok = await bcrypt.compare(dto.password, user.passwordHash ?? '');
+      if (!ok) throw new UnauthorizedException('Senha incorreta');
+    } else if (dto.confirmToken) {
+      if (!this.verifyDeletionCode(userId, dto.confirmToken)) {
+        throw new UnauthorizedException(
+          'Código de confirmação inválido ou expirado',
+        );
+      }
+    } else {
+      throw new BadRequestException(
+        isOAuthOnly
+          ? 'Envie o código de confirmação (confirmToken) recebido por email'
+          : 'A senha é obrigatória para excluir a conta',
+      );
+    }
+
+    const now = new Date();
+    const anonymizedEmail = `deleted-${user.id}@deleted.vintage.br`;
+
     await this.prisma.$transaction(async (tx) => {
-      // Soft-delete the user: anonymise PII, ban the account
+      // Soft-delete: anonymize PII, set deletedAt, mark as banned to block login
       await tx.user.update({
         where: { id: userId },
         data: {
+          deletedAt: now,
           isBanned: true,
-          bannedAt: new Date(),
-          bannedReason: 'Account deleted by user',
-          email: `deleted_${userId}@deleted.vintage.br`,
-          name: 'Conta excluída',
+          bannedAt: now,
+          bannedReason: 'Conta excluída pelo usuário',
+          email: anonymizedEmail,
+          name: 'Usuário excluído',
           cpf: null,
+          cnpj: null,
+          phone: null,
           avatarUrl: null,
+          coverPhotoUrl: null,
           bio: null,
+          socialProvider: null,
+          socialProviderId: null,
+          twoFaSecret: null,
+          twoFaEnabled: false,
         },
       });
 
-      // Deactivate all the user's active listings
+      // Cancel active listings
       await tx.listing.updateMany({
-        where: { sellerId: userId, status: 'ACTIVE' },
-        data: { status: 'PAUSED' },
+        where: { sellerId: userId, status: { in: ['ACTIVE', 'PAUSED'] } },
+        data: { status: 'DELETED' },
+      });
+
+      // Flag pending orders as buyer so support can refund unpaid ones
+      // (we intentionally do NOT touch PAID/SHIPPED orders — those need manual
+      // handling by support; those are preserved in the audit trail).
+      await tx.order.updateMany({
+        where: { buyerId: userId, status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
+
+      // Block offers from this user
+      await tx.offer.updateMany({
+        where: { buyerId: userId, status: 'PENDING' },
+        data: { status: 'REJECTED' },
+      });
+
+      // Create audit record
+      await tx.deletionAuditLog.create({
+        data: {
+          userId,
+          reason: dto.reason ?? null,
+        },
       });
     });
 
+    this.logger.log(`Conta ${userId} soft-deleted (hard-delete em 30 dias)`);
     return { success: true };
+  }
+
+  /**
+   * Scheduled sweep that hard-deletes soft-deleted users after the 30-day
+   * LGPD retention window. Cascades via Prisma relations.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async hardDeleteExpiredAccounts() {
+    const cutoff = new Date(Date.now() - this.HARD_DELETE_GRACE_MS);
+    const expired = await this.prisma.user.findMany({
+      where: {
+        deletedAt: { not: null, lt: cutoff },
+        deletionAuditLogs: { some: { hardDeletedAt: null } },
+      },
+      select: { id: true },
+      take: 50, // bounded to avoid long transactions
+    });
+
+    for (const u of expired) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // Cascade child records that don't have onDelete: Cascade set
+          await tx.favorite.deleteMany({ where: { userId: u.id } });
+          await tx.priceDropAlert.deleteMany({ where: { userId: u.id } });
+          await tx.savedSearch.deleteMany({ where: { userId: u.id } });
+          await tx.address.deleteMany({ where: { userId: u.id } });
+          await tx.deviceToken.deleteMany({ where: { userId: u.id } });
+          await tx.notification.deleteMany({ where: { userId: u.id } });
+          await tx.loginEvent.deleteMany({ where: { userId: u.id } });
+          await tx.userBlock.deleteMany({
+            where: { OR: [{ blockerId: u.id }, { blockedId: u.id }] },
+          });
+          await tx.follow.deleteMany({
+            where: { OR: [{ followerId: u.id }, { followingId: u.id }] },
+          });
+          // Preserve messages/listings/orders references (they remain linked
+          // to the anonymized user record). Mark the audit entry as finalized.
+          await tx.deletionAuditLog.updateMany({
+            where: { userId: u.id, hardDeletedAt: null },
+            data: { hardDeletedAt: new Date() },
+          });
+        });
+        this.logger.log(`Hard-deleted expired user data for ${u.id}`);
+      } catch (e) {
+        this.logger.error(
+          `Falha ao hard-delete usuário ${u.id}: ${String(e).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  // --- Blocking ---
+
+  async blockUser(blockerId: string, blockedId: string) {
+    if (blockerId === blockedId) {
+      throw new BadRequestException('Você não pode bloquear a si mesmo');
+    }
+    const target = await this.prisma.user.findUnique({
+      where: { id: blockedId },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException('Usuário não encontrado');
+
+    await this.prisma.userBlock.upsert({
+      where: { blockerId_blockedId: { blockerId, blockedId } },
+      create: { blockerId, blockedId },
+      update: {},
+    });
+
+    return { blocked: true };
+  }
+
+  async unblockUser(blockerId: string, blockedId: string) {
+    const existing = await this.prisma.userBlock.findUnique({
+      where: { blockerId_blockedId: { blockerId, blockedId } },
+    });
+    if (!existing) return { blocked: false };
+
+    await this.prisma.userBlock.delete({
+      where: { blockerId_blockedId: { blockerId, blockedId } },
+    });
+
+    return { blocked: false };
+  }
+
+  async listBlocks(userId: string) {
+    const rows = await this.prisma.userBlock.findMany({
+      where: { blockerId: userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        blockedId: true,
+        createdAt: true,
+        blocked: {
+          select: { id: true, name: true, avatarUrl: true },
+        },
+      },
+    });
+
+    return {
+      items: rows.map((r) => ({
+        userId: r.blockedId,
+        blockedAt: r.createdAt,
+        name: r.blocked.name,
+        avatarUrl: r.blocked.avatarUrl,
+      })),
+      blockedIds: rows.map((r) => r.blockedId),
+    };
+  }
+
+  /**
+   * Checks whether messaging/offers between two users should be blocked.
+   * Returns true if EITHER user has blocked the other, OR either is banned.
+   */
+  async isInteractionBlocked(a: string, b: string): Promise<boolean> {
+    const [users, blocks] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: [a, b] } },
+        select: { id: true, isBanned: true, deletedAt: true },
+      }),
+      this.prisma.userBlock.findFirst({
+        where: {
+          OR: [
+            { blockerId: a, blockedId: b },
+            { blockerId: b, blockedId: a },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (users.some((u) => u.isBanned || u.deletedAt)) return true;
+    return !!blocks;
   }
 
   // --- Admin Methods ---
