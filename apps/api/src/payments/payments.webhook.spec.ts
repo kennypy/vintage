@@ -119,14 +119,10 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       service = await createService('development');
     });
 
-    it('should accept missing signature in development mode', async () => {
-      mockMercadoPago.getPaymentStatus.mockResolvedValue({
-        status: 'approved',
-      });
-
-      const result = await service.handleWebhook(validPayload, undefined);
-
-      expect(result).toEqual({ received: true });
+    it('should still reject missing signature in development mode', async () => {
+      await expect(
+        service.handleWebhook(validPayload, undefined),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should still reject invalid signature even in development', async () => {
@@ -157,11 +153,12 @@ describe('PaymentsService — Webhook Signature Verification', () => {
 
     beforeEach(async () => {
       service = await createService('development');
+      mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
     });
 
     it('should reject payload missing "action" field', async () => {
       await expect(
-        service.handleWebhook({ data: { id: 'pay-1' } }, undefined),
+        service.handleWebhook({ data: { id: 'pay-1' } }, 'valid-sig'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -169,13 +166,13 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       await expect(
         service.handleWebhook(
           { action: 'payment.updated' },
-          undefined,
+          'valid-sig',
         ),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should reject completely empty payload', async () => {
-      await expect(service.handleWebhook({}, undefined)).rejects.toThrow(
+      await expect(service.handleWebhook({}, 'valid-sig')).rejects.toThrow(
         BadRequestException,
       );
     });
@@ -185,7 +182,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
         status: 'approved',
       });
 
-      const result = await service.handleWebhook(validPayload, undefined);
+      const result = await service.handleWebhook(validPayload, 'valid-sig');
 
       expect(result).toEqual({ received: true });
     });
