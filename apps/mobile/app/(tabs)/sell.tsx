@@ -232,9 +232,9 @@ function SellScreenContent() {
       }
 
       const result = useCamera
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaType.Images, quality: 0.8 })
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
         : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaType.Images,
+            mediaTypes: ['images'],
             allowsMultipleSelection: true,
             selectionLimit: 20 - photos.length,
             quality: 0.8,
@@ -313,8 +313,8 @@ function SellScreenContent() {
       }
 
       const result = useCamera
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaType.Videos, videoMaxDuration: 30, quality: 0.8 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaType.Videos, allowsMultipleSelection: false, videoMaxDuration: 30, quality: 0.8 });
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: 30, quality: 0.8 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], allowsMultipleSelection: false, videoMaxDuration: 30, quality: 0.8 });
 
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];

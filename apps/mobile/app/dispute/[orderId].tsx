@@ -82,11 +82,11 @@ export default function DisputeScreen() {
 
     const result = useCamera
       ? await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaType.Images,
+          mediaTypes: ['images'],
           quality: 0.8,
         })
       : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaType.Images,
+          mediaTypes: ['images'],
           allowsMultipleSelection: true,
           selectionLimit: 5 - photos.length,
           quality: 0.8,
