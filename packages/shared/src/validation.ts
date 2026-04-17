@@ -163,3 +163,124 @@ export function formatCNPJ(cnpj: string): string {
 export function matchesCNPJFormat(cnpj: string): boolean {
   return CNPJ_REGEX.test(cnpj);
 }
+
+// ── PIX key validation & display ─────────────────────────────────────
+// Banco Central defines five PIX key types. Each has a canonical format
+// the cash-out integration (Mercado Pago Payouts) must receive. We store
+// the canonical form and present a masked display form to the UI.
+
+export type PixKeyType =
+  | 'PIX_CPF'
+  | 'PIX_CNPJ'
+  | 'PIX_EMAIL'
+  | 'PIX_PHONE'
+  | 'PIX_RANDOM';
+
+/**
+ * Normalise a PIX key to its canonical storage form:
+ * - CPF/CNPJ: digits only
+ * - email: lower-cased, trimmed
+ * - phone: E.164 +55DDDNNNNNNNN — strictly Brazilian (Banco Central PIX
+ *   doesn't accept foreign numbers)
+ * - random: lower-cased UUID
+ *
+ * This function never throws. Invalid phone input is normalised to a form
+ * that `isValidPixKey` will reject downstream, so the validation error is
+ * raised at a single boundary.
+ */
+export function normalisePixKey(raw: string, type: PixKeyType): string {
+  const trimmed = raw.trim();
+  switch (type) {
+    case 'PIX_CPF':
+    case 'PIX_CNPJ':
+      return trimmed.replace(/\D/g, '');
+    case 'PIX_EMAIL':
+      return trimmed.toLowerCase();
+    case 'PIX_PHONE': {
+      // Strict: if the user typed an explicit "+<cc>" it MUST be +55.
+      // Anything else (e.g. +14155552671) is preserved so isValidPixKey
+      // rejects it instead of us silently re-stamping it as a BR number.
+      const digits = trimmed.replace(/\D/g, '');
+      if (trimmed.startsWith('+') && !digits.startsWith('55')) {
+        return `+${digits}`;
+      }
+      const national = digits.startsWith('55') && digits.length >= 12
+        ? digits.slice(2)
+        : digits;
+      return `+55${national}`;
+    }
+    case 'PIX_RANDOM':
+      return trimmed.toLowerCase();
+  }
+}
+
+/**
+ * Validate a PIX key against its declared type. The caller is responsible
+ * for passing the already-normalised key (normalisePixKey).
+ */
+export function isValidPixKey(key: string, type: PixKeyType): boolean {
+  switch (type) {
+    case 'PIX_CPF':
+      return isValidCPF(key);
+    case 'PIX_CNPJ':
+      return isValidCNPJ(key);
+    case 'PIX_EMAIL':
+      return isValidEmail(key);
+    case 'PIX_PHONE':
+      // Strict BR format:
+      //   Mobile:   +55 DD 9 NNNNNNNN   (DDD + 9 + 8 subscriber digits)
+      //   Landline: +55 DD [2-5]NNNNNNN (DDD + 2-5 prefix + 7 digits)
+      // DDD must be 11-99 (not starting with 0). This rejects both foreign
+      // numbers forced into the +55 slot (e.g. +5514155552671 — DDD 14, then
+      // '1' which isn't a valid landline prefix or mobile 9) and malformed
+      // BR numbers (9-digit line without the leading 9).
+      return /^\+55(1[1-9]|[2-9]\d)(9\d{8}|[2-5]\d{7})$/.test(key);
+    case 'PIX_RANDOM':
+      // Banco Central uses UUID v4 for random keys
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(key);
+  }
+}
+
+/**
+ * Produce a safe, masked representation of a PIX key for the UI.
+ * Reveals only enough to let the user recognise their own key — never
+ * enough for a bystander to identify the provider, area code, or full
+ * local-part. At most 4 characters of the canonical key leak.
+ */
+export function maskPixKey(key: string, type: PixKeyType): string {
+  switch (type) {
+    case 'PIX_CPF': {
+      // Canonical CPF is 11 digits — expose only the last two.
+      if (key.length !== 11) return '•••';
+      return `•••.•••.•••-${key.slice(-2)}`;
+    }
+    case 'PIX_CNPJ': {
+      if (key.length !== 14) return '•••';
+      return `••.•••.•••/••••-${key.slice(-2)}`;
+    }
+    case 'PIX_EMAIL': {
+      // Hide BOTH the local-part tail and the email provider. A bystander
+      // who sees `j•••@g•••.com` knows the user's local-part initial and
+      // the domain-initial + TLD — which is less than Gmail fingerprinting
+      // via the full visible domain.
+      const [local, domain] = key.split('@');
+      if (!domain) return '•••';
+      const head = local.length > 0 ? local.charAt(0) : '•';
+      const firstDot = domain.indexOf('.');
+      const domainBase = firstDot >= 0 ? domain.slice(0, firstDot) : domain;
+      const tld = firstDot >= 0 ? domain.slice(firstDot) : '';
+      const domainHead = domainBase.length > 0 ? domainBase.charAt(0) : '•';
+      return `${head}•••@${domainHead}•••${tld}`;
+    }
+    case 'PIX_PHONE': {
+      // Hide the DDD (area code) — it leaks the user's state in Brazil.
+      // Canonical form is +55DDD(9)NNNNNNNN; expose only the final 4.
+      if (key.length < 8) return '•••';
+      return `+55 •• ••••-${key.slice(-4)}`;
+    }
+    case 'PIX_RANDOM': {
+      if (key.length < 8) return '•••';
+      return `${key.slice(0, 4)}-••••-••••-${key.slice(-4)}`;
+    }
+  }
+}

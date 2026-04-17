@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
 import { formatBRL } from '@/lib/i18n';
@@ -20,8 +21,15 @@ interface WalletTransaction {
   createdAt: string;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+type PixKeyType = 'PIX_CPF' | 'PIX_CNPJ' | 'PIX_EMAIL' | 'PIX_PHONE' | 'PIX_RANDOM';
+
+interface PayoutMethodView {
+  id: string;
+  type: PixKeyType;
+  pixKeyMasked: string;
+  label: string | null;
+  isDefault: boolean;
+  createdAt: string;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -44,17 +52,43 @@ const STATUS_LABELS: Record<string, string> = {
   failed: 'Falhou',
 };
 
+const PIX_TYPE_LABELS: Record<PixKeyType, string> = {
+  PIX_CPF: 'CPF',
+  PIX_CNPJ: 'CNPJ',
+  PIX_EMAIL: 'E-mail',
+  PIX_PHONE: 'Telefone',
+  PIX_RANDOM: 'Aleatória',
+};
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 export default function WalletPage() {
   const router = useRouter();
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [methods, setMethods] = useState<PayoutMethodView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPayout, setShowPayout] = useState(false);
-  const [pixKey, setPixKey] = useState('');
-  const [pixKeyType, setPixKeyType] = useState<'cpf' | 'email' | 'phone' | 'random'>('cpf');
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const [payoutAmount, setPayoutAmount] = useState('');
   const [payoutLoading, setPayoutLoading] = useState(false);
+  const [payoutError, setPayoutError] = useState<string | null>(null);
+
+  const refreshAll = async () => {
+    const [bal, txnsRaw, methodsData] = await Promise.all([
+      apiGet<WalletBalance>('/wallet').catch(() => null),
+      apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => []),
+      apiGet<PayoutMethodView[]>('/wallet/payout-methods').catch(() => [] as PayoutMethodView[]),
+    ]);
+    if (bal) setBalance(bal);
+    setTransactions(Array.isArray(txnsRaw) ? txnsRaw : (txnsRaw.items ?? []));
+    setMethods(methodsData);
+    const def = methodsData.find((m) => m.isDefault) ?? methodsData[0];
+    if (def) setSelectedMethodId(def.id);
+  };
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -63,47 +97,51 @@ export default function WalletPage() {
       return;
     }
 
-    Promise.all([
-      apiGet<WalletBalance>('/wallet').catch(() => {
-        setError('Não foi possível carregar os dados. Tente novamente.');
-        return { availableBrl: 0, pendingBrl: 0, totalBrl: 0 };
-      }),
-      apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => {
-        setError('Não foi possível carregar os dados. Tente novamente.');
-        return [];
-      }),
-    ]).then(([bal, txns]) => {
-      setBalance(bal);
-      setTransactions(Array.isArray(txns) ? txns : (txns.items ?? []));
-    }).finally(() => setLoading(false));
+    refreshAll()
+      .catch(() => setError('Não foi possível carregar os dados. Tente novamente.'))
+      .finally(() => setLoading(false));
   }, [router]);
 
+  const openPayoutForm = () => {
+    setPayoutError(null);
+    if (!balance || balance.availableBrl <= 0) {
+      setPayoutError('Você não tem saldo disponível para saque.');
+      return;
+    }
+    if (methods.length === 0) {
+      setPayoutError('Cadastre uma chave PIX antes de solicitar o saque.');
+      return;
+    }
+    setShowPayout(true);
+  };
+
   const handlePayout = async () => {
-    if (!pixKey.trim() || !payoutAmount.trim()) return;
+    setPayoutError(null);
+    if (!selectedMethodId) {
+      setPayoutError('Selecione uma chave PIX.');
+      return;
+    }
+    if (!payoutAmount.trim()) {
+      setPayoutError('Informe um valor.');
+      return;
+    }
     const amount = parseFloat(payoutAmount.replace(',', '.'));
     if (isNaN(amount) || amount <= 0) {
-      alert('Valor invalido.');
+      setPayoutError('Valor inválido.');
       return;
     }
     if (balance && amount > balance.availableBrl) {
-      alert('Saldo insuficiente.');
+      setPayoutError('Saldo insuficiente.');
       return;
     }
     setPayoutLoading(true);
     try {
-      await apiPost('/wallet/payout', { amountBrl: amount, pixKey: pixKey.trim(), pixKeyType });
+      await apiPost('/wallet/payout', { amountBrl: amount, payoutMethodId: selectedMethodId });
       setShowPayout(false);
-      setPixKey('');
       setPayoutAmount('');
-      // Refresh data
-      const [bal, txns] = await Promise.all([
-        apiGet<WalletBalance>('/wallet').catch(() => balance),
-        apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => transactions),
-      ]);
-      if (bal) setBalance(bal);
-      setTransactions(Array.isArray(txns) ? txns : (txns.items ?? []));
-    } catch {
-      alert('Erro ao solicitar saque. Tente novamente.');
+      await refreshAll();
+    } catch (err) {
+      setPayoutError(err instanceof Error && err.message ? err.message : 'Erro ao solicitar saque.');
     } finally {
       setPayoutLoading(false);
     }
@@ -125,7 +163,15 @@ export default function WalletPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Carteira</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Carteira</h1>
+        <Link
+          href="/conta/payout-methods"
+          className="text-sm text-brand-600 font-medium hover:text-brand-700"
+        >
+          Gerenciar chaves PIX →
+        </Link>
+      </div>
 
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
@@ -148,39 +194,67 @@ export default function WalletPage() {
       {/* Payout button */}
       <button
         type="button"
-        onClick={() => setShowPayout(!showPayout)}
+        onClick={openPayoutForm}
         className="mb-6 px-6 py-3 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition"
       >
         Sacar via PIX
       </button>
 
+      {payoutError && !showPayout && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700" role="alert">
+          {payoutError}{' '}
+          {methods.length === 0 && (
+            <Link href="/conta/payout-methods" className="underline font-medium">
+              Cadastrar chave agora
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Payout form */}
       {showPayout && (
         <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 space-y-4">
           <h2 className="text-sm font-semibold text-gray-900">Solicitar saque</h2>
+
+          {payoutError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700" role="alert">
+              {payoutError}
+            </div>
+          )}
+
           <div>
-            <label className="text-xs text-gray-500 block mb-1">Tipo de chave PIX</label>
-            <select
-              value={pixKeyType}
-              onChange={(e) => setPixKeyType(e.target.value as typeof pixKeyType)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-            >
-              <option value="cpf">CPF</option>
-              <option value="email">E-mail</option>
-              <option value="phone">Telefone</option>
-              <option value="random">Chave aleatoria</option>
-            </select>
+            <label className="text-xs font-semibold text-gray-600 uppercase block mb-2">
+              Destino
+            </label>
+            <div className="space-y-2">
+              {methods.map((m) => (
+                <label
+                  key={m.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer ${
+                    selectedMethodId === m.id
+                      ? 'border-brand-500 bg-brand-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="payoutMethod"
+                    checked={selectedMethodId === m.id}
+                    onChange={() => setSelectedMethodId(m.id)}
+                    className="text-brand-600"
+                  />
+                  <div className="flex-1">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">
+                      {PIX_TYPE_LABELS[m.type]}
+                      {m.isDefault && ' · padrão'}
+                    </p>
+                    <p className="text-sm font-mono text-gray-900">{m.pixKeyMasked}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Chave PIX</label>
-            <input
-              type="text"
-              value={pixKey}
-              onChange={(e) => setPixKey(e.target.value)}
-              placeholder="Digite sua chave PIX"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
-            />
-          </div>
+
           <div>
             <label className="text-xs text-gray-500 block mb-1">Valor (R$)</label>
             <input

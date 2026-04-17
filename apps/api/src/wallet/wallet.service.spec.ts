@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { WalletService } from './wallet.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PayoutMethodsService } from './payout-methods.service';
 
 jest.mock('@vintage/shared', () => ({
   MIN_PAYOUT_BRL: 10.0,
@@ -20,16 +21,28 @@ const mockPrisma = {
   $transaction: jest.fn(),
 };
 
+const mockPayoutMethods = {
+  getOwnedOrThrow: jest.fn(),
+};
+
 describe('WalletService', () => {
   let service: WalletService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default: caller owns the method. Individual tests override.
+    mockPayoutMethods.getOwnedOrThrow.mockResolvedValue({
+      id: 'method-1',
+      userId: 'user-1',
+      type: 'PIX_EMAIL',
+      pixKey: 'jane@example.com',
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WalletService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PayoutMethodsService, useValue: mockPayoutMethods },
       ],
     }).compile();
 
@@ -105,25 +118,74 @@ describe('WalletService', () => {
   });
 
   describe('requestPayout', () => {
-    it('should deduct from wallet and return new balance', async () => {
+    /**
+     * The service now uses an interactive $transaction that:
+     *   1. conditional updateMany (balance >= amount) — the race-safe debit
+     *   2. walletTransaction.create — ledger row
+     *   3. wallet.findUnique — re-read to return the authoritative new balance
+     * The mock must run the callback with a tx client that returns those
+     * values, and $transaction must resolve to whatever the callback returns.
+     */
+    const setupInteractiveTx = (
+      debitCount: number,
+      postDebitBalance: number,
+    ) => {
+      const tx = {
+        wallet: {
+          updateMany: jest.fn().mockResolvedValue({ count: debitCount }),
+          findUnique: jest.fn().mockResolvedValue({ balanceBrl: postDebitBalance }),
+        },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation(async (cb: unknown) => {
+        if (typeof cb === 'function') return (cb as (t: typeof tx) => unknown)(tx);
+        return undefined;
+      });
+      return tx;
+    };
+
+    it('should deduct from wallet via conditional updateMany and return new balance', async () => {
       const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 250.0 };
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
-      mockPrisma.$transaction.mockResolvedValue(undefined);
+      const tx = setupInteractiveTx(1, 150);
 
-      const result = await service.requestPayout('user-1', 100);
+      const result = await service.requestPayout('user-1', 100, 'method-1');
 
       expect(result).toEqual({ success: true, newBalance: 150 });
-      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPayoutMethods.getOwnedOrThrow).toHaveBeenCalledWith('user-1', 'method-1');
+      // Critical: the debit is gated by a balance predicate, not a blind decrement.
+      expect(tx.wallet.updateMany).toHaveBeenCalledWith({
+        where: { id: 'wallet-1', balanceBrl: { gte: 100 } },
+        data: { balanceBrl: { decrement: 100 } },
+      });
+      expect(tx.walletTransaction.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          walletId: 'wallet-1',
+          type: 'PAYOUT',
+          amountBrl: -100,
+          referenceId: 'method-1',
+        }),
+      });
+    });
+
+    it('throws BadRequest when the race-safe debit finds count=0 (concurrent withdraw drained the balance)', async () => {
+      const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 100.0 };
+      mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
+      setupInteractiveTx(0, 100);
+
+      await expect(service.requestPayout('user-1', 80, 'method-1')).rejects.toThrow(
+        /Saldo insuficiente/,
+      );
     });
 
     it('should reject if amount is below minimum', async () => {
       const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 250.0 };
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
 
-      await expect(service.requestPayout('user-1', 5)).rejects.toThrow(
+      await expect(service.requestPayout('user-1', 5, 'method-1')).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.requestPayout('user-1', 5)).rejects.toThrow(
+      await expect(service.requestPayout('user-1', 5, 'method-1')).rejects.toThrow(
         'Valor mínimo para saque: R$10',
       );
     });
@@ -132,10 +194,10 @@ describe('WalletService', () => {
       const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 50.0 };
       mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
 
-      await expect(service.requestPayout('user-1', 100)).rejects.toThrow(
+      await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.requestPayout('user-1', 100)).rejects.toThrow(
+      await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
         'Saldo insuficiente',
       );
     });
@@ -143,9 +205,23 @@ describe('WalletService', () => {
     it('should reject if wallet not found', async () => {
       mockPrisma.wallet.findUnique.mockResolvedValue(null);
 
-      await expect(service.requestPayout('nonexistent', 50)).rejects.toThrow(
+      await expect(service.requestPayout('nonexistent', 50, 'method-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should reject if the payout method belongs to another user (before debiting)', async () => {
+      const wallet = { id: 'wallet-1', userId: 'user-1', balanceBrl: 250.0 };
+      mockPrisma.wallet.findUnique.mockResolvedValue(wallet);
+      mockPayoutMethods.getOwnedOrThrow.mockRejectedValueOnce(
+        new ForbiddenException('Chave PIX não pertence a esta conta.'),
+      );
+
+      await expect(service.requestPayout('user-1', 100, 'not-mine')).rejects.toThrow(
+        ForbiddenException,
+      );
+      // Critical: wallet MUST NOT have been debited.
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

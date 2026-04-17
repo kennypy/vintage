@@ -1,10 +1,14 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, Modal, TextInput } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
-import { getBalance, getTransactions, requestPayout } from '../../src/services/wallet';
-import type { WalletBalance, WalletTransaction } from '../../src/services/wallet';
+import {
+  getBalance, getTransactions, requestPayout, listPayoutMethods,
+} from '../../src/services/wallet';
+import type { WalletBalance, WalletTransaction, PayoutMethodView, PixKeyType } from '../../src/services/wallet';
+import { ApiError } from '../../src/services/api';
 
 const TRANSACTION_ICONS: Record<string, string> = {
   sale: 'arrow-down-circle-outline',
@@ -26,37 +30,40 @@ const STATUS_LABELS: Record<string, string> = {
   failed: 'Falhou',
 };
 
-type PixKeyType = 'cpf' | 'email' | 'phone' | 'random';
-const PIX_KEY_TYPES: { value: PixKeyType; label: string }[] = [
-  { value: 'cpf', label: 'CPF' },
-  { value: 'email', label: 'E-mail' },
-  { value: 'phone', label: 'Telefone' },
-  { value: 'random', label: 'Chave aleatoria' },
-];
+const TYPE_LABELS: Record<PixKeyType, string> = {
+  PIX_CPF: 'CPF',
+  PIX_CNPJ: 'CNPJ',
+  PIX_EMAIL: 'E-mail',
+  PIX_PHONE: 'Telefone',
+  PIX_RANDOM: 'Aleatória',
+};
 
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function WalletScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [methods, setMethods] = useState<PayoutMethodView[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [payoutModalVisible, setPayoutModalVisible] = useState(false);
-  const [pixKey, setPixKey] = useState('');
-  const [pixKeyType, setPixKeyType] = useState<PixKeyType>('cpf');
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const [payoutAmount, setPayoutAmount] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
-      const [balanceData, transactionsData] = await Promise.all([
+      const [balanceData, transactionsData, methodsData] = await Promise.all([
         getBalance(),
         getTransactions(),
+        listPayoutMethods().catch(() => [] as PayoutMethodView[]),
       ]);
       setBalance(balanceData);
       setTransactions(transactionsData.items);
+      setMethods(methodsData);
     } catch (_error) {
       // Keep defaults on error
     } finally {
@@ -79,41 +86,50 @@ export default function WalletScreen() {
       Alert.alert('Saldo insuficiente', 'Voce nao tem saldo disponivel para saque.');
       return;
     }
+    if (methods.length === 0) {
+      Alert.alert(
+        'Cadastre uma chave PIX',
+        'Você precisa cadastrar pelo menos uma chave PIX antes de sacar.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Cadastrar agora', onPress: () => router.push('/conta/payout-methods') },
+        ],
+      );
+      return;
+    }
     setPayoutAmount(formatBrl(balance.availableBrl));
-    setPixKey('');
-    setPixKeyType('cpf');
+    // Pre-select the default method if any, else the most recent.
+    const def = methods.find((m) => m.isDefault) ?? methods[0];
+    setSelectedMethodId(def.id);
     setPayoutModalVisible(true);
   };
 
   const handlePayout = async () => {
-    if (!pixKey.trim()) {
-      Alert.alert('Chave PIX obrigatoria', 'Informe sua chave PIX para continuar.');
+    if (!selectedMethodId) {
+      Alert.alert('Selecione uma chave', 'Escolha para qual chave PIX enviar.');
       return;
     }
-
     const parsedAmount = parseFloat(payoutAmount.replace(/\./g, '').replace(',', '.'));
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert('Valor invalido', 'Informe um valor valido para o saque.');
+      Alert.alert('Valor inválido', 'Informe um valor válido para o saque.');
       return;
     }
-
     if (balance && parsedAmount > balance.availableBrl) {
-      Alert.alert('Saldo insuficiente', 'O valor informado excede seu saldo disponivel.');
+      Alert.alert('Saldo insuficiente', 'O valor informado excede seu saldo disponível.');
       return;
     }
 
     setPayoutLoading(true);
     try {
-      await requestPayout({
-        amountBrl: parsedAmount,
-        pixKey: pixKey.trim(),
-        pixKeyType,
-      });
+      await requestPayout({ amountBrl: parsedAmount, payoutMethodId: selectedMethodId });
       setPayoutModalVisible(false);
-      Alert.alert('Saque solicitado!', 'O valor sera transferido em ate 1 dia util.');
+      Alert.alert('Saque solicitado!', 'O valor será transferido em até 1 dia útil.');
       await fetchData();
-    } catch (_error) {
-      Alert.alert('Erro', 'Nao foi possivel processar o saque. Tente novamente.');
+    } catch (err) {
+      const msg = err instanceof ApiError && err.message
+        ? err.message
+        : 'Não foi possível processar o saque. Tente novamente.';
+      Alert.alert('Erro', msg);
     } finally {
       setPayoutLoading(false);
     }
@@ -143,6 +159,13 @@ export default function WalletScreen() {
         <TouchableOpacity style={styles.payoutButton} onPress={openPayoutModal}>
           <Ionicons name="arrow-up-circle-outline" size={20} color={colors.neutral[0]} />
           <Text style={styles.payoutText}>Sacar via PIX</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.manageKeysLink}
+          onPress={() => router.push('/conta/payout-methods')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.manageKeysLinkText}>Gerenciar chaves PIX</Text>
         </TouchableOpacity>
       </View>
 
@@ -208,39 +231,33 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Tipo de chave PIX</Text>
-            <View style={styles.pixTypeRow}>
-              {PIX_KEY_TYPES.map((type) => (
-                <TouchableOpacity
-                  key={type.value}
-                  style={[
-                    styles.pixTypeChip,
-                    { borderColor: theme.border, backgroundColor: theme.card },
-                    pixKeyType === type.value && styles.pixTypeChipActive,
-                  ]}
-                  onPress={() => setPixKeyType(type.value)}
-                >
-                  <Text style={[
-                    styles.pixTypeText,
-                    { color: theme.textSecondary },
-                    pixKeyType === type.value && styles.pixTypeTextActive,
-                  ]}>
-                    {type.label}
+            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>
+              Destino ({methods.length} chave{methods.length !== 1 ? 's' : ''} cadastrada{methods.length !== 1 ? 's' : ''})
+            </Text>
+            {methods.map((m) => (
+              <TouchableOpacity
+                key={m.id}
+                style={[
+                  styles.methodRow,
+                  { borderColor: selectedMethodId === m.id ? colors.primary[500] : theme.border },
+                ]}
+                onPress={() => setSelectedMethodId(m.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: selectedMethodId === m.id }}
+              >
+                <Ionicons
+                  name={selectedMethodId === m.id ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={selectedMethodId === m.id ? colors.primary[500] : theme.textTertiary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.methodType, { color: theme.textSecondary }]}>
+                    {TYPE_LABELS[m.type]}{m.isDefault ? ' · padrão' : ''}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Chave PIX</Text>
-            <TextInput
-              style={[styles.textInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.inputBg }]}
-              value={pixKey}
-              onChangeText={setPixKey}
-              placeholder="Informe sua chave PIX"
-              placeholderTextColor={theme.textTertiary}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+                  <Text style={[styles.methodKey, { color: theme.text }]}>{m.pixKeyMasked}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
 
             <Text style={[styles.inputLabel, { color: theme.textSecondary }]}>Valor (R$)</Text>
             <TextInput
@@ -292,6 +309,8 @@ const styles = StyleSheet.create({
     borderRadius: 10, marginTop: 16,
   },
   payoutText: { color: colors.neutral[0], fontSize: 15, fontWeight: '600' },
+  manageKeysLink: { marginTop: 10 },
+  manageKeysLinkText: { color: colors.primary[100], fontSize: 13, textDecorationLine: 'underline' },
   sectionTitle: {
     fontSize: 16, fontWeight: '600',
     paddingHorizontal: 16, paddingVertical: 12,
@@ -324,14 +343,14 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: { fontSize: 20, fontWeight: '700' },
-  inputLabel: { fontSize: 14, fontWeight: '600', marginTop: 16, marginBottom: 8 },
-  pixTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pixTypeChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1,
+  inputLabel: { fontSize: 13, fontWeight: '600', marginTop: 16, marginBottom: 8, textTransform: 'uppercase' },
+  methodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderWidth: 1, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8,
   },
-  pixTypeChipActive: { borderColor: colors.pix, backgroundColor: colors.pix + '15' },
-  pixTypeText: { fontSize: 13, fontWeight: '500' },
-  pixTypeTextActive: { color: colors.pix, fontWeight: '600' },
+  methodType: { fontSize: 12, textTransform: 'uppercase', fontWeight: '600' },
+  methodKey: { fontSize: 15, fontFamily: 'monospace', marginTop: 2 },
   textInput: {
     borderWidth: 1, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
