@@ -6,6 +6,7 @@ import { AuthService, SocialProfile } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RedisService } from '../common/services/redis.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -47,6 +48,14 @@ const mockNotificationsService = {
   createNotification: jest.fn(),
 };
 
+const mockRedisService = {
+  get: jest.fn(),
+  set: jest.fn(),
+  incr: jest.fn(),
+  expire: jest.fn(),
+  del: jest.fn(),
+};
+
 describe('AuthService - Social Login', () => {
   let service: AuthService;
 
@@ -61,6 +70,7 @@ describe('AuthService - Social Login', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 
