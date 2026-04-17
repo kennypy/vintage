@@ -202,6 +202,11 @@ async function main() {
   // Users
   // ---------------------------------------------------------------------------
   const pw = await bcrypt.hash('Teste@123', 12);
+  // Seeded accounts must have the current TOS accepted or the login endpoint
+  // will bounce them with `TOS_UPDATE_REQUIRED` (409). Keep this in sync with
+  // AuthService.getCurrentTosVersion()'s default.
+  const seedTosVersion = process.env.TOS_VERSION ?? '1.0.0';
+  const seedAcceptedTos = { acceptedTosAt: new Date(), acceptedTosVersion: seedTosVersion };
 
   // Primary test user (the one used to login during dev)
   const userTeste = await prisma.user.upsert({
@@ -214,9 +219,10 @@ async function main() {
       cpfVerified: true,
       verified: true,
       bio: 'Usuária de teste principal. Compra e vende muito!',
+      ...seedAcceptedTos,
       wallet: { create: { balanceBrl: 150 } },
     },
-    update: { passwordHash: pw, cpfVerified: true },
+    update: { passwordHash: pw, cpfVerified: true, ...seedAcceptedTos },
   });
 
   // A power seller with many completed sales
@@ -230,9 +236,10 @@ async function main() {
       cpfVerified: true,
       verified: true,
       bio: 'Apaixonada por moda sustentável. Mais de 50 vendas!',
+      ...seedAcceptedTos,
       wallet: { create: { balanceBrl: 480 } },
     },
-    update: { passwordHash: pw },
+    update: { passwordHash: pw, ...seedAcceptedTos },
   });
 
   // A buyer (available for future order seeding)
@@ -245,9 +252,10 @@ async function main() {
       cpf: '98765432100',
       cpfVerified: true,
       verified: true,
+      ...seedAcceptedTos,
       wallet: { create: { balanceBrl: 0 } },
     },
-    update: { passwordHash: pw },
+    update: { passwordHash: pw, ...seedAcceptedTos },
   });
 
   // Admin user
@@ -261,9 +269,10 @@ async function main() {
       cpfVerified: true,
       verified: true,
       role: UserRole.ADMIN,
+      ...seedAcceptedTos,
       wallet: { create: { balanceBrl: 0 } },
     },
-    update: { passwordHash: pw, role: UserRole.ADMIN },
+    update: { passwordHash: pw, role: UserRole.ADMIN, ...seedAcceptedTos },
   });
 
   console.log('  ✅ Users: teste@vintage.com.br | ana.vendedora@vintage.com.br | joao.comprador@vintage.com.br | admin@vintage.com.br (all pw: Teste@123)');
