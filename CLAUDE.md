@@ -30,35 +30,51 @@ packages/shared/ — Shared types, utils, validation
 
 ## Development Workflow
 
-### MANDATORY: Pre-Push Checklist
+### MANDATORY: Pre-Push Gate — `./scripts/ci-parity.sh`
 
-**Every single `git push` MUST pass all of the following checks. No exceptions. Run them in order and fix any failures before pushing.**
+**Every `git push` MUST be preceded by a green run of `./scripts/ci-parity.sh`. One command. No exceptions.**
 
 ```bash
-# 1. Build shared packages (types, constants, validation)
-npx turbo build --filter=@vintage/shared
+# Full run — mirrors .github/workflows/ci.yml exactly: nukes every cache,
+# reinstalls from lockfile with npm ci, runs every CI step under
+# `set -o pipefail` so real exit codes are captured.
+./scripts/ci-parity.sh
 
-# 2. Generate Prisma client (if schema changed)
-cd apps/api && npx prisma generate && cd ../..
-
-# 3. Lint ALL packages — must exit 0 with no errors
-npx turbo lint
-
-# 4. Type-check API — must exit 0
-npx tsc -p apps/api/tsconfig.json --noEmit
-
-# 5. Run ALL tests — must exit 0
-npx turbo test
-
-# 6. Build API — must exit 0
-npx turbo build --filter=@vintage/api
-
-# 7. Build Web — must exit 0
-npx turbo build --filter=@vintage/web
-
-# 8. Only after ALL above pass, push
-git push -u origin <branch-name>
+# --fast is for tight edit/verify loops — keeps node_modules but still
+# clears .turbo and apps/web/.next. CI does not have a fast mode;
+# NEVER trust --fast as the final pre-push gate.
+./scripts/ci-parity.sh --fast
 ```
+
+Exit `0` = safe to push. Exit `1` = do not push; the failing step's last 40 log lines are printed to stderr and the full log is in `.ci-parity-logs/`.
+
+The script runs, in order, a faithful reproduction of `.github/workflows/ci.yml`:
+
+1. `npm ci` (NEVER `npm install`)
+2. `npx turbo build --filter=@vintage/shared --force`
+3. `npx prisma generate` in `apps/api`
+4. `npx turbo lint --force`
+5. `npx tsc -p apps/api/tsconfig.json --noEmit`
+6. `npx turbo test --force` with CI env (`DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=test`)
+7. `npx turbo build --filter=@vintage/api --force`
+8. `npx turbo build --filter=@vintage/web --force`
+9. `npm audit --audit-level=critical`
+
+**If you add a new step to `.github/workflows/ci.yml`, add the equivalent to `scripts/ci-parity.sh` in the same position.** The two files are meant to stay byte-for-byte equivalent in what they check.
+
+#### Anti-patterns that have broken CI in the past (never repeat)
+
+These are the concrete shortcuts that caused "green locally, red on CI" incidents on this branch. The ci-parity script refuses every one of them; this table exists so reviewers and future-you understand why.
+
+| Shortcut I took | How it broke CI | Why the script can't take it |
+|-----------------|-----------------|------------------------------|
+| Read `$?` after piping turbo through `tail` | `$?` was tail's exit (always 0); turbo's real failure was laundered to a false green | Every step runs under `set -o pipefail` inside `bash -c` |
+| Reused existing `node_modules` across checks | Fresh `npm ci` picks up stricter lint-plugin minor versions the reused tree didn't have — new errors only appeared on CI | Script deletes `node_modules` and runs `npm ci` before any check |
+| Trusted turbo's cached result | Turbo replayed a stale PASS even when sources changed; Next.js `.next/cache` did the same for the web build | `--force` on every turbo command; `.turbo/` and `apps/web/.next/` nuked beforehand |
+| Skipped `npx prisma generate` after editing `schema.prisma` | ts-jest compiled against the pre-edit Prisma client, so code referencing a renamed compound key built locally and failed on CI | Script always regenerates before typecheck/tests |
+| Suppressed an ESLint rule the package's config doesn't register (e.g. `eslint-disable-next-line react-hooks/exhaustive-deps` in a web config that never added `eslint-plugin-react-hooks`) | ESLint errors "Definition for rule not found" | Lint runs against the real config; the script fails at step 4 |
+| Used `npm install` instead of `npm ci` | Permissive install occasionally drifted the lockfile, producing different transitive versions than CI | Script always uses `npm ci` |
+| Backgrounded a turbo run and read the launcher's "exit 0" notification | Same effect as the pipefail trap — the launcher reported the last piped command's exit, not turbo's | Script is foreground-only; each exit comes directly from `bash -c` |
 
 If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use `--no-verify`. Do not force push over failures.
 
@@ -75,7 +91,10 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 | Import error for `.css` or assets | TypeScript strict | Ensure `next-env.d.ts` exists for web, proper tsconfig for each app |
 | `useContext` null error in Next.js build | React 19 + Next.js pages router conflict | Web app MUST use React 18.3.x + Next.js 14.x. Never upgrade to React 19. |
 | `peer dep` conflict on install | Mismatched ESLint / Next versions | Web uses standalone `eslint.config.mjs`, does NOT need `eslint-config-next` |
-| Stale `node_modules` after version change | npm didn't update hoisted deps | Delete `node_modules`, `package-lock.json`, and run `npm install` fresh |
+| Stale `node_modules` after version change | npm didn't update hoisted deps | `rm -rf node_modules && npm ci` (NEVER delete `package-lock.json` — CI uses `npm ci` and needs a matching lockfile) |
+| "Definition for rule X was not found" on CI lint | Added `// eslint-disable-next-line X` for a rule the package's ESLint config doesn't register | Either register the plugin that provides the rule, or remove the suppression — the rule isn't firing anyway |
+| Ts-jest compile error on a compound Prisma key | Edited `schema.prisma` without regenerating the client | `cd apps/api && npx prisma generate` (or just run `./scripts/ci-parity.sh`, which does this) |
+| "Green locally, red on CI" in general | Cache reuse, piped exit codes, or stale generated code | Always verify with `./scripts/ci-parity.sh` (no `--fast`) before pushing |
 
 ### ESLint Configuration
 - All packages use ESLint v9 **flat config** format (`eslint.config.mjs`)
