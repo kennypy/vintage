@@ -14,6 +14,18 @@ interface AppNotification {
   createdAt: string;
 }
 
+interface NotificationPreferences {
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+  orders: boolean;
+  messages: boolean;
+  offers: boolean;
+  followers: boolean;
+  priceDrops: boolean;
+  promotions: boolean;
+  news: boolean;
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -35,12 +47,50 @@ const TYPE_ICONS: Record<string, string> = {
   system: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
 };
 
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+        value ? 'bg-brand-600' : 'bg-gray-200'
+      }`}
+      aria-pressed={value}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          value ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      />
+    </button>
+  );
+}
+
+const DEFAULT_PREFS: NotificationPreferences = {
+  pushEnabled: true,
+  emailEnabled: true,
+  orders: true,
+  messages: true,
+  offers: true,
+  followers: true,
+  priceDrops: true,
+  promotions: false,
+  news: false,
+};
+
+type Tab = 'all' | 'unread' | 'preferences';
+
 export default function NotificationsPage() {
   const router = useRouter();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [tab, setTab] = useState<Tab>('all');
+
+  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_PREFS);
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -64,6 +114,12 @@ export default function NotificationsPage() {
         setError('Não foi possível carregar os dados. Tente novamente.');
       })
       .finally(() => setLoading(false));
+
+    apiGet<NotificationPreferences>('/users/me/notification-preferences')
+      .then((res) => setPrefs({ ...DEFAULT_PREFS, ...res }))
+      .catch(() => {
+        // Fallback to defaults — endpoint is optional.
+      });
   }, [router]);
 
   const handleMarkRead = async (id: string) => {
@@ -86,18 +142,37 @@ export default function NotificationsPage() {
     }
   };
 
+  const updatePref = async (patch: Partial<NotificationPreferences>) => {
+    const nextPrefs = { ...prefs, ...patch };
+    setPrefs(nextPrefs);
+    setPrefsSaving(true);
+    try {
+      await apiPatch('/users/me/notification-preferences', patch);
+      setPrefsSaved(true);
+      setTimeout(() => setPrefsSaved(false), 1500);
+    } catch {
+      // silently leave UI as-is.
+    } finally {
+      setPrefsSaving(false);
+    }
+  };
+
+  const visibleNotifications = tab === 'unread'
+    ? notifications.filter((n) => !n.read)
+    : notifications;
+
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900">Notificacoes</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Notificações</h1>
           {unreadCount > 0 && (
             <span className="px-2 py-0.5 bg-brand-600 text-white text-xs font-bold rounded-full">
               {unreadCount}
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
+        {unreadCount > 0 && tab !== 'preferences' && (
           <button
             type="button"
             onClick={handleMarkAllRead}
@@ -108,9 +183,83 @@ export default function NotificationsPage() {
         )}
       </div>
 
+      {/* Tabs */}
+      <div className="border-b border-gray-200 mb-6">
+        <div className="flex gap-6">
+          {([
+            { key: 'all', label: 'Todas' },
+            { key: 'unread', label: 'Não lidas' },
+            { key: 'preferences', label: 'Preferências' },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`pb-3 text-sm font-medium border-b-2 transition ${
+                tab === t.key
+                  ? 'border-brand-600 text-brand-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
-      {loading ? (
+      {tab === 'preferences' ? (
+        <div className="space-y-4">
+          {prefsSaved && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700">
+              Preferências atualizadas.
+            </div>
+          )}
+
+          <section className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Canais</h2>
+            <div className="divide-y divide-gray-100">
+              <PrefRow label="Notificações push" hint="No navegador e dispositivos">
+                <Toggle value={prefs.pushEnabled} onChange={(v) => updatePref({ pushEnabled: v })} />
+              </PrefRow>
+              <PrefRow label="Notificações por e-mail">
+                <Toggle value={prefs.emailEnabled} onChange={(v) => updatePref({ emailEnabled: v })} />
+              </PrefRow>
+            </div>
+          </section>
+
+          <section className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Categorias</h2>
+            <div className="divide-y divide-gray-100">
+              <PrefRow label="Pedidos" hint="Pagamento, envio e entrega">
+                <Toggle value={prefs.orders} onChange={(v) => updatePref({ orders: v })} />
+              </PrefRow>
+              <PrefRow label="Mensagens" hint="Novas mensagens de compradores e vendedores">
+                <Toggle value={prefs.messages} onChange={(v) => updatePref({ messages: v })} />
+              </PrefRow>
+              <PrefRow label="Ofertas" hint="Propostas recebidas e respostas">
+                <Toggle value={prefs.offers} onChange={(v) => updatePref({ offers: v })} />
+              </PrefRow>
+              <PrefRow label="Novos seguidores">
+                <Toggle value={prefs.followers} onChange={(v) => updatePref({ followers: v })} />
+              </PrefRow>
+              <PrefRow label="Queda de preço" hint="Favoritos com preço reduzido">
+                <Toggle value={prefs.priceDrops} onChange={(v) => updatePref({ priceDrops: v })} />
+              </PrefRow>
+              <PrefRow label="Promoções" hint="Destaque, Impulso e campanhas">
+                <Toggle value={prefs.promotions} onChange={(v) => updatePref({ promotions: v })} />
+              </PrefRow>
+              <PrefRow label="Novidades do Vintage.br">
+                <Toggle value={prefs.news} onChange={(v) => updatePref({ news: v })} />
+              </PrefRow>
+            </div>
+          </section>
+
+          {prefsSaving && (
+            <p className="text-xs text-gray-400 text-center">Salvando…</p>
+          )}
+        </div>
+      ) : loading ? (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="animate-pulse bg-white border border-gray-200 rounded-xl p-4">
@@ -124,16 +273,18 @@ export default function NotificationsPage() {
             </div>
           ))}
         </div>
-      ) : notifications.length === 0 ? (
+      ) : visibleNotifications.length === 0 ? (
         <div className="text-center py-16">
           <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
-          <p className="text-gray-500">Nenhuma notificacao por enquanto.</p>
+          <p className="text-gray-500">
+            {tab === 'unread' ? 'Nenhuma notificação não lida.' : 'Nenhuma notificação por enquanto.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {notifications.map((n) => (
+          {visibleNotifications.map((n) => (
             <button
               key={n.id}
               type="button"
@@ -163,6 +314,18 @@ export default function NotificationsPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function PrefRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+      <div>
+        <p className="text-sm font-medium text-gray-700">{label}</p>
+        {hint && <p className="text-xs text-gray-400 mt-0.5">{hint}</p>}
+      </div>
+      <div className="ml-4 flex-shrink-0">{children}</div>
     </div>
   );
 }
