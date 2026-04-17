@@ -120,8 +120,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const response = await loginService(email, password);
         // 2FA-required responses don't have a user; return the challenge so
-        // the login screen can route to the /2fa-challenge prompt.
-        if ('requiresTwoFa' in response && response.requiresTwoFa) {
+        // the login screen can route to the /2fa-challenge prompt. The
+        // literal-property check also narrows the type so `response.user`
+        // below is the authenticated variant.
+        if ('requiresTwoFa' in response) {
           return response;
         }
         setUser(response.user);
