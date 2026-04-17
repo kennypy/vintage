@@ -43,7 +43,11 @@ const mockJwtService = {
 };
 
 const mockConfigService = {
-  get: jest.fn().mockReturnValue('7d'),
+  get: jest.fn((key: string, defaultValue?: string) => {
+    if (key === 'TOS_VERSION') return '1.0.0';
+    if (key === 'JWT_REFRESH_EXPIRY') return '7d';
+    return defaultValue;
+  }),
 };
 
 const mockEmailService = {
@@ -154,10 +158,21 @@ describe('AuthService', () => {
     };
 
     it('should return tokens for valid credentials', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
+      const mockUser = {
         id: 'user-1',
         passwordHash: 'hashed_password',
-      });
+        name: 'Test',
+        email: 'test@example.com',
+        cpf: '52998224725',
+        avatarUrl: null,
+        createdAt: new Date(),
+        isBanned: false,
+        deletedAt: null,
+        twoFaEnabled: false,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockJwtService.sign
         .mockReturnValueOnce('access-token')

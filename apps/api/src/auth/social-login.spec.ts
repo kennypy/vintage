@@ -37,7 +37,11 @@ const mockJwtService = {
 };
 
 const mockConfigService = {
-  get: jest.fn().mockReturnValue('7d'),
+  get: jest.fn((key: string, defaultValue?: string) => {
+    if (key === 'TOS_VERSION') return '1.0.0';
+    if (key === 'JWT_REFRESH_EXPIRY') return '7d';
+    return defaultValue;
+  }),
 };
 
 const mockEmailService = {
@@ -93,6 +97,10 @@ describe('AuthService - Social Login', () => {
         socialProviderId: 'google-123',
         cpfVerified: true,
         avatarUrl: null,
+        isBanned: false,
+        deletedAt: null,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
       };
       mockPrisma.user.findUnique
         .mockResolvedValueOnce(existingUser) // check if user exists by email
@@ -188,6 +196,10 @@ describe('AuthService - Social Login', () => {
         socialProviderId: null,
         cpfVerified: true,
         avatarUrl: null,
+        isBanned: false,
+        deletedAt: null,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
       };
       mockPrisma.user.findUnique.mockResolvedValue(existingUser);
       mockJwtService.sign
