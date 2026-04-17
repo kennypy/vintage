@@ -50,7 +50,14 @@ describe('register', () => {
     expect(mockApiFetch).toHaveBeenCalledWith('/auth/register', {
       method: 'POST',
       authenticated: false,
-      body: JSON.stringify({ name: 'Pedro', email: 'pedro@test.com', cpf: '456', password: 'pass456' }),
+      body: JSON.stringify({
+        name: 'Pedro',
+        email: 'pedro@test.com',
+        cpf: '456',
+        password: 'pass456',
+        acceptedTos: true,
+        tosVersion: '1.0.0',
+      }),
     });
     expect(mockSetTokens).toHaveBeenCalledWith('at-789', 'rt-012');
     expect(result).toEqual(response);

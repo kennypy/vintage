@@ -326,17 +326,28 @@ export class OrdersService {
       );
     }
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.order.update({
+    // Wrap in an interactive transaction so we can re-read the listing state
+    // and only reactivate it if it's still parked as SOLD for this order.
+    // Prevents resurrecting a listing the seller has since DELETED or that
+    // a concurrent flow has moved to another terminal state.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.order.update({
         where: { id: orderId },
         data: { status: 'CANCELLED' },
-      }),
-      // Return the listing to the marketplace so another buyer can purchase.
-      this.prisma.listing.update({
+      });
+
+      const listing = await tx.listing.findUnique({
         where: { id: order.listingId },
-        data: { status: 'ACTIVE' },
-      }),
-    ]);
+        select: { status: true },
+      });
+      if (listing && listing.status === 'SOLD') {
+        await tx.listing.update({
+          where: { id: order.listingId },
+          data: { status: 'ACTIVE' },
+        });
+      }
+      return next;
+    });
 
     // Notify seller (fire-and-forget)
     this.notifications
