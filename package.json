@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "dev": "turbo dev",
+    "dev:backend": "turbo dev --filter=@vintage/api --filter=@vintage/web --filter=@vintage/shared",
+    "dev:mobile": "npm -w @vintage/mobile run dev",
     "build": "turbo build",
     "lint": "turbo lint",
     "test": "turbo test",
