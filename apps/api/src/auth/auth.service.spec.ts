@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RedisService } from '../common/services/redis.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -42,7 +43,11 @@ const mockJwtService = {
 };
 
 const mockConfigService = {
-  get: jest.fn().mockReturnValue('7d'),
+  get: jest.fn((key: string, defaultValue?: string) => {
+    if (key === 'TOS_VERSION') return '1.0.0';
+    if (key === 'JWT_REFRESH_EXPIRY') return '7d';
+    return defaultValue;
+  }),
 };
 
 const mockEmailService = {
@@ -51,6 +56,14 @@ const mockEmailService = {
 
 const mockNotificationsService = {
   createNotification: jest.fn(),
+};
+
+const mockRedisService = {
+  get: jest.fn(),
+  set: jest.fn(),
+  incr: jest.fn(),
+  expire: jest.fn(),
+  del: jest.fn(),
 };
 
 describe('AuthService', () => {
@@ -67,6 +80,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 
@@ -80,6 +94,8 @@ describe('AuthService', () => {
       cpf: '529.982.247-25',
       name: 'Maria Silva',
       phone: '+5511999999999',
+      acceptedTos: true,
+      tosVersion: '1.0.0',
     };
 
     it('should create user with hashed password, create wallet, and return tokens', async () => {
@@ -142,10 +158,21 @@ describe('AuthService', () => {
     };
 
     it('should return tokens for valid credentials', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
+      const mockUser = {
         id: 'user-1',
         passwordHash: 'hashed_password',
-      });
+        name: 'Test',
+        email: 'test@example.com',
+        cpf: '52998224725',
+        avatarUrl: null,
+        createdAt: new Date(),
+        isBanned: false,
+        deletedAt: null,
+        twoFaEnabled: false,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockJwtService.sign
         .mockReturnValueOnce('access-token')

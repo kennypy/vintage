@@ -28,10 +28,10 @@ describe('Header', () => {
     expect(screen.getByText('Criar conta')).toBeInTheDocument();
   });
 
-  it('shows Meu perfil and Sair when authenticated', () => {
+  it('shows Minha conta and Sair when authenticated', () => {
     localStorage.setItem('vintage_token', 'test-token');
     render(<Header />);
-    expect(screen.getByText('Meu perfil')).toBeInTheDocument();
+    expect(screen.getByText('Minha conta')).toBeInTheDocument();
     expect(screen.getByText('Sair')).toBeInTheDocument();
   });
 
@@ -44,7 +44,7 @@ describe('Header', () => {
 
   it('does not show profile/logout when not authenticated', () => {
     render(<Header />);
-    expect(screen.queryByText('Meu perfil')).not.toBeInTheDocument();
+    expect(screen.queryByText('Minha conta')).not.toBeInTheDocument();
     expect(screen.queryByText('Sair')).not.toBeInTheDocument();
   });
 

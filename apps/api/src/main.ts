@@ -85,19 +85,62 @@ async function bootstrap() {
           connectSrc: ["'self'"],
           frameSrc: ["'none'"],
           objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          frameAncestors: ["'none'"],
+          upgradeInsecureRequests: nodeEnv === 'production' ? [] : null,
         },
       },
       crossOriginEmbedderPolicy: true,
       xFrameOptions: { action: 'deny' },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      strictTransportSecurity:
+        nodeEnv === 'production'
+          ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+          : false,
     }),
   );
 
-  // CORS — explicit allowlist
-  const corsOrigin = config.get<string>('CORS_ORIGIN', 'http://localhost:3000');
+  // CORS — explicit allowlist with wildcard rejection.
+  // Production MUST provide CORS_ORIGIN. In non-prod, fall back to localhost dev origins.
+  const rawCorsOrigin = config.get<string>('CORS_ORIGIN', '');
+  if (nodeEnv === 'production' && !rawCorsOrigin) {
+    throw new Error(
+      'CORS_ORIGIN must be set in production (comma-separated allowlist).',
+    );
+  }
+  const corsOrigins = (rawCorsOrigin || (nodeEnv !== 'production' ? 'http://localhost:3000' : ''))
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  // Hard-fail if any configured origin is a wildcard or an invalid URL
+  for (const origin of corsOrigins) {
+    if (origin === '*') {
+      throw new Error(
+        'CORS_ORIGIN cannot be "*". Provide an explicit comma-separated allowlist.',
+      );
+    }
+    try {
+      new URL(origin);
+    } catch {
+      throw new Error(`CORS_ORIGIN contains an invalid URL: ${origin}`);
+    }
+  }
+
   app.enableCors({
-    origin: corsOrigin.split(','),
+    origin: corsOrigins,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-CSRF-Token', 'X-Request-ID'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-API-Key',
+      'X-CSRF-Token',
+      'X-Request-ID',
+      'X-Partner-Key',
+    ],
+    exposedHeaders: ['X-CSRF-Token', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
+    maxAge: 600,
     credentials: true,
   });
 

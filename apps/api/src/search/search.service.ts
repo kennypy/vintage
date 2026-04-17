@@ -19,8 +19,15 @@ export class SearchService implements OnModuleInit {
   private readonly indexName = 'listings';
 
   constructor(private configService: ConfigService) {
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+    const configuredHost = this.configService.get<string>('MEILISEARCH_HOST', '');
+    // Only fall back to localhost in non-production. Production must set this.
+    const host = configuredHost || (nodeEnv !== 'production' ? 'http://localhost:7700' : '');
+    if (!host) {
+      this.logger.warn('MEILISEARCH_HOST is not configured — search is disabled');
+    }
     this.client = new MeiliSearch({
-      host: this.configService.get<string>('MEILISEARCH_HOST', 'http://localhost:7700'),
+      host: host || 'http://127.0.0.1:7700', // placeholder; calls will fail fast
       apiKey: this.configService.get<string>('MEILISEARCH_API_KEY', ''),
     });
   }
@@ -77,6 +84,8 @@ export class SearchService implements OnModuleInit {
     page: number,
     pageSize: number,
   ) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const index = this.client.index(this.indexName);
 
     const filterParts: string[] = [];

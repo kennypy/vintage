@@ -101,8 +101,8 @@ describe('ListingsPage', () => {
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(4);
     expect(options[0]).toHaveTextContent('Mais relevantes');
-    expect(options[1]).toHaveTextContent('Menor preco');
-    expect(options[2]).toHaveTextContent('Maior preco');
+    expect(options[1]).toHaveTextContent('Menor preço');
+    expect(options[2]).toHaveTextContent('Maior preço');
     expect(options[3]).toHaveTextContent('Mais recentes');
   });
 
@@ -147,7 +147,7 @@ describe('ListingsPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Anterior')).toBeInTheDocument();
-      expect(screen.getByText('Proxima')).toBeInTheDocument();
+      expect(screen.getByText('Próxima')).toBeInTheDocument();
     });
   });
 
@@ -159,7 +159,7 @@ describe('ListingsPage', () => {
       expect(screen.getByText('Vestido Farm')).toBeInTheDocument();
     });
     expect(screen.queryByText('Anterior')).not.toBeInTheDocument();
-    expect(screen.queryByText('Proxima')).not.toBeInTheDocument();
+    expect(screen.queryByText('Próxima')).not.toBeInTheDocument();
   });
 
   it('handles API error gracefully', async () => {

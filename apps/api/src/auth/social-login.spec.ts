@@ -6,6 +6,7 @@ import { AuthService, SocialProfile } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RedisService } from '../common/services/redis.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -36,7 +37,11 @@ const mockJwtService = {
 };
 
 const mockConfigService = {
-  get: jest.fn().mockReturnValue('7d'),
+  get: jest.fn((key: string, defaultValue?: string) => {
+    if (key === 'TOS_VERSION') return '1.0.0';
+    if (key === 'JWT_REFRESH_EXPIRY') return '7d';
+    return defaultValue;
+  }),
 };
 
 const mockEmailService = {
@@ -45,6 +50,14 @@ const mockEmailService = {
 
 const mockNotificationsService = {
   createNotification: jest.fn(),
+};
+
+const mockRedisService = {
+  get: jest.fn(),
+  set: jest.fn(),
+  incr: jest.fn(),
+  expire: jest.fn(),
+  del: jest.fn(),
 };
 
 describe('AuthService - Social Login', () => {
@@ -61,6 +74,7 @@ describe('AuthService - Social Login', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
         { provide: NotificationsService, useValue: mockNotificationsService },
+        { provide: RedisService, useValue: mockRedisService },
       ],
     }).compile();
 
@@ -83,6 +97,10 @@ describe('AuthService - Social Login', () => {
         socialProviderId: 'google-123',
         cpfVerified: true,
         avatarUrl: null,
+        isBanned: false,
+        deletedAt: null,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
       };
       mockPrisma.user.findUnique
         .mockResolvedValueOnce(existingUser) // check if user exists by email
@@ -178,6 +196,10 @@ describe('AuthService - Social Login', () => {
         socialProviderId: null,
         cpfVerified: true,
         avatarUrl: null,
+        isBanned: false,
+        deletedAt: null,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
       };
       mockPrisma.user.findUnique.mockResolvedValue(existingUser);
       mockJwtService.sign

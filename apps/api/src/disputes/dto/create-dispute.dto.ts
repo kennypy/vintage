@@ -1,4 +1,4 @@
-import { IsString, IsEnum, MaxLength } from 'class-validator';
+import { IsString, IsEnum, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export enum DisputeReason {
@@ -12,21 +12,24 @@ export enum DisputeReason {
 export class CreateDisputeDto {
   @ApiProperty({ example: 'clxyz789', description: 'ID do pedido' })
   @IsString()
+  @MinLength(1)
+  @MaxLength(64)
   orderId!: string;
 
   @ApiProperty({
     enum: DisputeReason,
     example: DisputeReason.NOT_AS_DESCRIBED,
-    description: 'Motivo da disputa',
+    description: 'Motivo da disputa (máx. 5000 caracteres)',
   })
   @IsEnum(DisputeReason)
   reason!: DisputeReason;
 
   @ApiProperty({
     example: 'O produto veio com defeito visível na costura',
-    description: 'Descrição detalhada do problema (máx. 1000 caracteres)',
+    description: 'Descrição detalhada do problema (máx. 5000 caracteres)',
   })
   @IsString()
-  @MaxLength(1000)
+  @MinLength(1)
+  @MaxLength(5000)
   description!: string;
 }

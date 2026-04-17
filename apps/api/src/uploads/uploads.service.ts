@@ -15,6 +15,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as sharp from 'sharp';
 import { ImageAnalysisService } from './image-analysis.service';
 import { UploadImageResponse } from './dto/upload-response.dto';
+import { assertSafeS3Endpoint } from '../common/services/url-validator';
 
 /** Maximum file size in bytes (10 MB per image). */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -70,6 +71,9 @@ export class UploadsService {
   ) {
     const region = this.configService.get<string>('S3_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('S3_ENDPOINT', '');
+    // SSRF defense: reject endpoints pointing at loopback, metadata services,
+    // or private IPs. Fails fast at startup.
+    assertSafeS3Endpoint(endpoint);
     const accessKeyId = this.configService.get<string>('S3_ACCESS_KEY', '');
     const secretAccessKey = this.configService.get<string>(
       'S3_SECRET_KEY',

@@ -192,7 +192,7 @@ export default function UsersPage() {
               onClick={() => setPage((p) => p + 1)}
               className="px-3 py-1 border rounded disabled:opacity-40"
             >
-              Proxima
+              Próxima
             </button>
           </div>
         </div>

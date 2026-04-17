@@ -113,7 +113,7 @@ export default function RegisterPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Minimo 8 caracteres"
+              placeholder="Mínimo 8 caracteres"
               required
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
@@ -133,7 +133,7 @@ export default function RegisterPage() {
               </Link>{' '}
               e a{' '}
               <Link href="/privacy" className="text-brand-600 hover:text-brand-700 underline">
-                Politica de Privacidade
+                Política de Privacidade
               </Link>
             </span>
           </label>
@@ -147,8 +147,10 @@ export default function RegisterPage() {
           </button>
         </form>
 
+        {/* TODO(Phase 9): Wire Google / Apple OAuth after Google Cloud Console and Apple Developer setup. */}
+
         <p className="text-sm text-gray-500 text-center mt-6">
-          Ja tem conta?{' '}
+          Já tem conta?{' '}
           <Link href="/auth/login" className="text-brand-600 hover:text-brand-700 font-medium">
             Entrar
           </Link>

@@ -1,7 +1,17 @@
 import * as SecureStore from 'expo-secure-store';
 import { isDemoModeSync } from './demoStore';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
+const IS_DEV = process.env.EXPO_PUBLIC_ENV !== 'production';
+
+if (!ENV_API_URL && !IS_DEV) {
+  // Fail loudly in production builds — a localhost fallback would ship a broken app.
+  throw new Error(
+    'EXPO_PUBLIC_API_URL must be set in production builds. Check your EAS build profile env.',
+  );
+}
+
+const API_BASE_URL = ENV_API_URL ?? 'http://localhost:3001/api/v1';
 
 const TOKEN_KEY = 'vintage_access_token';
 const REFRESH_KEY = 'vintage_refresh_token';
@@ -24,7 +34,7 @@ interface RequestOptions extends RequestInit {
   authenticated?: boolean;
 }
 
-const FETCH_TIMEOUT_MS = 5000;
+const FETCH_TIMEOUT_MS = 20000;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 

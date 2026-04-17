@@ -1,6 +1,7 @@
 import {
   Injectable, NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateListingDto } from './dto/create-listing.dto';
@@ -8,9 +9,67 @@ import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
 import { MAX_LISTING_IMAGES, containsProhibitedContent } from '@vintage/shared';
 
+/** Default allowlist when ALLOWED_IMAGE_HOSTS env is not configured. */
+const DEFAULT_ALLOWED_IMAGE_HOSTS = [
+  'picsum.photos',        // dev placeholder
+  's3.amazonaws.com',     // generic AWS S3
+];
+
 @Injectable()
 export class ListingsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly allowedImageHosts: string[];
+
+  constructor(
+    private prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {
+    const raw = this.config.get<string>('ALLOWED_IMAGE_HOSTS', '');
+    const bucket = this.config.get<string>('S3_BUCKET', '');
+    const region = this.config.get<string>('S3_REGION', '');
+    const hosts = raw
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+
+    // Auto-include virtual-hosted-style and path-style S3 URLs for the
+    // configured bucket + region so the default config just works.
+    if (bucket && region) {
+      hosts.push(`${bucket}.s3.${region}.amazonaws.com`);
+      hosts.push(`${bucket}.s3.amazonaws.com`);
+      hosts.push(`s3.${region}.amazonaws.com`);
+    }
+    if (hosts.length === 0) {
+      hosts.push(...DEFAULT_ALLOWED_IMAGE_HOSTS);
+    }
+    this.allowedImageHosts = Array.from(new Set(hosts));
+  }
+
+  /** Validate a listing image URL is on the configured allowlist (SSRF + data-exfil defense). */
+  private validateImageUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new BadRequestException('URL de imagem inválida.');
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new BadRequestException('Protocolo de URL de imagem não permitido.');
+    }
+    const host = parsed.hostname.toLowerCase();
+    const ok = this.allowedImageHosts.some((allowed) => {
+      // Exact match or subdomain match
+      return host === allowed || host.endsWith(`.${allowed}`);
+    });
+    if (!ok) {
+      throw new BadRequestException(
+        `Domínio de imagem não permitido: ${host}`,
+      );
+    }
+  }
+
+  private validateImageUrls(urls: string[]): void {
+    for (const u of urls) this.validateImageUrl(u);
+  }
 
   async create(sellerId: string, dto: CreateListingDto) {
     const seller = await this.prisma.user.findUnique({
@@ -41,6 +100,9 @@ export class ListingsService {
     if (dto.imageUrls.length > MAX_LISTING_IMAGES) {
       throw new BadRequestException(`Máximo de ${MAX_LISTING_IMAGES} fotos por anúncio`);
     }
+
+    // SSRF / data-exfil defense: only allow images from known-good hosts.
+    this.validateImageUrls(dto.imageUrls);
 
     const category = await this.prisma.category.findUnique({
       where: { id: dto.categoryId },
@@ -117,8 +179,8 @@ export class ListingsService {
   }
 
   async search(dto: SearchListingsDto) {
-    const page = dto.page ?? 1;
-    const pageSize = dto.pageSize ?? 20;
+    const page = Math.max(1, dto.page ?? 1);
+    const pageSize = Math.min(Math.max(1, dto.pageSize ?? 20), 100);
     const skip = (page - 1) * pageSize;
 
     const where: Prisma.ListingWhereInput = { status: 'ACTIVE' };
@@ -231,6 +293,7 @@ export class ListingsService {
     }
 
     if (dto.imageUrls !== undefined) {
+      this.validateImageUrls(dto.imageUrls);
       await this.prisma.listingImage.deleteMany({ where: { listingId: id } });
       data.images = {
         create: dto.imageUrls.map((url, index) => ({
@@ -280,7 +343,7 @@ export class ListingsService {
 
   async getUserFavorites(userId: string, page: number = 1, pageSize: number = 20) {
     const p = Math.max(1, Number(page) || 1);
-    const ps = Math.max(1, Number(pageSize) || 20);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (p - 1) * ps;
     const [items, total] = await Promise.all([
       this.prisma.favorite.findMany({
@@ -317,7 +380,7 @@ export class ListingsService {
 
   async getFollowingFeed(userId: string, page: number = 1, pageSize: number = 20) {
     const p = Math.max(1, Number(page) || 1);
-    const ps = Math.max(1, Number(pageSize) || 20);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (p - 1) * ps;
 
     // Get all users that the current user follows
@@ -359,8 +422,15 @@ export class ListingsService {
   }
 
   async searchBrands(query: string) {
+    const q = typeof query === 'string' ? query.trim() : '';
+    if (q.length === 0) {
+      throw new BadRequestException('Informe um termo de busca (mínimo 1 caractere).');
+    }
+    if (q.length > 100) {
+      throw new BadRequestException('Termo de busca muito longo (máximo 100 caracteres).');
+    }
     return this.prisma.brand.findMany({
-      where: { name: { contains: query, mode: 'insensitive' } },
+      where: { name: { contains: q, mode: 'insensitive' } },
       take: 20,
       orderBy: { name: 'asc' },
     });

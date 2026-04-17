@@ -72,6 +72,8 @@ export class AuthenticityService {
 
   /** Admin: list all pending authenticity requests */
   async listPending(page: number = 1, pageSize: number = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (page - 1) * pageSize;
     const [items, total] = await Promise.all([
       this.prisma.authenticityRequest.findMany({

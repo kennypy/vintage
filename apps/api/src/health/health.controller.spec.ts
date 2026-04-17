@@ -1,9 +1,24 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { HealthController } from './health.controller';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../common/services/redis.service';
 
 const mockPrisma = {
   $queryRaw: jest.fn(),
+};
+
+const mockRedisService = {
+  get: jest.fn(),
+  set: jest.fn(),
+  incr: jest.fn(),
+  expire: jest.fn(),
+  del: jest.fn(),
+  ping: jest.fn(),
+};
+
+const mockConfigService = {
+  get: jest.fn(),
 };
 
 describe('HealthController', () => {
@@ -14,7 +29,11 @@ describe('HealthController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
-      providers: [{ provide: PrismaService, useValue: mockPrisma }],
+      providers: [
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: RedisService, useValue: mockRedisService },
+        { provide: ConfigService, useValue: mockConfigService },
+      ],
     }).compile();
 
     controller = module.get<HealthController>(HealthController);
@@ -39,6 +58,10 @@ describe('HealthController', () => {
   describe('ready', () => {
     it('should return ok when database is healthy', async () => {
       mockPrisma.$queryRaw.mockResolvedValue([{ result: 1 }]);
+      mockRedisService.ping.mockResolvedValue(true);
+      mockConfigService.get.mockImplementation(
+        (k: string, def?: string) => (k === 'MEILISEARCH_HOST' ? '' : def ?? ''),
+      );
 
       const res = {
         status: jest.fn().mockReturnThis(),
@@ -51,13 +74,21 @@ describe('HealthController', () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'ok',
-          checks: { database: 'ok' },
+          checks: expect.objectContaining({
+            database: 'ok',
+            redis: 'ok',
+            meilisearch: 'skipped',
+          }),
         }),
       );
     });
 
     it('should return 503 degraded when database is down', async () => {
       mockPrisma.$queryRaw.mockRejectedValue(new Error('connection refused'));
+      mockRedisService.ping.mockResolvedValue(true);
+      mockConfigService.get.mockImplementation(
+        (k: string, def?: string) => (k === 'MEILISEARCH_HOST' ? '' : def ?? ''),
+      );
 
       const res = {
         status: jest.fn().mockReturnThis(),
@@ -70,7 +101,9 @@ describe('HealthController', () => {
       expect(res.json).toHaveBeenCalledWith(
         expect.objectContaining({
           status: 'degraded',
-          checks: { database: 'error' },
+          checks: expect.objectContaining({
+            database: 'error',
+          }),
         }),
       );
     });

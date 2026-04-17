@@ -8,7 +8,9 @@ import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import * as crypto from 'crypto';
 
-const CSRF_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// 7 days — aligned with JWT refresh token expiry so mobile apps kept in
+// the background over a weekend don't fail CSRF on their first resumed POST.
+const CSRF_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
@@ -67,7 +69,7 @@ export class CsrfMiddleware implements NestMiddleware {
   }
 
   /**
-   * Generate a new HMAC-signed CSRF token valid for 24 hours.
+   * Generate a new HMAC-signed CSRF token valid for 7 days.
    */
   generateToken(): string {
     const timestamp = Date.now();

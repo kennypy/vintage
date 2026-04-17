@@ -1,39 +1,57 @@
 {
   "cli": {
-    "version": ">= 10.0.0"
+    "version": ">= 10.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      },
+      "ios": {
+        "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.182:3001/api/v1"
+        "EXPO_PUBLIC_API_URL": "http://localhost:3001/api/v1",
+        "EXPO_PUBLIC_ENV": "development"
       }
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api-staging.vintage.br/api/v1",
+        "EXPO_PUBLIC_ENV": "preview"
       }
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
       "android": {
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.vintage.br/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://api.vintage.br/api/v1",
+        "EXPO_PUBLIC_ENV": "production"
       }
     }
   },
   "submit": {
     "production": {
       "android": {
-        "serviceAccountKeyPath": "./google-services.json",
-        "track": "production"
+        "serviceAccountKeyPath": "./play-store-service-account.json",
+        "track": "internal",
+        "releaseStatus": "draft"
       },
       "ios": {
         "appleId": "",

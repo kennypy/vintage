@@ -13,12 +13,15 @@ export interface GoogleProfile {
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(config: ConfigService) {
+    const nodeEnv = config.get<string>('NODE_ENV', 'development');
+    // Dev-only fallback for API URL — production MUST set GOOGLE_CALLBACK_URL or API_URL.
+    const apiUrlFallback = nodeEnv !== 'production' ? 'http://localhost:3001' : '';
     super({
       clientID: config.get<string>('GOOGLE_CLIENT_ID', ''),
       clientSecret: config.get<string>('GOOGLE_CLIENT_SECRET', ''),
       callbackURL: config.get<string>(
         'GOOGLE_CALLBACK_URL',
-        `${config.get<string>('API_URL', 'http://localhost:3001')}/api/v1/auth/google/callback`,
+        `${config.get<string>('API_URL', apiUrlFallback)}/api/v1/auth/google/callback`,
       ),
       scope: ['email', 'profile'],
     });

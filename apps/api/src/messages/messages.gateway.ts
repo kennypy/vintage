@@ -31,6 +31,10 @@ function parseCorsOrigins(): string[] {
   if (process.env.WEB_URL) {
     return [process.env.WEB_URL];
   }
+  // Localhost fallback is dev-only — production requires CORS_ORIGINS/WEB_URL.
+  if (process.env.NODE_ENV === 'production') {
+    return [];
+  }
   return ['http://localhost:3000', 'http://localhost:8081'];
 }
 

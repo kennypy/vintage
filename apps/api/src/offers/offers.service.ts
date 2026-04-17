@@ -22,6 +22,8 @@ export class OffersService {
     page: number,
     pageSize: number,
   ) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const where =
       type === 'received'
         ? { listing: { sellerId: userId } }
@@ -76,6 +78,25 @@ export class OffersService {
 
     if (listing.sellerId === buyerId) {
       throw new BadRequestException('Você não pode fazer uma oferta no seu próprio anúncio');
+    }
+
+    // Reject if buyer is blocked by (or has blocked) the seller, or either side is banned/deleted
+    const [participants, block] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: [buyerId, listing.sellerId] } },
+        select: { id: true, isBanned: true, deletedAt: true },
+      }),
+      this.prisma.userBlock.findFirst({
+        where: {
+          OR: [
+            { blockerId: buyerId, blockedId: listing.sellerId },
+            { blockerId: listing.sellerId, blockedId: buyerId },
+          ],
+        },
+      }),
+    ]);
+    if (participants.some((u) => u.isBanned || u.deletedAt) || block) {
+      throw new ForbiddenException('Não é possível fazer oferta neste anúncio.');
     }
 
     const minAmount = Number(listing.priceBrl) * MIN_OFFER_PERCENTAGE;

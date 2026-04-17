@@ -4,6 +4,7 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -50,6 +51,13 @@ describe('PaymentsService', () => {
         { provide: MercadoPagoClient, useValue: mockMercadoPago },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: NotificationsService,
+          useValue: {
+            createNotification: jest.fn(),
+            notifyAdmins: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

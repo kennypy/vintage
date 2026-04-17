@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 
 const mockPrisma = {
   user: {
@@ -43,6 +44,14 @@ describe('UsersService', () => {
       providers: [
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: EmailService,
+          useValue: {
+            sendEmail: jest.fn(),
+            sendWelcomeEmail: jest.fn(),
+            sendDeletionConfirmation: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -16,6 +16,8 @@ export class ModerationService {
   ) {}
 
   async listPendingReports(page = 1, pageSize = 20, targetType?: string) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (page - 1) * pageSize;
     const where = {
       status: 'PENDING' as const,

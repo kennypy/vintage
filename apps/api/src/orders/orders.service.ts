@@ -3,8 +3,10 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -25,6 +27,27 @@ export class OrdersService {
   ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
+    // Idempotency check: if the buyer already submitted an order with the
+    // same key, return the existing order instead of creating a duplicate.
+    // The partial unique index on (buyerId, idempotencyKey) provides the
+    // database-level guarantee; this check avoids an exception on the
+    // happy retry path.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findFirst({
+        where: { buyerId, idempotencyKey: dto.idempotencyKey },
+        include: {
+          listing: {
+            include: {
+              images: { orderBy: { position: 'asc' }, take: 1 },
+            },
+          },
+          buyer: { select: { id: true, name: true } },
+          seller: { select: { id: true, name: true } },
+        },
+      });
+      if (existing) return existing;
+    }
+
     const listing = await this.prisma.listing.findUnique({
       where: { id: dto.listingId },
       include: { seller: { select: { id: true } } },
@@ -78,84 +101,129 @@ export class OrdersService {
 
     const total = Math.max(0, subtotal - discountBrl);
 
-    // Create order and mark listing as SOLD in a transaction
-    const order = await this.prisma.$transaction(async (tx) => {
-      // Double-check listing is still active inside transaction
-      const freshListing = await tx.listing.findUnique({
-        where: { id: dto.listingId },
-      });
+    // Create order + mark listing SOLD + (re-)validate coupon usage under
+    // Serializable isolation to prevent TOCTOU races on usedCount/maxUses.
+    let order;
+    try {
+      order = await this.prisma.$transaction(
+        async (tx) => {
+          // Double-check listing is still active inside transaction
+          const freshListing = await tx.listing.findUnique({
+            where: { id: dto.listingId },
+          });
 
-      if (!freshListing || freshListing.status !== 'ACTIVE') {
-        throw new BadRequestException('Este anúncio já foi vendido');
-      }
+          if (!freshListing || freshListing.status !== 'ACTIVE') {
+            throw new BadRequestException('Este anúncio já foi vendido');
+          }
 
-      const createdOrder = await tx.order.create({
-        data: {
-          buyerId,
-          sellerId: listing.sellerId,
-          listingId: dto.listingId,
-          // Free orders skip payment entirely — mark as PAID immediately
-          status: isFreeOrder ? 'PAID' : 'PENDING',
-          totalBrl: new Decimal(total.toFixed(2)),
-          itemPriceBrl: listing.priceBrl,
-          shippingCostBrl: new Decimal(shippingCost.toFixed(2)),
-          buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
-          discountBrl: discountBrl > 0 ? new Decimal(discountBrl.toFixed(2)) : undefined,
-          couponId: couponId ?? undefined,
-          shippingAddressId: dto.addressId,
-          paymentMethod: isFreeOrder ? 'FREE' : dto.paymentMethod,
-          installments: isFreeOrder ? 1 : installments,
-        },
-        include: {
-          listing: {
-            include: {
-              images: { orderBy: { position: 'asc' }, take: 1 },
+          // Re-validate coupon and increment usage atomically under Serializable
+          if (couponId) {
+            const coupon = await tx.coupon.findUnique({ where: { id: couponId } });
+            if (!coupon || !coupon.isActive) {
+              throw new BadRequestException('Cupom não está mais ativo');
+            }
+            if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+              throw new BadRequestException('Cupom expirado');
+            }
+            if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+              throw new ConflictException('Cupom atingiu o limite de usos');
+            }
+          }
+
+          const createdOrder = await tx.order.create({
+            data: {
+              buyerId,
+              sellerId: listing.sellerId,
+              listingId: dto.listingId,
+              // Free orders skip payment entirely — mark as PAID immediately
+              status: isFreeOrder ? 'PAID' : 'PENDING',
+              totalBrl: new Decimal(total.toFixed(2)),
+              itemPriceBrl: listing.priceBrl,
+              shippingCostBrl: new Decimal(shippingCost.toFixed(2)),
+              buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
+              discountBrl: discountBrl > 0 ? new Decimal(discountBrl.toFixed(2)) : undefined,
+              couponId: couponId ?? undefined,
+              shippingAddressId: dto.addressId,
+              paymentMethod: isFreeOrder ? 'FREE' : dto.paymentMethod,
+              installments: isFreeOrder ? 1 : installments,
+              idempotencyKey: dto.idempotencyKey ?? undefined,
             },
-          },
-          buyer: { select: { id: true, name: true } },
-          seller: { select: { id: true, name: true } },
+            include: {
+              listing: {
+                include: {
+                  images: { orderBy: { position: 'asc' }, take: 1 },
+                },
+              },
+              buyer: { select: { id: true, name: true } },
+              seller: { select: { id: true, name: true } },
+            },
+          });
+
+          await tx.listing.update({
+            where: { id: dto.listingId },
+            data: { status: 'SOLD' },
+          });
+
+          // Increment coupon usage counter (inside tx, Serializable ensures
+          // that any concurrent creator sees the new count on retry).
+          if (couponId) {
+            await tx.coupon.update({
+              where: { id: couponId },
+              data: { usedCount: { increment: 1 } },
+            });
+          }
+
+          // Free orders are already PAID — hold funds in escrow immediately
+          if (isFreeOrder) {
+            const wallet = await tx.wallet.upsert({
+              where: { userId: listing.sellerId },
+              create: { userId: listing.sellerId, balanceBrl: 0, pendingBrl: 0 },
+              update: {},
+            });
+
+            await tx.wallet.update({
+              where: { id: wallet.id },
+              data: { pendingBrl: { increment: itemPrice } },
+            });
+
+            await tx.walletTransaction.create({
+              data: {
+                walletId: wallet.id,
+                type: 'ESCROW_HOLD',
+                amountBrl: new Decimal(itemPrice.toFixed(2)),
+                referenceId: createdOrder.id,
+                description: `Venda em custódia: ${listing.title}`,
+              },
+            });
+          }
+
+          return createdOrder;
         },
-      });
-
-      await tx.listing.update({
-        where: { id: dto.listingId },
-        data: { status: 'SOLD' },
-      });
-
-      // Increment coupon usage counter
-      if (couponId) {
-        await tx.coupon.update({
-          where: { id: couponId },
-          data: { usedCount: { increment: 1 } },
-        });
-      }
-
-      // Free orders are already PAID — hold funds in escrow immediately
-      if (isFreeOrder) {
-        const wallet = await tx.wallet.upsert({
-          where: { userId: listing.sellerId },
-          create: { userId: listing.sellerId, balanceBrl: 0, pendingBrl: 0 },
-          update: {},
-        });
-
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { pendingBrl: { increment: itemPrice } },
-        });
-
-        await tx.walletTransaction.create({
-          data: {
-            walletId: wallet.id,
-            type: 'ESCROW_HOLD',
-            amountBrl: new Decimal(itemPrice.toFixed(2)),
-            referenceId: createdOrder.id,
-            description: `Venda em custódia: ${listing.title}`,
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (err) {
+      // Unique-constraint on idempotencyKey → fetch the existing order and return it
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        dto.idempotencyKey
+      ) {
+        const existing = await this.prisma.order.findFirst({
+          where: { buyerId, idempotencyKey: dto.idempotencyKey },
+          include: {
+            listing: {
+              include: {
+                images: { orderBy: { position: 'asc' }, take: 1 },
+              },
+            },
+            buyer: { select: { id: true, name: true } },
+            seller: { select: { id: true, name: true } },
           },
         });
+        if (existing) return existing;
       }
-
-      return createdOrder;
-    });
+      throw err;
+    }
 
     // Notify seller about new order (fire-and-forget)
     this.notifications
@@ -177,6 +245,8 @@ export class OrdersService {
     page: number = 1,
     pageSize: number = 20,
   ) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const skip = (page - 1) * pageSize;
     const where = role === 'buyer' ? { buyerId: userId } : { sellerId: userId };
 

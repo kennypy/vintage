@@ -3,13 +3,16 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum ReportTargetType {
   LISTING = 'listing',
+  MESSAGE = 'message',
   USER = 'user',
+  REVIEW = 'review',
 }
 
 export enum ReportReason {
+  SPAM = 'spam',
   COUNTERFEIT = 'counterfeit',
   INAPPROPRIATE = 'inappropriate',
-  SPAM = 'spam',
+  FRAUD = 'fraud',
   HARASSMENT = 'harassment',
   OTHER = 'other',
 }
@@ -19,7 +22,7 @@ export class CreateReportDto {
   @IsEnum(ReportTargetType)
   targetType!: ReportTargetType;
 
-  @ApiProperty({ description: 'ID do alvo (anúncio ou usuário)' })
+  @ApiProperty({ description: 'ID do alvo (anúncio, mensagem, usuário ou avaliação)' })
   @IsString()
   targetId!: string;
 

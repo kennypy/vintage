@@ -9,6 +9,7 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 
 @ApiTags('users')
 @Controller()
@@ -39,12 +40,53 @@ export class UsersController {
 
   // --- Account Deletion ---
 
+  @Post('users/me/delete-confirmation')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Solicitar código de confirmação para excluir conta OAuth',
+  })
+  requestDeletionConfirmation(@CurrentUser() user: AuthUser) {
+    return this.usersService.requestDeletionConfirmation(user.id);
+  }
+
   @Delete('users/me')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Excluir conta do usuário autenticado' })
-  deleteAccount(@CurrentUser() user: AuthUser) {
-    return this.usersService.deleteAccount(user.id);
+  @ApiOperation({
+    summary: 'Excluir conta — requer senha ou código de confirmação',
+  })
+  deleteAccount(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: DeleteAccountDto,
+  ) {
+    return this.usersService.deleteAccount(user.id, dto);
+  }
+
+  // --- User Blocks ---
+
+  @Post('users/:id/block')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Bloquear outro usuário' })
+  blockUser(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.usersService.blockUser(user.id, id);
+  }
+
+  @Delete('users/:id/block')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Desbloquear usuário' })
+  unblockUser(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.usersService.unblockUser(user.id, id);
+  }
+
+  @Get('users/me/blocks')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Listar usuários bloqueados pelo usuário atual' })
+  listBlocks(@CurrentUser() user: AuthUser) {
+    return this.usersService.listBlocks(user.id);
   }
 
   // --- Public & Authenticated Endpoints ---
