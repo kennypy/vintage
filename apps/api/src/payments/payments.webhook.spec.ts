@@ -4,6 +4,7 @@ import { UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -46,6 +47,13 @@ function createService(nodeEnv: string): Promise<PaymentsService> {
         },
       },
       { provide: PrismaService, useValue: mockPrisma },
+      {
+        provide: NotificationsService,
+        useValue: {
+          createNotification: jest.fn(),
+          notifyAdmins: jest.fn(),
+        },
+      },
     ],
   })
     .compile()

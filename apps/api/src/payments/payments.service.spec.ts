@@ -51,6 +51,13 @@ describe('PaymentsService', () => {
         { provide: MercadoPagoClient, useValue: mockMercadoPago },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: NotificationsService,
+          useValue: {
+            createNotification: jest.fn(),
+            notifyAdmins: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
