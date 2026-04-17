@@ -16,6 +16,7 @@ import { TOTP, generateSecret as totpGenerateSecret, generateURI, NobleCryptoPlu
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
 import { isValidCPF } from '@vintage/shared';
@@ -27,6 +28,11 @@ const TWOFA_MAX_ATTEMPTS = 10;
 const TWOFA_LOCK_TTL_SECONDS = 30 * 60; // 30 min
 const TWOFA_ATTEMPTS_TTL_SECONDS = 60 * 60; // attempt counter expires in 1h
 const NEW_DEVICE_DEBOUNCE_TTL_SECONDS = 60 * 60; // 1h debounce per device
+
+/** SMS 2FA: OTP lifetime and resend throttle. */
+const SMS_CODE_TTL_SECONDS = 5 * 60; // 5 min
+const SMS_RESEND_COOLDOWN_SECONDS = 30; // 30 s between sends to same user
+const SMS_MAX_SENDS_PER_HOUR = 5; // hard ceiling to control cost + abuse
 
 export interface SocialProfile {
   email: string;
@@ -44,6 +50,7 @@ export class AuthService {
     private jwtService: JwtService,
     private config: ConfigService,
     private emailService: EmailService,
+    private smsService: SmsService,
     private notificationsService: NotificationsService,
     private redis: RedisService,
   ) {}
@@ -222,10 +229,36 @@ export class AuthService {
         { sub: user.id, type: 'twofa_pending' },
         { expiresIn: '5m' },
       );
-      return { requiresTwoFa: true, tempToken };
+      const method = user.twoFaMethod === 'SMS' ? 'SMS' : 'TOTP';
+
+      // SMS method: send the OTP synchronously so the user gets it in the
+      // same request. If Twilio fails, bubble the error up — we've not yet
+      // issued full tokens so the user can retry cleanly.
+      if (method === 'SMS' && user.twoFaPhone) {
+        await this.sendSmsOtp(user.id, user.twoFaPhone);
+      }
+
+      return {
+        requiresTwoFa: true,
+        tempToken,
+        method,
+        // For SMS, expose the masked target number so the UI can tell the
+        // user which phone received the code. Mask all but last 4 digits.
+        phoneHint:
+          method === 'SMS' && user.twoFaPhone
+            ? this.maskPhone(user.twoFaPhone)
+            : undefined,
+      };
     }
 
     return this.generateTokensWithUser(user.id);
+  }
+
+  /** Obfuscate a phone number for display: +55 (11) •••• 1234 */
+  private maskPhone(e164: string): string {
+    if (e164.length <= 4) return e164;
+    const last4 = e164.slice(-4);
+    return `••••${last4}`;
   }
 
   /** Called after login to log the event and alert on new device (fire-and-forget) */
@@ -282,34 +315,81 @@ export class AuthService {
     });
   }
 
-  /** Verify TOTP code after login when 2FA is required */
-  async confirmLoginWithTwoFa(tempToken: string, totpCode: string) {
+  /**
+   * Verify 2FA code after login — branches on method (TOTP authenticator or SMS OTP).
+   *
+   * Error messaging is deliberately uniform ("Código ou token inválido.") across
+   * every failure path (bad tempToken, wrong tempToken type, user not found,
+   * 2FA not configured, wrong code, expired code) so an attacker cannot use
+   * response text to enumerate user IDs or account states.
+   */
+  async confirmLoginWithTwoFa(tempToken: string, code: string) {
+    const UNIFORM_ERROR = 'Código ou token inválido.';
+
+    let payload: { sub: string; type: string };
+    try {
+      payload = this.jwtService.verify(tempToken) as { sub: string; type: string };
+    } catch {
+      throw new UnauthorizedException(UNIFORM_ERROR);
+    }
+
+    if (payload.type !== 'twofa_pending') {
+      throw new UnauthorizedException(UNIFORM_ERROR);
+    }
+
+    await this.assertNotLocked(payload.sub);
+
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!user || !user.twoFaEnabled) {
+      throw new UnauthorizedException(UNIFORM_ERROR);
+    }
+
+    const method = user.twoFaMethod;
+
+    if (method === 'SMS') {
+      const ok = await this.consumeSmsCode(user.id, code);
+      if (!ok) {
+        await this.recordTwoFaFailure(user.id);
+        throw new UnauthorizedException(UNIFORM_ERROR);
+      }
+    } else {
+      if (!user.twoFaSecret) {
+        throw new UnauthorizedException(UNIFORM_ERROR);
+      }
+      const result = await this.makeTOTP(user.twoFaSecret).verify(code);
+      if (!result.valid) {
+        await this.recordTwoFaFailure(user.id);
+        throw new UnauthorizedException(UNIFORM_ERROR);
+      }
+    }
+
+    await this.resetTwoFaAttempts(user.id);
+    return this.generateTokens(user.id);
+  }
+
+  /**
+   * Resend the SMS OTP during login. Requires the tempToken (from the initial
+   * login response) so arbitrary callers can't trigger SMS to arbitrary users.
+   * Subject to SMS_RESEND_COOLDOWN_SECONDS between sends.
+   */
+  async resendLoginSmsCode(tempToken: string) {
     let payload: { sub: string; type: string };
     try {
       payload = this.jwtService.verify(tempToken) as { sub: string; type: string };
     } catch {
       throw new UnauthorizedException('Token temporário inválido ou expirado');
     }
-
     if (payload.type !== 'twofa_pending') {
       throw new UnauthorizedException('Token inválido');
     }
 
-    await this.assertNotLocked(payload.sub);
-
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user || !user.twoFaEnabled || !user.twoFaSecret) {
-      throw new UnauthorizedException('2FA não configurado');
+    if (!user || !user.twoFaEnabled || user.twoFaMethod !== 'SMS' || !user.twoFaPhone) {
+      throw new BadRequestException('SMS 2FA não está ativo para esta conta.');
     }
 
-    const result = await this.makeTOTP(user.twoFaSecret).verify(totpCode);
-    if (!result.valid) {
-      await this.recordTwoFaFailure(user.id);
-      throw new UnauthorizedException('Código 2FA inválido');
-    }
-
-    await this.resetTwoFaAttempts(user.id);
-    return this.generateTokens(user.id);
+    await this.sendSmsOtp(user.id, user.twoFaPhone);
+    return { success: true, phoneHint: this.maskPhone(user.twoFaPhone) };
   }
 
   /** Generate TOTP secret and return QR code data URL for the authenticator app */
@@ -352,41 +432,281 @@ export class AuthService {
     await this.resetTwoFaAttempts(userId);
     await this.prisma.user.update({
       where: { id: userId },
-      data: { twoFaEnabled: true },
+      data: {
+        twoFaEnabled: true,
+        twoFaMethod: 'TOTP',
+        // Clear any stale SMS-method fields left over from a previous enrollment.
+        twoFaPhone: null,
+        twoFaPhoneVerifiedAt: null,
+      },
     });
 
     return { success: true, message: '2FA ativado com sucesso. Guarde bem seu app autenticador.' };
   }
 
-  /** Disable 2FA — requires current TOTP code for confirmation */
-  async disableTwoFa(userId: string, totpCode: string) {
+  /**
+   * Disable 2FA. Requires a current code — TOTP for method=TOTP, or the most
+   * recent SMS OTP for method=SMS (triggered via /auth/2fa/sms/send). This
+   * ensures the same factor that would gate login is required to turn it off.
+   */
+  async disableTwoFa(userId: string, code: string) {
     await this.assertNotLocked(userId);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.twoFaEnabled || !user.twoFaSecret) {
+    if (!user || !user.twoFaEnabled) {
       throw new BadRequestException('2FA não está ativado nesta conta');
     }
 
-    const result = await this.makeTOTP(user.twoFaSecret).verify(totpCode);
-    if (!result.valid) {
-      await this.recordTwoFaFailure(userId);
-      throw new BadRequestException('Código 2FA inválido');
+    if (user.twoFaMethod === 'SMS') {
+      const ok = await this.consumeSmsCode(userId, code);
+      if (!ok) {
+        await this.recordTwoFaFailure(userId);
+        throw new BadRequestException('Código SMS inválido ou expirado.');
+      }
+    } else {
+      if (!user.twoFaSecret) {
+        throw new BadRequestException('2FA não está ativado nesta conta');
+      }
+      const result = await this.makeTOTP(user.twoFaSecret).verify(code);
+      if (!result.valid) {
+        await this.recordTwoFaFailure(userId);
+        throw new BadRequestException('Código 2FA inválido');
+      }
     }
 
     await this.resetTwoFaAttempts(userId);
     await this.prisma.user.update({
       where: { id: userId },
-      data: { twoFaEnabled: false, twoFaSecret: null },
+      data: {
+        twoFaEnabled: false,
+        twoFaMethod: 'TOTP',
+        twoFaSecret: null,
+        twoFaPhone: null,
+        twoFaPhoneVerifiedAt: null,
+      },
     });
 
     return { success: true, message: '2FA desativado.' };
+  }
+
+  // ── SMS 2FA helpers ──────────────────────────────────────────────────
+
+  private smsCodeKey(userId: string): string {
+    return `auth:2fa:sms:code:${userId}`;
+  }
+
+  private smsSendCountKey(userId: string): string {
+    return `auth:2fa:sms:sends:${userId}`;
+  }
+
+  private smsCooldownKey(userId: string): string {
+    return `auth:2fa:sms:cooldown:${userId}`;
+  }
+
+  private hashCode(code: string): string {
+    return crypto.createHash('sha256').update(code).digest('hex');
+  }
+
+  /**
+   * Generate a cryptographically-random 6-digit numeric code, store its
+   * hash (not the plaintext) in Redis, enforce rate limits, and send the
+   * SMS via Twilio. Throws on Twilio transport failures so the caller
+   * surfaces a clear error to the user.
+   *
+   * Fail-closed on Redis outages in production: rate limiting IS the
+   * Twilio cost-control, so if we can't count we refuse to send rather
+   * than allow an attacker to drain our SMS quota.
+   */
+  private async sendSmsOtp(userId: string, phoneE164: string): Promise<void> {
+    if (!SmsService.isValidE164(phoneE164)) {
+      throw new BadRequestException('Número de telefone em formato inválido.');
+    }
+
+    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
+    if (nodeEnv === 'production' && !this.redis.isAvailable()) {
+      this.logger.error(
+        'SMS 2FA send refused: Redis unavailable — rate limiting cannot be enforced.',
+      );
+      throw new HttpException(
+        'Serviço temporariamente indisponível. Tente novamente em instantes.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+
+    // Per-user cooldown between sends (30 s).
+    const cooling = await this.redis.get(this.smsCooldownKey(userId));
+    if (cooling) {
+      throw new HttpException(
+        'Aguarde alguns segundos antes de solicitar um novo código.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Hard ceiling on sends per hour (cost + abuse control).
+    const sends = await this.redis.incrWithTtl(
+      this.smsSendCountKey(userId),
+      60 * 60,
+    );
+    if (sends > SMS_MAX_SENDS_PER_HOUR) {
+      throw new HttpException(
+        'Limite de envios de SMS atingido. Tente novamente mais tarde.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // 6-digit numeric, zero-padded. randomInt has enough entropy for OTP.
+    const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+    // Delete-then-set so a new code always replaces any stale one (setNx
+    // would leave the previous code in place).
+    await this.redis.del(this.smsCodeKey(userId));
+    await this.redis.setNx(
+      this.smsCodeKey(userId),
+      this.hashCode(code),
+      SMS_CODE_TTL_SECONDS,
+    );
+
+    await this.redis.setNx(this.smsCooldownKey(userId), '1', SMS_RESEND_COOLDOWN_SECONDS);
+
+    const body = `Vintage.br: seu código de verificação é ${code}. Expira em 5 minutos. Nunca compartilhe este código.`;
+    try {
+      await this.smsService.sendSms(phoneE164, body);
+    } catch (err) {
+      // Transport failed — clear the stored code (user can't receive it) AND
+      // refund the rate-limit credit so a flaky Twilio doesn't lock out a
+      // legitimate user. The cooldown key still prevents rapid retry spam.
+      await this.redis.del(this.smsCodeKey(userId));
+      await this.redis.decr(this.smsSendCountKey(userId));
+      this.logger.error(
+        `Falha ao enviar código SMS 2FA para usuário ${userId}: ${String(err).slice(0, 200)}`,
+      );
+      throw new HttpException(
+        'Não foi possível enviar o SMS no momento. Tente novamente.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+  }
+
+  /**
+   * Validate a user-supplied SMS code against the stored hash. Returns true
+   * if the code matches and is not expired; atomically removes the code on
+   * read so two concurrent requests can't both succeed on the same OTP.
+   * Does NOT touch the brute-force counter — callers are responsible for
+   * invoking recordTwoFaFailure on miss.
+   */
+  private async consumeSmsCode(userId: string, code: string): Promise<boolean> {
+    if (!/^\d{6}$/.test(code)) return false;
+    // GETDEL is atomic: the losing side of a concurrent consume sees null.
+    const stored = await this.redis.getDel(this.smsCodeKey(userId));
+    if (!stored) return false;
+    const provided = this.hashCode(code);
+    const a = Buffer.from(stored, 'hex');
+    const b = Buffer.from(provided, 'hex');
+    if (a.length !== b.length) return false;
+    // timing-safe so response time doesn't leak guess progress.
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  // ── SMS 2FA enrollment (authenticated user) ──────────────────────────
+
+  /**
+   * Start SMS 2FA enrollment: stores the requested phone (not yet verified),
+   * sends a one-time code. Requires the account to not already have 2FA active;
+   * switching from TOTP to SMS requires disabling TOTP first.
+   */
+  async setupSms2Fa(userId: string, phoneE164Raw: string) {
+    const phone = phoneE164Raw.trim();
+    if (!SmsService.isValidE164(phone)) {
+      throw new BadRequestException(
+        'Informe o telefone em formato E.164 (ex: +5511999998888).',
+      );
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Usuário não encontrado');
+    if (user.twoFaEnabled) {
+      throw new BadRequestException(
+        'Desative o 2FA atual antes de configurar SMS.',
+      );
+    }
+
+    // Persist the phone as "pending verification" — we don't flip the
+    // method/enabled flags until the user confirms the code in /enable-sms.
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        twoFaPhone: phone,
+        twoFaPhoneVerifiedAt: null,
+      },
+    });
+
+    await this.sendSmsOtp(userId, phone);
+    return { success: true, phoneHint: this.maskPhone(phone) };
+  }
+
+  /** Confirm the enrollment code and flip SMS 2FA on. */
+  async enableSms2Fa(userId: string, code: string) {
+    await this.assertNotLocked(userId);
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Usuário não encontrado');
+    if (user.twoFaEnabled) {
+      throw new BadRequestException('2FA já está ativado.');
+    }
+    if (!user.twoFaPhone) {
+      throw new BadRequestException('Execute /auth/2fa/sms/setup primeiro.');
+    }
+
+    const ok = await this.consumeSmsCode(userId, code);
+    if (!ok) {
+      await this.recordTwoFaFailure(userId);
+      throw new BadRequestException('Código SMS inválido ou expirado.');
+    }
+
+    await this.resetTwoFaAttempts(userId);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        twoFaEnabled: true,
+        twoFaMethod: 'SMS',
+        twoFaSecret: null, // make sure no stale TOTP secret remains
+        twoFaPhoneVerifiedAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      message: '2FA por SMS ativado. A cada login você receberá um código.',
+    };
+  }
+
+  /**
+   * Resend the enrollment SMS (authenticated user, after /setup).
+   * Distinct from resendLoginSmsCode which uses a tempToken.
+   */
+  async resendEnrollmentSmsCode(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.twoFaPhone) {
+      throw new BadRequestException('Execute /auth/2fa/sms/setup primeiro.');
+    }
+    if (user.twoFaEnabled && user.twoFaMethod === 'SMS') {
+      // Already enrolled — no need to resend.
+      return { success: true, alreadyEnabled: true };
+    }
+    await this.sendSmsOtp(userId, user.twoFaPhone);
+    return { success: true, phoneHint: this.maskPhone(user.twoFaPhone) };
   }
 
   /** Return the user's Conta Protegida status */
   async getSecurityStatus(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { cpfVerified: true, twoFaEnabled: true, verified: true },
+      select: {
+        cpfVerified: true,
+        twoFaEnabled: true,
+        twoFaMethod: true,
+        twoFaPhone: true,
+        verified: true,
+      },
     });
     if (!user) throw new UnauthorizedException('Usuário não encontrado');
 
@@ -400,6 +720,11 @@ export class AuthService {
     return {
       cpfVerified: user.cpfVerified,
       twoFaEnabled: user.twoFaEnabled,
+      twoFaMethod: user.twoFaMethod,
+      twoFaPhoneHint:
+        user.twoFaEnabled && user.twoFaMethod === 'SMS' && user.twoFaPhone
+          ? this.maskPhone(user.twoFaPhone)
+          : null,
       isContaProtegida: user.cpfVerified && user.twoFaEnabled,
       recentLogins,
     };

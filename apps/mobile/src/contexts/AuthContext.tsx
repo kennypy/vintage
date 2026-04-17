@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { getToken, clearTokens } from '../services/api';
-import { login as loginService, register as registerService, signInWithGoogle as signInWithGoogleService, signInWithApple as signInWithAppleService, AuthUser } from '../services/auth';
+import { apiFetch, getToken, clearTokens } from '../services/api';
+import {
+  login as loginService,
+  confirmLoginTwoFa as confirmLoginTwoFaService,
+  register as registerService,
+  signInWithGoogle as signInWithGoogleService,
+  signInWithApple as signInWithAppleService,
+  AuthUser,
+  TwoFaChallenge,
+} from '../services/auth';
 import { getProfile, UserProfile } from '../services/users';
 import {
   getDemoUser,
@@ -19,7 +27,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   isDemoMode: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<TwoFaChallenge | null>;
+  completeTwoFaChallenge: (tempToken: string, code: string) => Promise<void>;
   signUp: (name: string, email: string, cpf: string, password: string) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
   signInWithApple: (identityToken: string, name?: string) => Promise<void>;
@@ -101,40 +110,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootstrap();
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    // Always clear any stale demo session before attempting a real login.
-    // This resets _demoModeCache to false so apiFetch doesn't bail out early.
-    await disableDemoMode();
-    await clearTokens();
-    setDemoActive(false);
-    try {
-      const response = await loginService(email, password);
-      setUser(response.user);
-      registerForPushNotifications().catch(() => {});
-    } catch (error) {
-      if (isNetworkError(error)) {
-        if (__DEV__) console.warn('[signIn] network error, falling back to demo:', String(error));
-        // API unreachable (no internet, timeout, server down) — fall back to demo mode
-        const existing = await getDemoUser();
-        if (existing && existing.email === email) {
-          setUser(demoUserToAuthUser(existing));
-          setDemoActive(true);
-        } else {
-          const demoUser = await createDemoUser(
-            email.split('@')[0] ?? 'Usuário',
-            email,
-            '00000000000',
-          );
-          setUser(demoUserToAuthUser(demoUser));
-          setDemoActive(true);
+  const signIn = useCallback(
+    async (email: string, password: string): Promise<TwoFaChallenge | null> => {
+      // Always clear any stale demo session before attempting a real login.
+      // This resets _demoModeCache to false so apiFetch doesn't bail out early.
+      await disableDemoMode();
+      await clearTokens();
+      setDemoActive(false);
+      try {
+        const response = await loginService(email, password);
+        // 2FA-required responses don't have a user; return the challenge so
+        // the login screen can route to the /2fa-challenge prompt.
+        if ('requiresTwoFa' in response && response.requiresTwoFa) {
+          return response;
         }
-      } else {
-        // API returned a real error (wrong password, invalid email, etc.) — propagate it
-        // so the login screen can display the error message to the user
+        setUser(response.user);
+        registerForPushNotifications().catch(() => {});
+        return null;
+      } catch (error) {
+        if (isNetworkError(error)) {
+          if (__DEV__) console.warn('[signIn] network error, falling back to demo:', String(error));
+          // API unreachable (no internet, timeout, server down) — fall back to demo mode
+          const existing = await getDemoUser();
+          if (existing && existing.email === email) {
+            setUser(demoUserToAuthUser(existing));
+            setDemoActive(true);
+          } else {
+            const demoUser = await createDemoUser(
+              email.split('@')[0] ?? 'Usuário',
+              email,
+              '00000000000',
+            );
+            setUser(demoUserToAuthUser(demoUser));
+            setDemoActive(true);
+          }
+          return null;
+        }
+        // API returned a real error (wrong password, invalid email, etc.) —
+        // propagate it so the login screen can display the error.
         throw error;
       }
-    }
-  }, []);
+    },
+    [],
+  );
+
+  /**
+   * Complete a pending 2FA challenge. Persists real tokens via the service,
+   * then loads /users/me to populate the user state (the challenge-confirm
+   * endpoint returns only tokens, not the profile).
+   */
+  const completeTwoFaChallenge = useCallback(
+    async (tempToken: string, code: string): Promise<void> => {
+      await confirmLoginTwoFaService(tempToken, code);
+      const profile = await apiFetch<AuthUser & Partial<UserProfile>>('/users/me');
+      setUser(profile);
+      registerForPushNotifications().catch(() => {});
+    },
+    [],
+  );
 
   const signUp = useCallback(async (name: string, email: string, cpf: string, password: string) => {
     try {
@@ -202,6 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isDemoMode: demoActive,
         signIn,
+        completeTwoFaChallenge,
         signUp,
         signInWithGoogle,
         signInWithApple,

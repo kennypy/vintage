@@ -18,7 +18,22 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await apiPost<{ accessToken: string }>('/auth/login', { email, password });
+      const response = await apiPost<
+        | { accessToken: string; refreshToken: string }
+        | { requiresTwoFa: true; tempToken: string; method: 'TOTP' | 'SMS'; phoneHint?: string }
+      >('/auth/login', { email, password });
+
+      if ('requiresTwoFa' in response && response.requiresTwoFa) {
+        // 2FA challenge: route to the verification page with the tempToken.
+        const qs = new URLSearchParams({
+          tempToken: response.tempToken,
+          method: response.method,
+        });
+        if (response.phoneHint) qs.set('phoneHint', response.phoneHint);
+        router.push(`/auth/2fa?${qs.toString()}`);
+        return;
+      }
+
       setAuthToken(response.accessToken);
       router.push('/');
     } catch (err) {

@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService, SocialProfile } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
 
@@ -55,9 +56,19 @@ const mockNotificationsService = {
 const mockRedisService = {
   get: jest.fn(),
   set: jest.fn(),
+  setNx: jest.fn(),
   incr: jest.fn(),
+  incrWithTtl: jest.fn(),
   expire: jest.fn(),
   del: jest.fn(),
+  getDel: jest.fn(),
+  decr: jest.fn(),
+  isAvailable: jest.fn().mockReturnValue(true),
+};
+
+const mockSmsService = {
+  sendSms: jest.fn(),
+  isConfigured: jest.fn().mockReturnValue(true),
 };
 
 describe('AuthService - Social Login', () => {
@@ -73,6 +84,7 @@ describe('AuthService - Social Login', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
+        { provide: SmsService, useValue: mockSmsService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: RedisService, useValue: mockRedisService },
       ],

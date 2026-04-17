@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
 
@@ -34,6 +35,10 @@ const mockPrisma = {
     findFirst: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
+  },
+  loginEvent: {
+    create: jest.fn(),
   },
 };
 
@@ -52,6 +57,13 @@ const mockConfigService = {
 
 const mockEmailService = {
   sendWelcomeEmail: jest.fn(),
+  sendEmailChangeConfirmation: jest.fn(),
+  sendEmailChangeNoticeToOld: jest.fn(),
+};
+
+const mockSmsService = {
+  sendSms: jest.fn(),
+  isConfigured: jest.fn().mockReturnValue(true),
 };
 
 const mockNotificationsService = {
@@ -61,9 +73,14 @@ const mockNotificationsService = {
 const mockRedisService = {
   get: jest.fn(),
   set: jest.fn(),
+  setNx: jest.fn().mockResolvedValue(true),
   incr: jest.fn(),
+  incrWithTtl: jest.fn().mockResolvedValue(1),
   expire: jest.fn(),
   del: jest.fn(),
+  getDel: jest.fn(),
+  decr: jest.fn(),
+  isAvailable: jest.fn().mockReturnValue(true),
 };
 
 describe('AuthService', () => {
@@ -79,6 +96,7 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: EmailService, useValue: mockEmailService },
+        { provide: SmsService, useValue: mockSmsService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: RedisService, useValue: mockRedisService },
       ],
@@ -245,6 +263,206 @@ describe('AuthService', () => {
 
       await expect(service.refreshToken('valid-refresh-token')).rejects.toThrow(
         UnauthorizedException,
+      );
+    });
+  });
+
+  // ── SMS 2FA ──────────────────────────────────────────────────────────
+  // Tests focus on the branches that were most at risk in review:
+  // atomic consume, uniform error messages, rate limiting, and counter refund.
+
+  describe('confirmLoginWithTwoFa — SMS path', () => {
+    beforeEach(() => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'twofa_pending' });
+      mockRedisService.get.mockResolvedValue(null); // no 2FA lock
+    });
+
+    it('uses GETDEL (single-use) when verifying an SMS code', async () => {
+      const crypto = jest.requireActual<typeof import('crypto')>('crypto');
+      const plaintext = '123456';
+      const hash = crypto.createHash('sha256').update(plaintext).digest('hex');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: true,
+        twoFaMethod: 'SMS',
+        twoFaSecret: null,
+      });
+      mockRedisService.getDel.mockResolvedValueOnce(hash);
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
+      const result = await service.confirmLoginWithTwoFa('tmp', plaintext);
+
+      expect(mockRedisService.getDel).toHaveBeenCalledWith('auth:2fa:sms:code:user-1');
+      // Second concurrent call should fail (getDel returns null after the first).
+      mockRedisService.getDel.mockResolvedValueOnce(null);
+      await expect(service.confirmLoginWithTwoFa('tmp', plaintext)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(result).toMatchObject({ accessToken: 'access-token' });
+    });
+
+    it('returns the UNIFORM error for invalid SMS code (no user-state leak)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: true,
+        twoFaMethod: 'SMS',
+      });
+      mockRedisService.getDel.mockResolvedValueOnce(null); // expired/missing
+
+      await expect(service.confirmLoginWithTwoFa('tmp', '000000')).rejects.toThrow(
+        'Código ou token inválido.',
+      );
+    });
+
+    it('returns the UNIFORM error when the user has no 2FA configured', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+        twoFaMethod: 'TOTP',
+      });
+
+      await expect(service.confirmLoginWithTwoFa('tmp', '123456')).rejects.toThrow(
+        'Código ou token inválido.',
+      );
+    });
+
+    it('returns the UNIFORM error when tempToken is of the wrong type', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh' });
+
+      await expect(service.confirmLoginWithTwoFa('tmp', '123456')).rejects.toThrow(
+        'Código ou token inválido.',
+      );
+    });
+  });
+
+  describe('setupSms2Fa', () => {
+    it('rejects invalid E.164 phone numbers', async () => {
+      await expect(service.setupSms2Fa('user-1', '11999998888')).rejects.toThrow(
+        'E.164',
+      );
+    });
+
+    it('rejects when 2FA is already enabled', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: true,
+      });
+
+      await expect(
+        service.setupSms2Fa('user-1', '+5511999998888'),
+      ).rejects.toThrow('Desative o 2FA atual');
+    });
+
+    it('sends OTP and returns a masked phone hint on success', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockRedisService.get.mockResolvedValue(null);
+      mockRedisService.incrWithTtl.mockResolvedValue(1);
+      mockSmsService.sendSms.mockResolvedValue(undefined);
+
+      const result = await service.setupSms2Fa('user-1', '+5511999998888');
+
+      expect(mockSmsService.sendSms).toHaveBeenCalledTimes(1);
+      expect(result.phoneHint).toMatch(/•{4}8888$/);
+    });
+
+    it('refunds the send counter when Twilio fails (failed send does not count)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockRedisService.get.mockResolvedValue(null);
+      mockRedisService.incrWithTtl.mockResolvedValue(1);
+      mockSmsService.sendSms.mockRejectedValue(new Error('twilio down'));
+
+      await expect(
+        service.setupSms2Fa('user-1', '+5511999998888'),
+      ).rejects.toThrow('Não foi possível enviar');
+
+      expect(mockRedisService.del).toHaveBeenCalledWith('auth:2fa:sms:code:user-1');
+      expect(mockRedisService.decr).toHaveBeenCalledWith('auth:2fa:sms:sends:user-1');
+    });
+
+    it('blocks sending when the per-user hourly ceiling is reached', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockRedisService.get.mockResolvedValue(null);
+      mockRedisService.incrWithTtl.mockResolvedValue(6); // > SMS_MAX_SENDS_PER_HOUR (5)
+
+      await expect(
+        service.setupSms2Fa('user-1', '+5511999998888'),
+      ).rejects.toThrow('Limite de envios');
+
+      expect(mockSmsService.sendSms).not.toHaveBeenCalled();
+    });
+
+    it('fails closed in production when Redis is unavailable', async () => {
+      mockConfigService.get.mockImplementationOnce((key: string) =>
+        key === 'NODE_ENV' ? 'production' : undefined,
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockRedisService.isAvailable.mockReturnValueOnce(false);
+
+      await expect(
+        service.setupSms2Fa('user-1', '+5511999998888'),
+      ).rejects.toThrow('indisponível');
+
+      expect(mockSmsService.sendSms).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('enableSms2Fa', () => {
+    beforeEach(() => {
+      mockRedisService.get.mockResolvedValue(null);
+    });
+
+    it('flips twoFaEnabled/Method only when the SMS code verifies', async () => {
+      const crypto = jest.requireActual<typeof import('crypto')>('crypto');
+      const code = '654321';
+      const hash = crypto.createHash('sha256').update(code).digest('hex');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+        twoFaPhone: '+5511999998888',
+      });
+      mockRedisService.getDel.mockResolvedValueOnce(hash);
+
+      await service.enableSms2Fa('user-1', code);
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({
+            twoFaEnabled: true,
+            twoFaMethod: 'SMS',
+            twoFaSecret: null,
+          }),
+        }),
+      );
+    });
+
+    it('rejects when the enrollment phone was never set', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: false,
+        twoFaPhone: null,
+      });
+
+      await expect(service.enableSms2Fa('user-1', '123456')).rejects.toThrow(
+        'setup',
       );
     });
   });

@@ -83,7 +83,19 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      await signIn(email, password);
+      const challenge = await signIn(email, password);
+      if (challenge) {
+        // 2FA required — route to the challenge screen with the tempToken.
+        router.replace({
+          pathname: '/(auth)/2fa-challenge',
+          params: {
+            tempToken: challenge.tempToken,
+            method: challenge.method,
+            phoneHint: challenge.phoneHint ?? '',
+          },
+        });
+        return;
+      }
       router.replace('/(tabs)');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Email ou senha incorretos. Tente novamente.';

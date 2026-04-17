@@ -44,6 +44,12 @@ async function bootstrap() {
       { key: 'NFE_API_KEY', label: 'NF-e API key' },
       { key: 'CORREIOS_TOKEN', label: 'Correios API token' },
       { key: 'DATABASE_URL', label: 'Database connection string' },
+      // Twilio is required because SMS 2FA is a first-class login factor —
+      // silent fallback to dev-mode "log code to console" in production would
+      // expose OTPs via stdout logs and lock SMS-2FA users out of the app.
+      { key: 'TWILIO_ACCOUNT_SID', label: 'Twilio Account SID (SMS 2FA)' },
+      { key: 'TWILIO_AUTH_TOKEN', label: 'Twilio Auth Token (SMS 2FA)' },
+      { key: 'TWILIO_FROM_NUMBER', label: 'Twilio sender number (E.164, SMS 2FA)' },
     ];
 
     const missing: string[] = [];
