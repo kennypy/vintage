@@ -37,16 +37,28 @@ export async function login(email: string, password: string): Promise<LoginRespo
   return data;
 }
 
+/** Current ToS version the app presents on the signup screen — must match
+ *  the server's TOS_VERSION or login will immediately force re-acceptance. */
+export const CURRENT_TOS_VERSION = '1.0.0';
+
 export async function register(
   name: string,
   email: string,
   cpf: string,
   password: string,
+  opts: { acceptedTos: boolean; tosVersion?: string } = { acceptedTos: true },
 ): Promise<RegisterResponse> {
   const data = await apiFetch<RegisterResponse>('/auth/register', {
     method: 'POST',
     authenticated: false,
-    body: JSON.stringify({ name, email, cpf, password }),
+    body: JSON.stringify({
+      name,
+      email,
+      cpf,
+      password,
+      acceptedTos: opts.acceptedTos,
+      tosVersion: opts.tosVersion ?? CURRENT_TOS_VERSION,
+    }),
   });
 
   await setTokens(data.accessToken, data.refreshToken);

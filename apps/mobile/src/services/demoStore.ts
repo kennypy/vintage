@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet, secureDelete } from './secureStorage';
 import type { Listing } from './listings';
 import type { Conversation, Message } from './messages';
 
@@ -172,26 +172,26 @@ SEEDED_LISTINGS.forEach((l) => demoListingsMap.set(l.id, l));
 // ─── Demo Mode Flags ─────────────────────────────────────────────────────────
 
 export async function isDemoMode(): Promise<boolean> {
-  const flag = await SecureStore.getItemAsync(DEMO_MODE_KEY);
+  const flag = await secureGet(DEMO_MODE_KEY);
   _demoModeCache = flag === 'true';
   return _demoModeCache;
 }
 
 export async function enableDemoMode(): Promise<void> {
-  await SecureStore.setItemAsync(DEMO_MODE_KEY, 'true');
+  await secureSet(DEMO_MODE_KEY, 'true');
   _demoModeCache = true;
 }
 
 export async function disableDemoMode(): Promise<void> {
-  await SecureStore.deleteItemAsync(DEMO_MODE_KEY);
-  await SecureStore.deleteItemAsync(DEMO_USER_KEY);
+  await secureDelete(DEMO_MODE_KEY);
+  await secureDelete(DEMO_USER_KEY);
   _demoModeCache = false;
 }
 
 // ─── Demo User ────────────────────────────────────────────────────────────────
 
 export async function getDemoUser(): Promise<DemoUser | null> {
-  const raw = await SecureStore.getItemAsync(DEMO_USER_KEY);
+  const raw = await secureGet(DEMO_USER_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as DemoUser;
@@ -212,7 +212,7 @@ export async function createDemoUser(
     cpf,
     createdAt: new Date().toISOString(),
   };
-  await SecureStore.setItemAsync(DEMO_USER_KEY, JSON.stringify(user));
+  await secureSet(DEMO_USER_KEY, JSON.stringify(user));
   await enableDemoMode();
   return user;
 }
@@ -221,7 +221,7 @@ export async function updateDemoUser(data: Partial<DemoUser>): Promise<DemoUser 
   const current = await getDemoUser();
   if (!current) return null;
   const updated = { ...current, ...data };
-  await SecureStore.setItemAsync(DEMO_USER_KEY, JSON.stringify(updated));
+  await secureSet(DEMO_USER_KEY, JSON.stringify(updated));
   return updated;
 }
 

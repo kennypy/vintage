@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Li
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet } from '../../src/services/secureStorage';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
@@ -18,7 +18,7 @@ interface NotifPrefs {
 
 async function loadNotifPrefs(): Promise<NotifPrefs> {
   try {
-    const raw = await SecureStore.getItemAsync(NOTIF_PREFS_KEY);
+    const raw = await secureGet(NOTIF_PREFS_KEY);
     if (raw) return JSON.parse(raw) as NotifPrefs;
   } catch (_e) {
     // Return defaults if SecureStore unavailable
@@ -28,7 +28,7 @@ async function loadNotifPrefs(): Promise<NotifPrefs> {
 
 async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
   try {
-    await SecureStore.setItemAsync(NOTIF_PREFS_KEY, JSON.stringify(prefs));
+    await secureSet(NOTIF_PREFS_KEY, JSON.stringify(prefs));
   } catch (_e) {
     // Silently fail if SecureStore unavailable
   }

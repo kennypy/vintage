@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet } from './secureStorage';
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
@@ -40,7 +40,7 @@ export async function fetchFeatureFlags(): Promise<Record<string, boolean>> {
     }
 
     const cached: CachedFlags = { flags, fetchedAt: Date.now() };
-    await SecureStore.setItemAsync(CACHE_KEY, JSON.stringify(cached));
+    await secureSet(CACHE_KEY, JSON.stringify(cached));
 
     return flags;
   } catch {
@@ -51,7 +51,7 @@ export async function fetchFeatureFlags(): Promise<Record<string, boolean>> {
 
 export async function getCachedFlags(): Promise<Record<string, boolean>> {
   try {
-    const raw = await SecureStore.getItemAsync(CACHE_KEY);
+    const raw = await secureGet(CACHE_KEY);
     if (raw) {
       const cached = JSON.parse(raw) as CachedFlags;
       return cached.flags;
