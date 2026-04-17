@@ -304,6 +304,54 @@ export class OrdersService {
     return order;
   }
 
+  /**
+   * Buyer-initiated cancellation of an unpaid order. Only allowed while the
+   * order is still PENDING (not paid). Returns the listing to ACTIVE so the
+   * seller can continue selling it. No refund logic is needed because no money
+   * has moved; for PAID orders the dispute / cron flow handles refunds.
+   */
+  async cancelByBuyer(orderId: string, buyerId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) {
+      throw new NotFoundException('Pedido não encontrado');
+    }
+    if (order.buyerId !== buyerId) {
+      throw new ForbiddenException('Apenas o comprador pode cancelar este pedido.');
+    }
+    if (order.status !== 'PENDING') {
+      throw new BadRequestException(
+        'Apenas pedidos aguardando pagamento podem ser cancelados. Abra uma disputa se já pagou.',
+      );
+    }
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'CANCELLED' },
+      }),
+      // Return the listing to the marketplace so another buyer can purchase.
+      this.prisma.listing.update({
+        where: { id: order.listingId },
+        data: { status: 'ACTIVE' },
+      }),
+    ]);
+
+    // Notify seller (fire-and-forget)
+    this.notifications
+      .createNotification(
+        order.sellerId,
+        'order',
+        'Pedido cancelado',
+        'O comprador cancelou o pedido antes do pagamento. O anúncio voltou a ficar ativo.',
+        { orderId: order.id },
+      )
+      .catch(() => {});
+
+    return updated;
+  }
+
   async markShipped(orderId: string, sellerId: string, dto: ShipOrderDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },

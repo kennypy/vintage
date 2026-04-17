@@ -1043,3 +1043,21 @@ model PasswordResetToken {
   @@index([expiresAt])
   @@map("password_reset_tokens")
 }
+
+// Email-change confirmation token. Sent to the NEW email address; redeeming
+// it atomically swaps the user's email. Old tokens are invalidated when a
+// new one is issued so a stolen link becomes useless as soon as the user
+// restarts the flow.
+model EmailChangeToken {
+  id         String    @id @default(cuid())
+  userId     String
+  newEmail   String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("email_change_tokens")
+}

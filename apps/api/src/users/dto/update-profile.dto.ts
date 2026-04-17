@@ -1,4 +1,4 @@
-import { IsString, IsOptional, MaxLength, IsUrl } from 'class-validator';
+import { IsString, IsOptional, MaxLength, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProfileDto {
@@ -19,8 +19,15 @@ export class UpdateProfileDto {
   @IsString()
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg' })
+  // Accepts either a preset identifier (preset:femaleXX) or an https URL
+  // returned by POST /uploads/avatar. Reject anything else at the DTO
+  // boundary so file:// URIs from unuploaded client images never reach the DB.
+  @ApiPropertyOptional({ example: 'https://cdn.vintage.br/avatars/foo.jpg' })
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @MaxLength(2048)
+  @Matches(/^(preset:[a-zA-Z0-9_-]{1,32}|https:\/\/\S+)$/, {
+    message: 'avatarUrl deve ser um preset (preset:xxx) ou URL https.',
+  })
   avatarUrl?: string;
 }

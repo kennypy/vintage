@@ -55,6 +55,23 @@ export class UploadsController {
     );
   }
 
+  @Post('avatar')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload de avatar de perfil (JPEG/PNG, máx 10MB, 512x512)' })
+  @ApiResponse({ status: 201, description: 'Avatar enviado', schema: { properties: { url: { type: 'string' }, key: { type: 'string' } } } })
+  @ApiResponse({ status: 400, description: 'Arquivo inválido' })
+  async uploadAvatar(
+    @UploadedFile() file: UploadedFileInfo,
+  ): Promise<{ url: string; key: string }> {
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Nenhum arquivo enviado.');
+    }
+    return this.uploadsService.uploadAvatar(file.buffer, file.originalname, file.mimetype);
+  }
+
   @Post('listing-video')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

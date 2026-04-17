@@ -20,6 +20,7 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { updateProfile } from '../../src/services/users';
+import { uploadAvatar } from '../../src/services/listings';
 import { Avatar, PRESET_AVATARS } from '../../src/components/Avatar';
 
 export default function EditProfileScreen() {
@@ -90,23 +91,42 @@ export default function EditProfileScreen() {
 
     setSaving(true);
     try {
+      // If the avatar is a local device URI (camera/gallery), upload it to R2/S3
+      // first so the server gets a durable URL and other users can see it.
+      let finalAvatarUrl: string | undefined = avatarUri ?? undefined;
+      const isLocalUri =
+        !!avatarUri &&
+        (avatarUri.startsWith('file:') ||
+          avatarUri.startsWith('content:') ||
+          avatarUri.startsWith('ph://') ||
+          avatarUri.startsWith('assets-library:'));
+
+      if (isLocalUri && avatarUri) {
+        try {
+          const uploaded = await uploadAvatar(avatarUri);
+          finalAvatarUrl = uploaded.url;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Falha ao enviar foto.';
+          Alert.alert('Erro', msg);
+          setSaving(false);
+          return;
+        }
+      }
+
       await updateProfile(user.id, {
         name: name.trim(),
         bio: bio.trim() || undefined,
         phone: phone.trim() || undefined,
-        avatarUrl: avatarUri ?? undefined,
+        avatarUrl: finalAvatarUrl,
       });
-      if (avatarUri) await updateUserAvatar(avatarUri);
+      if (finalAvatarUrl) await updateUserAvatar(finalAvatarUrl);
       await refreshUser();
       Alert.alert('Sucesso', 'Perfil atualizado com sucesso!', [
         { text: 'OK', onPress: () => router.back() },
       ]);
-    } catch {
-      // API may reject file:// URIs — still persist avatar locally
-      if (avatarUri) await updateUserAvatar(avatarUri);
-      Alert.alert('Sucesso', 'Perfil atualizado!', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : 'Não foi possível salvar o perfil.';
+      Alert.alert('Erro', msg);
     } finally {
       setSaving(false);
     }

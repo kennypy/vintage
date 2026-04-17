@@ -272,6 +272,36 @@ export async function uploadListingImage(uri: string): Promise<UploadImageRespon
   return JSON.parse(result.body) as UploadImageResponse;
 }
 
+/**
+ * Upload a profile avatar. Same transport as listing images, different endpoint.
+ */
+export async function uploadAvatar(uri: string): Promise<{ url: string; key: string }> {
+  const csrfToken = await getCsrfToken();
+  const token = await getToken();
+
+  const result = await FileSystem.uploadAsync(
+    `${API_BASE_URL}/uploads/avatar`,
+    uri,
+    {
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      httpMethod: 'POST',
+      headers: {
+        Authorization: token ? `Bearer ${token}` : '',
+        'X-CSRF-Token': csrfToken,
+      },
+    },
+  );
+
+  if (result.status < 200 || result.status >= 300) {
+    let message = 'Falha no upload do avatar';
+    try { message = (JSON.parse(result.body) as { message?: string }).message ?? message; } catch { /* ignore */ }
+    throw new Error(message);
+  }
+
+  return JSON.parse(result.body) as { url: string; key: string };
+}
+
 /** Response from POST /uploads/listing-video */
 export interface UploadVideoResponse {
   url: string;

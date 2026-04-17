@@ -100,6 +100,23 @@ export default function OrderDetailPage() {
       .finally(() => setLoading(false));
   }, [router, params.id]);
 
+  const handleCancel = async () => {
+    if (!order) return;
+    if (!window.confirm('Tem certeza que deseja cancelar este pedido? Esta ação não pode ser desfeita.')) {
+      return;
+    }
+    setConfirming(true);
+    try {
+      await apiPatch(`/orders/${order.id}/cancel`);
+      setOrder((prev) => prev ? { ...prev, status: 'CANCELLED' } : prev);
+    } catch (err: unknown) {
+      const msg = err instanceof Error && err.message ? err.message : 'Não foi possível cancelar o pedido.';
+      alert(msg);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   const handleConfirmDelivery = async () => {
     if (!order) return;
     setConfirming(true);
@@ -313,6 +330,17 @@ export default function OrderDetailPage() {
       </div>
 
       {/* Actions */}
+      {order.status === 'PENDING' && isBuyer && (
+        <button
+          type="button"
+          onClick={handleCancel}
+          disabled={confirming}
+          className="w-full py-3 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition disabled:opacity-50 mb-3"
+        >
+          {confirming ? 'Cancelando...' : 'Cancelar pedido'}
+        </button>
+      )}
+
       {order.status === 'PAID' && isSeller && (
         <button
           type="button"

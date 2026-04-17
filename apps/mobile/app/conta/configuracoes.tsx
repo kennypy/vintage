@@ -160,6 +160,14 @@ export default function ConfiguracoesScreen() {
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Privacidade</Text>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/conta/alterar-email')}
+        >
+          <Ionicons name="mail-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Alterar email</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
           onPress={() => router.push('/conta/alterar-senha')}
         >
           <Ionicons name="lock-closed-outline" size={22} color={theme.textSecondary} />

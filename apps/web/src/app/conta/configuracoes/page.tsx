@@ -1,35 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 
 interface UserProfile {
   id: string;
   name: string;
   email: string;
   phone?: string;
-  twoFAEnabled?: boolean;
+  twoFaEnabled?: boolean;
   language?: string;
-}
-
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-        value ? 'bg-brand-600' : 'bg-gray-200'
-      }`}
-      aria-pressed={value}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-          value ? 'translate-x-6' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  );
 }
 
 export default function ConfiguracoesPage() {
@@ -38,7 +20,7 @@ export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true);
 
   const [language, setLanguage] = useState('pt-BR');
-  const [twoFAEnabled, setTwoFAEnabled] = useState(false);
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -53,11 +35,14 @@ export default function ConfiguracoesPage() {
       router.push('/auth/login');
       return;
     }
-    apiGet<UserProfile>('/users/me')
-      .then((data) => {
-        setUser(data);
-        setLanguage(data.language ?? 'pt-BR');
-        setTwoFAEnabled(!!data.twoFAEnabled);
+    Promise.all([
+      apiGet<UserProfile>('/users/me'),
+      apiGet<{ twoFaEnabled: boolean }>('/auth/security-status').catch(() => null),
+    ])
+      .then(([profile, sec]) => {
+        setUser(profile);
+        setLanguage(profile.language ?? 'pt-BR');
+        setTwoFaEnabled(!!(sec?.twoFaEnabled ?? profile.twoFaEnabled));
       })
       .catch(() => {
         router.push('/auth/login');
@@ -74,23 +59,14 @@ export default function ConfiguracoesPage() {
     const prev = language;
     setLanguage(code);
     try {
-      await apiPatch('/users/me', { language: code });
+      // Persisted client-side only for now — backend does not accept a language field.
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('vintage_language', code);
+      }
       flash('success', 'Idioma atualizado.');
     } catch {
       setLanguage(prev);
       flash('error', 'Não foi possível atualizar o idioma.');
-    }
-  };
-
-  const toggle2FA = async (next: boolean) => {
-    const prev = twoFAEnabled;
-    setTwoFAEnabled(next);
-    try {
-      await apiPatch('/users/me', { twoFAEnabled: next });
-      flash('success', next ? '2FA ativada.' : '2FA desativada.');
-    } catch {
-      setTwoFAEnabled(prev);
-      flash('error', 'Não foi possível atualizar a autenticação em 2 fatores.');
     }
   };
 
@@ -159,17 +135,51 @@ export default function ConfiguracoesPage() {
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-6">
-        <h2 className="text-base font-semibold text-gray-900 mb-4">Autenticação em 2 fatores</h2>
-        <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-gray-900 mb-1">Conta</h2>
+        <p className="text-sm text-gray-500 mb-4">Seu email atual: <strong>{user.email}</strong></p>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/conta/perfil"
+            className="inline-block px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
+          >
+            Editar perfil
+          </Link>
+          <Link
+            href="/conta/alterar-email"
+            className="inline-block px-5 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
+          >
+            Alterar email
+          </Link>
+        </div>
+      </section>
+
+      <section className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-gray-700">2FA</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {twoFAEnabled
-                ? 'Ativa — use um app autenticador para entrar.'
-                : 'Adiciona uma camada extra de segurança à sua conta.'}
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Autenticação em 2 fatores</h2>
+            <p className="text-sm text-gray-500">
+              {twoFaEnabled
+                ? 'Ativa — exige um código do seu app autenticador a cada login.'
+                : 'Adicione uma camada extra de segurança à sua conta.'}
             </p>
           </div>
-          <Toggle value={twoFAEnabled} onChange={toggle2FA} />
+          {twoFaEnabled ? (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">
+              Ativo
+            </span>
+          ) : (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 whitespace-nowrap">
+              Desativado
+            </span>
+          )}
+        </div>
+        <div className="mt-4">
+          <Link
+            href="/conta/seguranca"
+            className="inline-block px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
+          >
+            {twoFaEnabled ? 'Gerenciar 2FA' : 'Configurar 2FA'}
+          </Link>
         </div>
       </section>
 

@@ -157,6 +157,51 @@ export class EmailService {
     await this.send(to, subject, html);
   }
 
+  async sendEmailChangeConfirmation(
+    to: string,
+    name: string,
+    changeToken: string,
+  ): Promise<void> {
+    const confirmUrl = `https://vintage.br/auth/confirmar-email?token=${encodeURIComponent(changeToken)}`;
+    const subject = 'Confirme seu novo email — Vintage.br';
+    const html = this.buildHtml(`
+      <h1 style="color: #333; font-size: 24px; margin-bottom: 16px;">Olá, ${this.escapeHtml(name)}!</h1>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        Recebemos uma solicitação para alterar o email da sua conta Vintage.br para este endereço.
+      </p>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        Clique no botão abaixo para confirmar a alteração. Este link é válido por 1 hora.
+      </p>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${confirmUrl}" style="background-color: #e91e63; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: bold;">
+          Confirmar novo email
+        </a>
+      </div>
+      <p style="color: #999; font-size: 14px; line-height: 1.6;">
+        Se você não solicitou essa alteração, ignore este email — seu endereço atual continua valendo.
+      </p>
+    `);
+    await this.send(to, subject, html);
+  }
+
+  async sendEmailChangeNoticeToOld(
+    to: string,
+    name: string,
+    newEmail: string,
+  ): Promise<void> {
+    const subject = 'Seu email foi alterado — Vintage.br';
+    const html = this.buildHtml(`
+      <h1 style="color: #333; font-size: 24px; margin-bottom: 16px;">Olá, ${this.escapeHtml(name)}!</h1>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        O email da sua conta Vintage.br foi alterado para <strong>${this.escapeHtml(newEmail)}</strong>.
+      </p>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        Se foi você, nenhuma ação é necessária. Se não foi você, entre em contato imediatamente com o suporte em suporte@vintage.br.
+      </p>
+    `);
+    await this.send(to, subject, html);
+  }
+
   async sendDeletionConfirmationCode(
     to: string,
     name: string,

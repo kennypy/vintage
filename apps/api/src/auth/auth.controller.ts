@@ -9,6 +9,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyTwoFaDto, ConfirmLoginTwoFaDto } from './dto/two-fa.dto';
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
+import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { GoogleProfile } from './google.strategy';
@@ -190,6 +191,22 @@ export class AuthController {
   @ApiOperation({ summary: 'Alterar senha (requer senha atual)' })
   changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+  }
+
+  @Post('request-email-change')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Solicitar alteração de email (envia link ao novo endereço)' })
+  requestEmailChange(@CurrentUser() user: AuthUser, @Body() dto: RequestEmailChangeDto) {
+    return this.authService.requestEmailChange(user.id, dto.newEmail, dto.password);
+  }
+
+  @Post('confirm-email-change')
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiOperation({ summary: 'Confirmar alteração de email com token recebido' })
+  confirmEmailChange(@Body() dto: ConfirmEmailChangeDto) {
+    return this.authService.confirmEmailChange(dto.token);
   }
 
   @Post('admin-setup')

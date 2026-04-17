@@ -153,6 +153,29 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
+export async function requestEmailChange(
+  newEmail: string,
+  password: string,
+): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>('/auth/request-email-change', {
+    method: 'POST',
+    body: JSON.stringify({ newEmail, password }),
+  });
+}
+
+export async function confirmEmailChange(
+  token: string,
+): Promise<{ success: boolean; message: string; newEmail: string }> {
+  return apiFetch<{ success: boolean; message: string; newEmail: string }>(
+    '/auth/confirm-email-change',
+    {
+      method: 'POST',
+      authenticated: false,
+      body: JSON.stringify({ token }),
+    },
+  );
+}
+
 export async function signInWithApple(identityToken: string, name?: string): Promise<SocialLoginResponse> {
   const data = await apiFetch<SocialLoginResponse>('/auth/apple/callback', {
     method: 'POST',
