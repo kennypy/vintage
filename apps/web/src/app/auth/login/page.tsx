@@ -23,7 +23,7 @@ export default function LoginPage() {
         | { requiresTwoFa: true; tempToken: string; method: 'TOTP' | 'SMS'; phoneHint?: string }
       >('/auth/login', { email, password });
 
-      if ('requiresTwoFa' in response && response.requiresTwoFa) {
+      if ('requiresTwoFa' in response) {
         // 2FA challenge: route to the verification page with the tempToken.
         const qs = new URLSearchParams({
           tempToken: response.tempToken,

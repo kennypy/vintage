@@ -48,7 +48,7 @@ export async function login(
     body: JSON.stringify({ email, password }),
   });
 
-  if ('requiresTwoFa' in data && data.requiresTwoFa) {
+  if ('requiresTwoFa' in data) {
     // Do NOT persist tokens — caller must complete the 2FA challenge first.
     return data;
   }

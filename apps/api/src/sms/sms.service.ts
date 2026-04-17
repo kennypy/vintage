@@ -75,7 +75,9 @@ export class SmsService {
       this.logger.error(
         `Twilio send failed to ${to}: ${String(err).slice(0, 200)}`,
       );
-      throw new Error('Falha ao enviar SMS. Tente novamente em instantes.');
+      throw new Error('Falha ao enviar SMS. Tente novamente em instantes.', {
+        cause: err,
+      });
     }
   }
 }
