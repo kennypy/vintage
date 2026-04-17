@@ -49,7 +49,8 @@
     "qrcode": "1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sharp": "^0.33.0"
+    "sharp": "^0.33.0",
+    "twilio": "^5.13.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

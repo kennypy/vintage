@@ -7,7 +7,12 @@ import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { VerifyTwoFaDto, ConfirmLoginTwoFaDto } from './dto/two-fa.dto';
+import {
+  VerifyTwoFaDto,
+  ConfirmLoginTwoFaDto,
+  ResendLoginSmsDto,
+  SetupSmsDto,
+} from './dto/two-fa.dto';
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -100,9 +105,45 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Throttle(TWOFA_THROTTLE)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Desativar 2FA (requer código TOTP atual)' })
+  @ApiOperation({ summary: 'Desativar 2FA (requer código TOTP ou SMS atual)' })
   disableTwoFa(@CurrentUser() user: AuthUser, @Body() dto: VerifyTwoFaDto) {
     return this.authService.disableTwoFa(user.id, dto.token);
+  }
+
+  // ── SMS 2FA enrollment ────────────────────────────────────────────
+
+  @Post('2fa/sms/setup')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Iniciar 2FA por SMS — cadastra telefone e envia código' })
+  setupSms2Fa(@CurrentUser() user: AuthUser, @Body() dto: SetupSmsDto) {
+    return this.authService.setupSms2Fa(user.id, dto.phone);
+  }
+
+  @Post('2fa/sms/enable')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Ativar 2FA por SMS com o código recebido' })
+  enableSms2Fa(@CurrentUser() user: AuthUser, @Body() dto: VerifyTwoFaDto) {
+    return this.authService.enableSms2Fa(user.id, dto.token);
+  }
+
+  @Post('2fa/sms/resend')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(TWOFA_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reenviar código SMS durante enrollment (usuário autenticado)' })
+  resendEnrollmentSms(@CurrentUser() user: AuthUser) {
+    return this.authService.resendEnrollmentSmsCode(user.id);
+  }
+
+  @Post('2fa/sms/login-resend')
+  @Throttle(TWOFA_THROTTLE)
+  @ApiOperation({ summary: 'Reenviar código SMS durante login (requer tempToken do login)' })
+  resendLoginSms(@Body() dto: ResendLoginSmsDto) {
+    return this.authService.resendLoginSmsCode(dto.tempToken);
   }
 
   @Get('security-status')

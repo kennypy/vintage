@@ -20,21 +20,104 @@ export interface LoginResponse {
   refreshToken: string;
 }
 
+/**
+ * Returned by POST /auth/login when the account has 2FA enabled. The client
+ * must prompt for a code and then call POST /auth/2fa/confirm-login with
+ * `tempToken` + the entered code to complete authentication.
+ */
+export interface TwoFaChallenge {
+  requiresTwoFa: true;
+  tempToken: string;
+  method: 'TOTP' | 'SMS';
+  phoneHint?: string;
+}
+
 export interface RegisterResponse {
   user: AuthUser;
   accessToken: string;
   refreshToken: string;
 }
 
-export async function login(email: string, password: string): Promise<LoginResponse> {
-  const data = await apiFetch<LoginResponse>('/auth/login', {
+export async function login(
+  email: string,
+  password: string,
+): Promise<LoginResponse | TwoFaChallenge> {
+  const data = await apiFetch<LoginResponse | TwoFaChallenge>('/auth/login', {
     method: 'POST',
     authenticated: false,
     body: JSON.stringify({ email, password }),
   });
 
+  if ('requiresTwoFa' in data && data.requiresTwoFa) {
+    // Do NOT persist tokens — caller must complete the 2FA challenge first.
+    return data;
+  }
+
   await setTokens(data.accessToken, data.refreshToken);
   return data;
+}
+
+/**
+ * Complete a 2FA challenge with the tempToken from login and the 6-digit code.
+ * On success, persists the real access/refresh tokens and returns the user.
+ */
+export async function confirmLoginTwoFa(
+  tempToken: string,
+  token: string,
+): Promise<AuthTokens> {
+  const data = await apiFetch<AuthTokens>('/auth/2fa/confirm-login', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ tempToken, token }),
+  });
+  await setTokens(data.accessToken, data.refreshToken);
+  return data;
+}
+
+/** Ask the API to resend the login-time SMS code (valid for 5 min). */
+export async function resendLoginSms(
+  tempToken: string,
+): Promise<{ success: boolean; phoneHint: string }> {
+  return apiFetch<{ success: boolean; phoneHint: string }>(
+    '/auth/2fa/sms/login-resend',
+    {
+      method: 'POST',
+      authenticated: false,
+      body: JSON.stringify({ tempToken }),
+    },
+  );
+}
+
+/** Enrollment flow: start SMS 2FA for the authenticated user. */
+export async function setupSms2Fa(
+  phone: string,
+): Promise<{ success: boolean; phoneHint: string }> {
+  return apiFetch<{ success: boolean; phoneHint: string }>('/auth/2fa/sms/setup', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+/** Enrollment flow: confirm the enrollment code and flip SMS 2FA on. */
+export async function enableSms2Fa(
+  token: string,
+): Promise<{ success: boolean; message: string }> {
+  return apiFetch<{ success: boolean; message: string }>('/auth/2fa/sms/enable', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+/** Enrollment flow: resend the enrollment code (authenticated). */
+export async function resendEnrollmentSms(): Promise<{
+  success: boolean;
+  phoneHint?: string;
+  alreadyEnabled?: boolean;
+}> {
+  return apiFetch<{ success: boolean; phoneHint?: string; alreadyEnabled?: boolean }>(
+    '/auth/2fa/sms/resend',
+    { method: 'POST' },
+  );
 }
 
 /** Current ToS version the app presents on the signup screen — must match
@@ -98,6 +181,8 @@ export async function signInWithGoogle(idToken: string): Promise<SocialLoginResp
 export interface SecurityStatus {
   cpfVerified: boolean;
   twoFaEnabled: boolean;
+  twoFaMethod: 'TOTP' | 'SMS';
+  twoFaPhoneHint: string | null;
   isContaProtegida: boolean;
   recentLogins: Array<{ platform: string | null; success: boolean; createdAt: string }>;
 }

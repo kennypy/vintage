@@ -156,6 +156,41 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Atomic GET-and-DELETE. Returns the value if the key existed (and removes it),
+   * or null if the key was missing. Used for single-use tokens / OTPs where
+   * two concurrent callers must not both observe the same value.
+   *
+   * Returns null when Redis is unavailable in non-production — callers must
+   * treat this as "code not found" (fail-closed) rather than "dev bypass".
+   */
+  async getDel(key: string): Promise<string | null> {
+    const client = this.getClient();
+    if (!client) return null;
+    try {
+      return await client.getdel(key);
+    } catch (err) {
+      this.logger.warn(`Redis getdel error: ${String(err).slice(0, 200)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Decrement a counter (used to refund rate-limit credits when the operation
+   * the counter was tracking ultimately failed, e.g. Twilio transport error).
+   * Never drops below zero. No-op when Redis is unavailable.
+   */
+  async decr(key: string): Promise<void> {
+    const client = this.getClient();
+    if (!client) return;
+    try {
+      const next = await client.decr(key);
+      if (next < 0) await client.set(key, '0', 'KEEPTTL');
+    } catch (err) {
+      this.logger.warn(`Redis decr error: ${String(err).slice(0, 200)}`);
+    }
+  }
+
   /** Simple ping for health checks. */
   async ping(): Promise<boolean> {
     const client = this.client;

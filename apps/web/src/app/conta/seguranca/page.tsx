@@ -7,6 +7,8 @@ import { apiGet, apiPost } from '@/lib/api';
 interface SecurityStatus {
   cpfVerified: boolean;
   twoFaEnabled: boolean;
+  twoFaMethod: 'TOTP' | 'SMS';
+  twoFaPhoneHint: string | null;
   isContaProtegida: boolean;
   recentLogins: Array<{ platform: string | null; success: boolean; createdAt: string }>;
 }
@@ -17,19 +19,29 @@ interface TwoFaSetup {
   otpAuthUrl: string;
 }
 
+type Mode = 'idle' | 'totp-setup' | 'sms-phone' | 'sms-code' | 'disable';
+
 export default function SegurancaPage() {
   const router = useRouter();
   const [status, setStatus] = useState<SecurityStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [setup, setSetup] = useState<TwoFaSetup | null>(null);
-  const [token, setToken] = useState('');
-  const [disableToken, setDisableToken] = useState('');
+  const [mode, setMode] = useState<Mode>('idle');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
+  // TOTP state
+  const [totpSetup, setTotpSetup] = useState<TwoFaSetup | null>(null);
+
+  // SMS state
+  const [phoneInput, setPhoneInput] = useState('+55');
+  const [smsPhoneHint, setSmsPhoneHint] = useState<string | null>(null);
+
+  // Shared code input
+  const [code, setCode] = useState('');
+
   const flash = (type: 'success' | 'error', msg: string) => {
     setNotice({ type, msg });
-    setTimeout(() => setNotice(null), 2500);
+    setTimeout(() => setNotice(null), 3000);
   };
 
   const refresh = useCallback(async () => {
@@ -43,71 +55,135 @@ export default function SegurancaPage() {
     }
   }, [router]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  const handleStartSetup = async () => {
+  const resetMode = () => {
+    setMode('idle');
+    setTotpSetup(null);
+    setCode('');
+    setPhoneInput('+55');
+    setSmsPhoneHint(null);
+  };
+
+  // ── TOTP ──────────────────────────────────────────────────────────
+  const handleStartTotp = async () => {
     setBusy(true);
     try {
       const data = await apiPost<TwoFaSetup>('/auth/2fa/setup', {});
-      setSetup(data);
-      setToken('');
-    } catch (err: unknown) {
-      const msg = err instanceof Error && err.message ? err.message : 'Não foi possível iniciar a configuração.';
-      flash('error', msg);
+      setTotpSetup(data);
+      setCode('');
+      setMode('totp-setup');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Não foi possível iniciar.');
     } finally {
       setBusy(false);
     }
   };
 
-  const handleConfirmEnable = async () => {
-    if (token.length !== 6) {
-      flash('error', 'O código deve ter 6 dígitos.');
-      return;
-    }
+  const handleConfirmTotp = async () => {
+    if (code.length !== 6) return;
     setBusy(true);
     try {
-      await apiPost('/auth/2fa/enable', { token });
-      setSetup(null);
-      setToken('');
+      await apiPost('/auth/2fa/enable', { token: code });
+      resetMode();
       await refresh();
-      flash('success', '2FA ativado. Guarde bem seu app autenticador.');
-    } catch (err: unknown) {
-      const msg = err instanceof Error && err.message ? err.message : 'Código inválido.';
-      flash('error', msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDisable = async () => {
-    if (disableToken.length !== 6) {
-      flash('error', 'Informe o código atual do autenticador (6 dígitos).');
-      return;
-    }
-    setBusy(true);
-    try {
-      await apiPost('/auth/2fa/disable', { token: disableToken });
-      setDisableToken('');
-      await refresh();
-      flash('success', '2FA desativado.');
-    } catch (err: unknown) {
-      const msg = err instanceof Error && err.message ? err.message : 'Código inválido.';
-      flash('error', msg);
+      flash('success', '2FA ativado.');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Código inválido.');
     } finally {
       setBusy(false);
     }
   };
 
   const copySecret = async () => {
-    if (!setup?.secret) return;
+    if (!totpSetup?.secret) return;
     if (typeof window === 'undefined') return;
     try {
-      await window.navigator.clipboard.writeText(setup.secret);
+      await window.navigator.clipboard.writeText(totpSetup.secret);
       flash('success', 'Chave copiada.');
     } catch {
       flash('error', 'Não foi possível copiar.');
+    }
+  };
+
+  // ── SMS ───────────────────────────────────────────────────────────
+  const handleStartSms = () => {
+    setPhoneInput('+55');
+    setCode('');
+    setSmsPhoneHint(null);
+    setMode('sms-phone');
+  };
+
+  const handleSendSms = async () => {
+    const phone = phoneInput.trim();
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      flash('error', 'Informe o telefone em formato E.164 (ex: +5511999998888).');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await apiPost<{ success: boolean; phoneHint: string }>('/auth/2fa/sms/setup', {
+        phone,
+      });
+      setSmsPhoneHint(res.phoneHint);
+      setCode('');
+      setMode('sms-code');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Não foi possível enviar o SMS.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmSms = async () => {
+    if (code.length !== 6) return;
+    setBusy(true);
+    try {
+      await apiPost('/auth/2fa/sms/enable', { token: code });
+      resetMode();
+      await refresh();
+      flash('success', 'SMS 2FA ativado.');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Código inválido.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResendSms = async () => {
+    setBusy(true);
+    try {
+      const res = await apiPost<{ success: boolean; phoneHint?: string }>(
+        '/auth/2fa/sms/resend',
+        {},
+      );
+      if (res.phoneHint) setSmsPhoneHint(res.phoneHint);
+      flash('success', 'Código reenviado.');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Não foi possível reenviar.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── Disable ───────────────────────────────────────────────────────
+  const handleStartDisable = () => {
+    setCode('');
+    setMode('disable');
+  };
+
+  const handleConfirmDisable = async () => {
+    if (code.length !== 6) return;
+    setBusy(true);
+    try {
+      await apiPost('/auth/2fa/disable', { token: code });
+      resetMode();
+      await refresh();
+      flash('success', '2FA desativado.');
+    } catch (err) {
+      flash('error', err instanceof Error && err.message ? err.message : 'Código inválido.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -115,6 +191,9 @@ export default function SegurancaPage() {
     return <div className="animate-pulse h-64 bg-white border border-gray-200 rounded-xl" />;
   }
   if (!status) return null;
+
+  const enabled = status.twoFaEnabled;
+  const method = status.twoFaMethod;
 
   return (
     <div className="space-y-4">
@@ -131,105 +210,214 @@ export default function SegurancaPage() {
       )}
 
       <section className="bg-white border border-gray-200 rounded-xl p-6">
-        <h1 className="text-base font-semibold text-gray-900 mb-1">Autenticação em 2 fatores</h1>
+        <h1 className="text-base font-semibold text-gray-900 mb-1">Autenticação em 2 etapas</h1>
         <p className="text-sm text-gray-500 mb-4">
-          Protege sua conta exigindo um código do seu app autenticador a cada login.
+          Escolha app autenticador (TOTP) ou SMS. Você receberá o segundo fator a cada login.
         </p>
 
-        {status.twoFaEnabled ? (
+        {enabled ? (
           <>
             <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 mb-4">
-              {status.isContaProtegida ? 'Conta protegida ativa' : '2FA ativo'}
+              {method === 'SMS'
+                ? `SMS ativo${status.twoFaPhoneHint ? ` (${status.twoFaPhoneHint})` : ''}`
+                : 'Autenticador ativo'}
             </div>
-            <div className="space-y-3">
-              <label htmlFor="disableToken" className="block text-sm font-medium text-gray-700">
-                Para desativar, informe o código atual do seu autenticador:
-              </label>
+            <div>
+              <button
+                type="button"
+                onClick={handleStartDisable}
+                disabled={busy}
+                className="px-5 py-2 border border-red-400 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-40"
+              >
+                Desativar 2FA
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleStartTotp}
+              disabled={busy}
+              className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
+            >
+              Configurar com app autenticador
+            </button>
+            <button
+              type="button"
+              onClick={handleStartSms}
+              disabled={busy}
+              className="px-5 py-2 border border-brand-500 text-brand-600 text-sm font-medium rounded-lg hover:bg-brand-50 disabled:opacity-40"
+            >
+              Configurar por SMS
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Flow-specific modals */}
+      {mode !== 'idle' && (
+        <section className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              {mode === 'totp-setup' && 'Configurar autenticador'}
+              {mode === 'sms-phone' && 'Configurar SMS'}
+              {mode === 'sms-code' && 'Confirmar telefone'}
+              {mode === 'disable' && 'Desativar 2FA'}
+            </h2>
+            <button
+              type="button"
+              onClick={resetMode}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          {mode === 'totp-setup' && totpSetup && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                1. Abra seu app autenticador (Google Authenticator, Authy…) e escaneie:
+              </p>
+              <div className="flex items-center justify-center bg-gray-50 p-4 rounded-lg">
+                <img src={totpSetup.qrCodeDataUrl} alt="QR code 2FA" width={180} height={180} />
+              </div>
+              <div className="text-sm text-gray-600">
+                Ou informe manualmente:
+                <button
+                  type="button"
+                  onClick={copySecret}
+                  className="block w-full mt-2 px-3 py-2 font-mono text-center bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100"
+                >
+                  {totpSetup.secret}
+                </button>
+              </div>
               <input
-                id="disableToken"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 maxLength={6}
-                value={disableToken}
-                onChange={(e) => setDisableToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-500"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="123456"
+                className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-500"
+                aria-label="Código TOTP"
               />
               <div>
                 <button
                   type="button"
-                  onClick={handleDisable}
-                  disabled={busy || disableToken.length !== 6}
+                  onClick={handleConfirmTotp}
+                  disabled={busy || code.length !== 6}
+                  className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {busy ? 'Ativando…' : 'Ativar 2FA'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'sms-phone' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                Informe seu celular em formato E.164 (com DDI):
+              </p>
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder="+5511999998888"
+                className="w-full max-w-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                aria-label="Telefone 2FA"
+              />
+              <div>
+                <button
+                  type="button"
+                  onClick={handleSendSms}
+                  disabled={busy}
+                  className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {busy ? 'Enviando…' : 'Enviar código'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'sms-code' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                Digite o código enviado para {smsPhoneHint ?? 'seu telefone'}. Válido por 5 minutos.
+              </p>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-500"
+                aria-label="Código SMS"
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleConfirmSms}
+                  disabled={busy || code.length !== 6}
+                  className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
+                >
+                  {busy ? 'Ativando…' : 'Ativar SMS 2FA'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendSms}
+                  disabled={busy}
+                  className="text-sm text-brand-600 font-medium hover:text-brand-700 disabled:opacity-40"
+                >
+                  {busy ? 'Reenviando…' : 'Reenviar código'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'disable' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                {method === 'SMS'
+                  ? 'Solicite um código SMS e informe-o abaixo.'
+                  : 'Informe o código atual do seu app autenticador.'}
+              </p>
+              {method === 'SMS' && (
+                <button
+                  type="button"
+                  onClick={handleResendSms}
+                  disabled={busy}
+                  className="px-5 py-2 border border-brand-500 text-brand-600 text-sm font-medium rounded-lg hover:bg-brand-50 disabled:opacity-40"
+                >
+                  {busy ? 'Enviando…' : 'Enviar código SMS'}
+                </button>
+              )}
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="123456"
+                className="block w-40 px-3 py-2 border border-gray-300 rounded-lg text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-500"
+                aria-label="Código 2FA"
+              />
+              <div>
+                <button
+                  type="button"
+                  onClick={handleConfirmDisable}
+                  disabled={busy || code.length !== 6}
                   className="px-5 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40"
                 >
                   {busy ? 'Desativando…' : 'Desativar 2FA'}
                 </button>
               </div>
             </div>
-          </>
-        ) : !setup ? (
-          <button
-            type="button"
-            onClick={handleStartSetup}
-            disabled={busy}
-            className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
-          >
-            {busy ? 'Preparando…' : 'Configurar 2FA'}
-          </button>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-700">
-              1. Abra seu app autenticador (Google Authenticator, Authy, 1Password…) e escaneie o QR code abaixo:
-            </p>
-            <div className="flex items-center justify-center bg-gray-50 p-4 rounded-lg">
-              {/* Data URL QR — render via plain img so we don't require next/image remote config */}
-              <img src={setup.qrCodeDataUrl} alt="QR code 2FA" width={180} height={180} />
-            </div>
-            <div className="text-sm text-gray-600">
-              Ou informe manualmente esta chave:
-              <button
-                type="button"
-                onClick={copySecret}
-                className="block w-full mt-2 px-3 py-2 font-mono text-center bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100"
-              >
-                {setup.secret}
-              </button>
-            </div>
-            <div>
-              <label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-1">
-                2. Informe o código de 6 dígitos gerado pelo app:
-              </label>
-              <input
-                id="token"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={6}
-                value={token}
-                onChange={(e) => setToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                className="w-40 px-3 py-2 border border-gray-300 rounded-lg text-sm text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-500"
-                placeholder="123456"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleConfirmEnable}
-                disabled={busy || token.length !== 6}
-                className="px-5 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 disabled:opacity-40"
-              >
-                {busy ? 'Ativando…' : 'Ativar 2FA'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setSetup(null); setToken(''); }}
-                className="px-5 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      )}
 
       <section className="bg-white border border-gray-200 rounded-xl p-6">
         <h2 className="text-base font-semibold text-gray-900 mb-4">Acessos recentes</h2>
@@ -260,4 +448,3 @@ export default function SegurancaPage() {
     </div>
   );
 }
-

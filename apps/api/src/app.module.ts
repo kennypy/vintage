@@ -26,6 +26,7 @@ import { NotaFiscalModule } from './notafiscal/notafiscal.module';
 import { BundlesModule } from './bundles/bundles.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { EmailModule } from './email/email.module';
+import { SmsModule } from './sms/sms.module';
 import { PushModule } from './push/push.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ConsentModule } from './consent/consent.module';
@@ -72,6 +73,7 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
     BundlesModule,
     PromotionsModule,
     EmailModule,
+    SmsModule,
     PushModule,
     UploadsModule,
     ConsentModule,
@@ -104,6 +106,10 @@ export class AppModule implements NestModule {
         { path: 'api/v1/auth/register', method: RequestMethod.POST },
         { path: 'api/v1/auth/login', method: RequestMethod.POST },
         { path: 'api/v1/auth/2fa/confirm-login', method: RequestMethod.POST },
+        // SMS-code resend is called with only a tempToken (same pre-auth
+        // security model as /auth/2fa/confirm-login), so CSRF is not
+        // applicable — the tempToken is the anti-forgery factor.
+        { path: 'api/v1/auth/2fa/sms/login-resend', method: RequestMethod.POST },
         { path: 'api/v1/auth/apple/callback', method: RequestMethod.POST },
         // Partner API endpoints use X-Partner-Key; CSRF middleware already
         // skips routes where X-API-Key is present. Explicit exclusion for clarity.

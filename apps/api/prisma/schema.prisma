@@ -26,7 +26,13 @@ model User {
   verified           Boolean   @default(false)
   cpfVerified        Boolean   @default(false)
   twoFaEnabled       Boolean   @default(false)
-  twoFaSecret        String?   // Encrypted TOTP secret (null when 2FA disabled)
+  twoFaMethod        TwoFaMethod @default(TOTP) // TOTP authenticator app or SMS
+  twoFaSecret        String?   // Encrypted TOTP secret (null when 2FA disabled or SMS)
+  // Phone number verified for SMS 2FA. E.164 format (+55...). Separate from
+  // `phone` because the profile phone may be displayed publicly while the
+  // 2FA number is strictly an auth factor.
+  twoFaPhone         String?
+  twoFaPhoneVerifiedAt DateTime?
   socialProvider     String?   // 'google', 'apple', or null
   socialProviderId   String?   // provider's unique user ID
   coverPhotoUrl      String?
@@ -1060,4 +1066,9 @@ model EmailChangeToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("email_change_tokens")
+}
+
+enum TwoFaMethod {
+  TOTP
+  SMS
 }
