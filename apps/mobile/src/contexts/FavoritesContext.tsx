@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet } from '../services/secureStorage';
 import { toggleFavorite as toggleFavoriteApi, getFavorites } from '../services/listings';
 import { isDemoMode, getDemoFavorites } from '../services/demoStore';
 
@@ -26,7 +26,7 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
   // Keep ref in sync so toggleFavorite closure always has current value
   useEffect(() => {
     favRef.current = favorites;
-    SecureStore.setItemAsync(FAVORITES_CACHE_KEY, JSON.stringify([...favorites])).catch(() => {});
+    secureSet(FAVORITES_CACHE_KEY, JSON.stringify([...favorites])).catch(() => {});
   }, [favorites]);
 
   // Hydrate on mount
@@ -45,7 +45,7 @@ export function FavoritesProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Fallback to local cache
         try {
-          const cached = await SecureStore.getItemAsync(FAVORITES_CACHE_KEY);
+          const cached = await secureGet(FAVORITES_CACHE_KEY);
           if (cached) setFavorites(new Set(JSON.parse(cached) as string[]));
         } catch (_cacheError) {
           // Cache unavailable — start with empty favorites

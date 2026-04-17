@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useColorScheme } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet } from '../services/secureStorage';
 import { colors } from '../theme/colors';
 
 const THEME_PREF_KEY = 'vintage_theme_pref';
@@ -75,14 +75,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Load saved preferences
   useEffect(() => {
-    SecureStore.getItemAsync(THEME_PREF_KEY)
+    secureGet(THEME_PREF_KEY)
       .then((val) => {
         if (val === 'light' || val === 'dark' || val === 'system') {
           setModeState(val);
         }
       })
       .catch(() => {});
-    SecureStore.getItemAsync(FULLSCREEN_PREF_KEY)
+    secureGet(FULLSCREEN_PREF_KEY)
       .then((val) => {
         if (val === 'true') setFullScreenState(true);
       })
@@ -91,12 +91,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode);
-    SecureStore.setItemAsync(THEME_PREF_KEY, newMode).catch(() => {});
+    secureSet(THEME_PREF_KEY, newMode).catch(() => {});
   }, []);
 
   const setFullScreen = useCallback((value: boolean) => {
     setFullScreenState(value);
-    SecureStore.setItemAsync(FULLSCREEN_PREF_KEY, String(value)).catch(() => {});
+    secureSet(FULLSCREEN_PREF_KEY, String(value)).catch(() => {});
   }, []);
 
   const isDark = mode === 'system' ? systemScheme === 'dark' : mode === 'dark';
