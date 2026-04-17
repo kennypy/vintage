@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureGet, secureSet, secureDelete } from './secureStorage';
 import { isDemoModeSync } from './demoStore';
 
 const ENV_API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -17,17 +17,17 @@ const TOKEN_KEY = 'vintage_access_token';
 const REFRESH_KEY = 'vintage_refresh_token';
 
 export async function getToken(): Promise<string | null> {
-  return SecureStore.getItemAsync(TOKEN_KEY);
+  return secureGet(TOKEN_KEY);
 }
 
 export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
-  await SecureStore.setItemAsync(TOKEN_KEY, accessToken);
-  await SecureStore.setItemAsync(REFRESH_KEY, refreshToken);
+  await secureSet(TOKEN_KEY, accessToken);
+  await secureSet(REFRESH_KEY, refreshToken);
 }
 
 export async function clearTokens(): Promise<void> {
-  await SecureStore.deleteItemAsync(TOKEN_KEY);
-  await SecureStore.deleteItemAsync(REFRESH_KEY);
+  await secureDelete(TOKEN_KEY);
+  await secureDelete(REFRESH_KEY);
 }
 
 interface RequestOptions extends RequestInit {
@@ -175,7 +175,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
 async function attemptRefresh(): Promise<boolean> {
   try {
-    const refreshToken = await SecureStore.getItemAsync(REFRESH_KEY);
+    const refreshToken = await secureGet(REFRESH_KEY);
     if (!refreshToken) return false;
 
     const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
