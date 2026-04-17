@@ -141,6 +141,11 @@ npm run format       # Formatar código com Prettier
 
 - **[PLAN.md](./PLAN.md)** — Plano completo do projeto, análise de concorrentes (Vinted, Enjoei), fases de implementação, guia de abertura de empresa no Brasil
 - **[CLAUDE.md](./CLAUDE.md)** — Guidelines de desenvolvimento, checklist pre-push, padrões de segurança
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** — Runbook de deploy em Supabase / Upstash / Meilisearch / Fly.io / R2 / Vercel / Resend
+- **[STORE_SUBMISSION.md](./STORE_SUBMISSION.md)** — Passo a passo completo de submissão na App Store e Play Store
+- **[THIRD_PARTY_ONBOARDING.md](./THIRD_PARTY_ONBOARDING.md)** — Checklist de cadastros de Mercado Pago, Correios, Google/Apple OAuth, Resend, Sentry, etc.
+- **[apps/mobile/STORE_TEXT.pt-BR.md](./apps/mobile/STORE_TEXT.pt-BR.md)** — Textos pt-BR prontos para App Store e Play Store
+- **[apps/mobile/assets/store/README.md](./apps/mobile/assets/store/README.md)** — Especificação dos assets visuais das lojas
 
 ## Licença
 

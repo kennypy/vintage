@@ -55,6 +55,12 @@ export async function getCsrfToken(): Promise<string> {
   return csrfTokenCache;
 }
 
+/** Force a new CSRF token on the next call — used after a 403 CSRF rejection. */
+export function invalidateCsrfToken(): void {
+  csrfTokenCache = null;
+  csrfTokenFetchedAt = 0;
+}
+
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   // In demo mode there is no API — fail immediately so fallbacks trigger without delay
   if (isDemoModeSync()) {
@@ -126,6 +132,38 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       }
     }
     throw new ApiError(401, 'Session expired');
+  }
+
+  // On CSRF rejection, rotate the token and retry once. The server rotates
+  // tokens every 24 h and on some state transitions; without this retry the
+  // user sees a spurious failure.
+  if (
+    response.status === 403
+    && !SAFE_METHODS.has(options.method?.toUpperCase() ?? 'GET')
+  ) {
+    let bodyText = '';
+    try { bodyText = await response.clone().text(); } catch { /* ignore */ }
+    if (bodyText.toLowerCase().includes('csrf')) {
+      invalidateCsrfToken();
+      headers['X-CSRF-Token'] = await getCsrfToken();
+      const retryController = new AbortController();
+      const retryTimeout = setTimeout(() => retryController.abort(), FETCH_TIMEOUT_MS);
+      try {
+        const retryResponse = await fetch(`${API_BASE_URL}${path}`, {
+          headers,
+          signal: retryController.signal,
+          ...rest,
+        });
+        clearTimeout(retryTimeout);
+        if (!retryResponse.ok) {
+          throw new ApiError(retryResponse.status, await safeParseError(retryResponse));
+        }
+        return retryResponse.json();
+      } catch (err) {
+        clearTimeout(retryTimeout);
+        throw err;
+      }
+    }
   }
 
   if (!response.ok) {

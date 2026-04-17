@@ -102,10 +102,35 @@ export default function ListingDetailScreen() {
 
   const handleOffer = async () => {
     if (!listing) return;
-    const amount = parseFloat(offerAmount.replace(',', '.'));
+    const amount = parseFloat(offerAmount.replace(/\./g, '').replace(',', '.'));
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Valor inválido', 'Informe um valor válido para a oferta.');
       return;
+    }
+    if (amount < 1) {
+      Alert.alert('Oferta muito baixa', 'O valor mínimo de uma oferta é R$ 1,00.');
+      return;
+    }
+    if (amount >= listing.priceBrl) {
+      Alert.alert(
+        'Oferta acima do preço',
+        `O preço do anúncio é R$ ${formatBrl(listing.priceBrl)}. Para comprar pelo valor cheio, use o botão "Comprar agora".`,
+      );
+      return;
+    }
+    // Discourage absurdly low offers (< 30% of asking) to reduce seller frustration.
+    if (amount < listing.priceBrl * 0.3) {
+      const ok = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Oferta muito baixa',
+          `Sua oferta é menos de 30% do preço pedido (R$ ${formatBrl(listing.priceBrl)}). Tem certeza?`,
+          [
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Enviar mesmo assim', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!ok) return;
     }
     setOfferLoading(true);
     try {

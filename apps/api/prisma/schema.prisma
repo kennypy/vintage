@@ -1025,3 +1025,21 @@ model CronLock {
 
   @@map("cron_locks")
 }
+
+// --- Password reset tokens ---
+// Stores a hashed reset token per user with a bounded TTL. Tokens are single-use:
+// `usedAt` is set when redeemed. We hash the token at rest so a DB leak does not
+// let an attacker take over accounts.
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
