@@ -23,6 +23,12 @@ const mockPrisma = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  user: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
+  userBlock: {
+    findFirst: jest.fn().mockResolvedValue(null),
+  },
 };
 
 describe('OffersService', () => {
@@ -30,6 +36,8 @@ describe('OffersService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.user.findMany.mockResolvedValue([]);
+    mockPrisma.userBlock.findFirst.mockResolvedValue(null);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
