@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet } from '@/lib/api';
+import { formatBRL, ORDER_STATUS_PT, ORDER_STATUS_COLORS } from '@/lib/i18n';
 
 interface Order {
   id: string;
@@ -17,30 +18,6 @@ interface Order {
   };
   seller?: { name: string };
   buyer?: { name: string };
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  PENDING: 'Aguardando pagamento',
-  PAID: 'Pago',
-  SHIPPED: 'Enviado',
-  DELIVERED: 'Entregue',
-  COMPLETED: 'Concluído',
-  CANCELLED: 'Cancelado',
-  DISPUTED: 'Em disputa',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-yellow-100 text-yellow-800',
-  PAID: 'bg-blue-100 text-blue-800',
-  SHIPPED: 'bg-purple-100 text-purple-800',
-  DELIVERED: 'bg-green-100 text-green-800',
-  COMPLETED: 'bg-green-100 text-green-800',
-  CANCELLED: 'bg-red-100 text-red-800',
-  DISPUTED: 'bg-orange-100 text-orange-800',
-};
-
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
 function formatDate(iso: string): string {
@@ -183,10 +160,10 @@ export default function OrdersPage() {
                 </p>
                 <span
                   className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    STATUS_COLORS[order.status] ?? 'bg-gray-100 text-gray-700'
+                    ORDER_STATUS_COLORS[order.status] ?? 'bg-gray-100 text-gray-700'
                   }`}
                 >
-                  {STATUS_LABELS[order.status] ?? order.status}
+                  {ORDER_STATUS_PT[order.status] ?? order.status}
                 </span>
               </div>
             </Link>

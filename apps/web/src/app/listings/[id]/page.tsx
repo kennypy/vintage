@@ -40,7 +40,7 @@ export async function generateMetadata({
 
   if (!listing) {
     return {
-      title: 'Anuncio nao encontrado',
+      title: 'Anúncio não encontrado',
     };
   }
 

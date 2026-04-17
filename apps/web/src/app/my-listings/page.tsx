@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiDelete, apiPatch } from '@/lib/api';
+import { formatBRL, LISTING_STATUS_PT, LISTING_STATUS_COLORS } from '@/lib/i18n';
 
 interface Listing {
   id: string;
@@ -20,27 +21,9 @@ interface Listing {
   createdAt: string;
 }
 
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 function getImageUrl(img: { url: string } | string): string {
   return typeof img === 'string' ? img : img.url;
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: 'Ativo',
-  PAUSED: 'Pausado',
-  SOLD: 'Vendido',
-  DRAFT: 'Rascunho',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: 'bg-green-100 text-green-800',
-  PAUSED: 'bg-yellow-100 text-yellow-800',
-  SOLD: 'bg-blue-100 text-blue-800',
-  DRAFT: 'bg-gray-100 text-gray-600',
-};
 
 type StatusFilter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'SOLD';
 
@@ -74,12 +57,12 @@ export default function MyListingsPage() {
   const filtered = filter === 'ALL' ? listings : listings.filter((l) => l.status === filter);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este anuncio?')) return;
+    if (!confirm('Tem certeza que deseja excluir este anúncio?')) return;
     try {
       await apiDelete(`/listings/${encodeURIComponent(id)}`);
       setListings((prev) => prev.filter((l) => l.id !== id));
     } catch {
-      alert('Erro ao excluir anuncio.');
+      alert('Erro ao excluir anúncio.');
     }
   };
 
@@ -96,9 +79,9 @@ export default function MyListingsPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Meus anuncios</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Meus anúncios</h1>
         <Link href="/sell" className="px-4 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition">
-          Novo anuncio
+          Novo anúncio
         </Link>
       </div>
 
@@ -114,7 +97,7 @@ export default function MyListingsPage() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {s === 'ALL' ? 'Todos' : STATUS_LABELS[s] ?? s}
+            {s === 'ALL' ? 'Todos' : LISTING_STATUS_PT[s] ?? s}
             {s === 'ALL' ? ` (${listings.length})` : ` (${listings.filter((l) => l.status === s).length})`}
           </button>
         ))}
@@ -138,10 +121,10 @@ export default function MyListingsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500 mb-4">
-            {filter === 'ALL' ? 'Voce ainda nao criou nenhum anuncio.' : `Nenhum anuncio com status "${STATUS_LABELS[filter]}".`}
+            {filter === 'ALL' ? 'Você ainda não criou nenhum anúncio.' : `Nenhum anúncio com status "${LISTING_STATUS_PT[filter]}".`}
           </p>
           <Link href="/sell" className="inline-block px-6 py-2 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 transition">
-            Criar anuncio
+            Criar anúncio
           </Link>
         </div>
       ) : (
@@ -167,15 +150,15 @@ export default function MyListingsPage() {
                       <Link href={`/listings/${listing.id}`} className="text-sm font-medium text-gray-900 hover:text-brand-600 truncate">
                         {listing.title}
                       </Link>
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${STATUS_COLORS[listing.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                        {STATUS_LABELS[listing.status] ?? listing.status}
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${LISTING_STATUS_COLORS[listing.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {LISTING_STATUS_PT[listing.status] ?? listing.status}
                       </span>
                     </div>
                     <p className="text-lg font-bold text-brand-600 mt-0.5">{formatBRL(listing.priceBrl ?? listing.price ?? 0)}</p>
                     <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
                       <span>{listing.size}</span>
                       <span>{listing.condition}</span>
-                      {listing.viewCount != null && <span>{listing.viewCount} visualizacoes</span>}
+                      {listing.viewCount != null && <span>{listing.viewCount} visualizações</span>}
                       {listing.favoriteCount != null && <span>{listing.favoriteCount} favoritos</span>}
                     </div>
                   </div>

@@ -1,7 +1,12 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import ListingDetailPage from '../listings/[id]/page';
+import ListingDetailClient from '../listings/[id]/ListingDetailClient';
+
+// Keep legacy test signature: tests pass { params: { id } } to a wrapper.
+function ListingDetailPage({ params }: { params: { id: string } }) {
+  return <ListingDetailClient id={params.id} />;
+}
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: jest.fn() }),

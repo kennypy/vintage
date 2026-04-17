@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
+import { formatBRL } from '@/lib/i18n';
 
 interface Message {
   id: string;
@@ -146,9 +147,6 @@ export default function ConversationPage() {
   }
 
   if (!conversation) return null;
-
-  const formatBRL = (value: number) =>
-    value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>

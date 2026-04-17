@@ -37,13 +37,13 @@ export async function generateMetadata({
 
   if (!seller) {
     return {
-      title: 'Vendedor nao encontrado',
+      title: 'Vendedor não encontrado',
     };
   }
 
   const description = seller.bio
     ? seller.bio.slice(0, 155)
-    : `Veja os anuncios de ${seller.name} na Vintage.br`;
+    : `Veja os anúncios de ${seller.name} na Vintage.br`;
 
   const url = `${APP_URL}/seller/${seller.id}`;
 

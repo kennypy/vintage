@@ -67,13 +67,36 @@ export default function MessagesPage() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  // Poll for conversation list updates every 5 seconds
+  // Poll for conversation list updates.
+  // Uses the Page Visibility API to pause polling when the tab is hidden, and
+  // backs off from 5s → 30s after 60s of user inactivity to save battery/bandwidth.
   useEffect(() => {
     const token =
       typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
     if (!token) return;
 
-    const interval = setInterval(async () => {
+    const ACTIVE_INTERVAL_MS = 5000;
+    const IDLE_INTERVAL_MS = 30000;
+    const IDLE_AFTER_MS = 60000;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastActivityAt = Date.now();
+
+    const markActive = () => {
+      lastActivityAt = Date.now();
+    };
+
+    const schedule = (delay: number) => {
+      timer = setTimeout(tick, delay);
+    };
+
+    const tick = async () => {
+      // Skip the network call when the tab is not visible — reschedule a check.
+      if (typeof document !== 'undefined' && document.hidden) {
+        schedule(ACTIVE_INTERVAL_MS);
+        return;
+      }
+
       try {
         const res = await apiGet<Conversation[] | { data: Conversation[] }>(
           '/messages/conversations',
@@ -83,9 +106,28 @@ export default function MessagesPage() {
       } catch (_err) {
         // Silently ignore polling errors to avoid disrupting the UI
       }
-    }, 5000);
 
-    return () => clearInterval(interval);
+      const idle = Date.now() - lastActivityAt > IDLE_AFTER_MS;
+      schedule(idle ? IDLE_INTERVAL_MS : ACTIVE_INTERVAL_MS);
+    };
+
+    schedule(ACTIVE_INTERVAL_MS);
+
+    const activityEvents: (keyof WindowEventMap)[] = [
+      'mousemove',
+      'keydown',
+      'scroll',
+      'click',
+      'touchstart',
+    ];
+    activityEvents.forEach((evt) => window.addEventListener(evt, markActive, { passive: true }));
+    document.addEventListener('visibilitychange', markActive);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      activityEvents.forEach((evt) => window.removeEventListener(evt, markActive));
+      document.removeEventListener('visibilitychange', markActive);
+    };
   }, []);
 
   return (

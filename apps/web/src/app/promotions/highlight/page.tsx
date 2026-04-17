@@ -7,9 +7,9 @@ import { SPOTLIGHT_PRICE_BRL, SPOTLIGHT_DURATION_DAYS } from '@vintage/shared';
 
 const BENEFITS = [
   'Selo de loja em destaque no perfil',
-  'Seus anuncios aparecem antes dos demais',
-  'Notificacoes para seus seguidores sobre novos anuncios',
-  'Estatisticas avancadas da sua loja',
+  'Seus anúncios aparecem antes dos demais',
+  'Notificações para seus seguidores sobre novos anúncios',
+  'Estatísticas avançadas da sua loja',
   'Banner personalizado no seu perfil',
 ];
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
 import { MEGAFONE_FREE_DAYS } from '@vintage/shared';
+import { formatBRL } from '@/lib/i18n';
 
 interface Listing {
   id: string;
@@ -14,15 +15,11 @@ interface Listing {
   images?: Array<{ url: string } | string>;
 }
 
-function formatBRL(value: number): string {
-  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 const BENEFITS = [
   'Visibilidade 10x maior',
   'Aparece primeiro nas buscas',
-  'Notificacao para compradores interessados',
-  '1 uso gratis por mes',
+  'Notificação para compradores interessados',
+  '1 uso grátis por mês',
 ];
 
 const STEPS = [
