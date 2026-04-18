@@ -127,6 +127,12 @@ export class ModerationService {
           isBanned: true,
           bannedAt: new Date(),
           bannedReason: String(reason).slice(0, 500),
+          // Bump tokenVersion so any outstanding JWTs die immediately.
+          // JwtStrategy already throws on isBanned=true, but the ver bump
+          // is defense-in-depth: if the ban flow ever gets split across
+          // service boundaries or the isBanned read comes from a cache,
+          // the ver check still catches the stale token.
+          tokenVersion: { increment: 1 },
         },
       });
 
@@ -153,5 +159,25 @@ export class ModerationService {
     });
 
     return { unbanned: true, userId };
+  }
+
+  /**
+   * Force-logout a user without banning them. Bumps tokenVersion so every
+   * outstanding JWT (access + refresh) issued before this call is
+   * rejected on the next request. Used when support suspects a session
+   * is compromised but doesn't want to suspend the account itself.
+   */
+  async forceLogout(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    return { success: true, userId };
   }
 }
