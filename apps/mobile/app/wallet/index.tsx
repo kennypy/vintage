@@ -5,9 +5,12 @@ import { useRouter } from 'expo-router';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import {
-  getBalance, getTransactions, requestPayout, listPayoutMethods,
+  getBalance, getTransactions, requestPayout, listPayoutMethods, listMyPayouts,
 } from '../../src/services/wallet';
-import type { WalletBalance, WalletTransaction, PayoutMethodView, PixKeyType } from '../../src/services/wallet';
+import type {
+  WalletBalance, WalletTransaction, PayoutMethodView, PixKeyType,
+  PayoutRequestView, PayoutRequestStatus,
+} from '../../src/services/wallet';
 import { ApiError } from '../../src/services/api';
 
 const TRANSACTION_ICONS: Record<string, string> = {
@@ -38,6 +41,21 @@ const TYPE_LABELS: Record<PixKeyType, string> = {
   PIX_RANDOM: 'Aleatória',
 };
 
+// Payout status ↔ (label, badge color). PENDING means "queued for ops"
+// when the MP contract isn't active yet; it's not an error state.
+const PAYOUT_STATUS_LABEL: Record<PayoutRequestStatus, string> = {
+  PENDING: 'Aguardando',
+  PROCESSING: 'Processando',
+  COMPLETED: 'Pago',
+  FAILED: 'Falhou',
+};
+const PAYOUT_STATUS_COLOR: Record<PayoutRequestStatus, string> = {
+  PENDING: colors.warning[600],
+  PROCESSING: colors.primary[600],
+  COMPLETED: colors.success[600],
+  FAILED: colors.error[500],
+};
+
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -47,6 +65,7 @@ export default function WalletScreen() {
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [methods, setMethods] = useState<PayoutMethodView[]>([]);
+  const [payouts, setPayouts] = useState<PayoutRequestView[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [payoutLoading, setPayoutLoading] = useState(false);
@@ -56,14 +75,16 @@ export default function WalletScreen() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [balanceData, transactionsData, methodsData] = await Promise.all([
+      const [balanceData, transactionsData, methodsData, payoutsData] = await Promise.all([
         getBalance(),
         getTransactions(),
         listPayoutMethods().catch(() => [] as PayoutMethodView[]),
+        listMyPayouts().catch(() => ({ items: [] as PayoutRequestView[] })),
       ]);
       setBalance(balanceData);
       setTransactions(transactionsData.items);
       setMethods(methodsData);
+      setPayouts(payoutsData.items);
     } catch (_error) {
       // Keep defaults on error
     } finally {
@@ -168,6 +189,39 @@ export default function WalletScreen() {
           <Text style={styles.manageKeysLinkText}>Gerenciar chaves PIX</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Payout requests (Wave 3C) — when PENDING, the MP contract
+          hasn't processed yet and finance will reconcile manually. */}
+      {payouts.length > 0 && (
+        <>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Saques</Text>
+          {payouts.slice(0, 5).map((p) => (
+            <View
+              key={p.id}
+              style={[styles.payoutRow, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.payoutAmount, { color: theme.text }]}>
+                  R$ {formatBrl(p.amountBrl)}
+                </Text>
+                <Text style={[styles.payoutMeta, { color: theme.textSecondary }]}>
+                  {TYPE_LABELS[p.snapshotType]} · {new Date(p.requestedAt).toLocaleDateString('pt-BR')}
+                </Text>
+                {p.status === 'FAILED' && p.failureReason && (
+                  <Text style={[styles.payoutMeta, { color: colors.error[500] }]} numberOfLines={2}>
+                    {p.failureReason}
+                  </Text>
+                )}
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: PAYOUT_STATUS_COLOR[p.status] + '15' }]}>
+                <Text style={[styles.statusBadgeText, { color: PAYOUT_STATUS_COLOR[p.status] }]}>
+                  {PAYOUT_STATUS_LABEL[p.status]}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </>
+      )}
 
       {/* Transactions */}
       <Text style={[styles.sectionTitle, { color: theme.text }]}>Historico</Text>
@@ -327,6 +381,18 @@ const styles = StyleSheet.create({
   transactionDesc: { fontSize: 14, fontWeight: '500' },
   transactionMeta: { fontSize: 12, marginTop: 2 },
   transactionAmount: { fontSize: 15, fontWeight: '600' },
+  payoutRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  payoutAmount: { fontSize: 15, fontWeight: '600' },
+  payoutMeta: { fontSize: 12, marginTop: 2 },
+  statusBadge: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+  },
+  statusBadgeText: { fontSize: 12, fontWeight: '600' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
   emptyText: { fontSize: 14, marginTop: 4 },

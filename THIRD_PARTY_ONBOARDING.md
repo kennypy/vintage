@@ -41,12 +41,12 @@ concluído (`[x]`) antes de liberar o deploy.
   - Estatuto social / Contrato social
   - Volume projetado (R$/mês)
 
-### 1.5. Payout — chaves PIX salvas
+### 1.5. Payout — chaves PIX salvas + integração MP (Wave 3C)
 
-A Wave 2B mudou o fluxo: o vendedor **cadastra previamente uma ou mais
-chaves PIX** (`/conta/payout-methods`) e escolhe uma na hora do saque
-em `/wallet`. O backend (`apps/api/src/wallet/payout-methods.service.ts`)
-nunca aceita uma chave PIX anônima no body do saque.
+O vendedor cadastra previamente uma ou mais chaves PIX
+(`/conta/payout-methods`) e escolhe uma na hora do saque em `/wallet`.
+O backend (`apps/api/src/wallet/payout-methods.service.ts`) nunca aceita
+uma chave PIX anônima no body do saque.
 
 - Limite: 5 chaves por conta (`MAX_METHODS_PER_USER`).
 - Canonicalização estrita: CPF/CNPJ → só dígitos; email → lowercase;
@@ -59,9 +59,37 @@ nunca aceita uma chave PIX anônima no body do saque.
   — dois saques concorrentes contra o mesmo saldo não deixam a carteira
   negativa.
 
-Quando o Mercado Pago Marketplace estiver ativo para split, integre o
-`/wallet/payout` real trocando o "débito apenas" atual pela chamada da
-API de saque do MP (não coberto nesta PR — é o próximo marco).
+**Gate `cpfVerified` (Wave 3C):** o endpoint `/wallet/payout` exige que
+o vendedor tenha CPF **verificado** (não apenas cadastrado). Verificação
+é feita via upload de documento em `/conta/verificacao` com aprovação
+admin. Isso alinha o gate com a exigência de KYC do Mercado Pago.
+
+**Integração MP Marketplace (Wave 3C):** `apps/api/src/wallet/payouts.service.ts`
+cria uma `PayoutRequest` por saque, debita a carteira atomicamente, e
+chama `POST /v1/money_requests` do MP. Para ativar:
+
+1. `fly secrets set MERCADOPAGO_PAYOUT_ENABLED=true` apenas **depois** do
+   MP Marketplace contract estar ativo (ver §1.4 acima) — antes disso o
+   `sendPixPayout()` lança `MercadoPagoPayoutUnavailableError` e o
+   PayoutRequest fica em status `PENDING` para o financeiro processar
+   manualmente.
+2. Admins marcam manualmente `COMPLETED` ou `FAILED` via
+   `PATCH /wallet/admin/payouts/:id/status` (requer AdminGuard).
+   `FAILED` estorna o saldo atomicamente.
+3. Webhook `POST /payments/webhook` já reconhece o payload — consumir o
+   `external_reference` (PayoutRequest.id) para promover PROCESSING →
+   COMPLETED.
+
+**Lifecycle da PayoutRequest:**
+```
+PENDING  → chamada MP recusada (contrato ainda não ativo, ou limitação)
+PROCESSING  → MP aceitou, aguardando confirmação do banco destinatário
+COMPLETED  → MP confirmou; saldo já debitado
+FAILED  → erro terminal; saldo estornado (REFUND no ledger)
+```
+
+O vendedor vê este histórico em `/wallet` (seção "Saques") no web e
+mobile.
 
 ### 1.5. Homologação
 

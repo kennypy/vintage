@@ -2,6 +2,21 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 
+/**
+ * Raised when the payout endpoint is hit but MERCADOPAGO_PAYOUT_ENABLED
+ * is not 'true'. PayoutsService catches this specifically to leave the
+ * PayoutRequest in PENDING (for the manual ops queue) rather than
+ * transitioning to FAILED + refunding the wallet. Once the MP
+ * Marketplace contract is active, flip the flag and this class goes
+ * unused.
+ */
+export class MercadoPagoPayoutUnavailableError extends Error {
+  constructor() {
+    super('Mercado Pago payout contract not yet active; routing to ops queue.');
+    this.name = 'MercadoPagoPayoutUnavailableError';
+  }
+}
+
 interface MercadoPagoPaymentResponse {
   id: string;
   status: string;
@@ -323,7 +338,120 @@ export class MercadoPagoClient {
     };
   }
 
+  /**
+   * Send a PIX payout to an external key. Requires Mercado Pago's
+   * Marketplace / Money Out contract to be activated — the endpoint
+   * (`/v1/money_requests`) is gated by the merchant's contract and
+   * will 403 otherwise. We gate this side on `MERCADOPAGO_PAYOUT_ENABLED`
+   * so staging/dev can run the app without the contract active; when
+   * the flag is off, callers get a clear "not yet available" error and
+   * the PayoutRequest row stays PENDING for ops to reconcile manually.
+   *
+   * Idempotency: the externalReference MUST be the PayoutRequest.id so
+   * a retry lands on the same MP record and we dedupe on our side via
+   * `PayoutRequest.externalId UNIQUE`.
+   *
+   * Security:
+   *   - `pixKey` is the canonicalised value (digits-only for CPF/CNPJ,
+   *     lowercased for email, +55… for phone, UUID v4 for random).
+   *   - The idempotency key is SHA256(externalReference) so a resend of
+   *     the same request is a no-op at the MP side, never a double-spend.
+   *   - We never log the raw pixKey — only `type` + last-4 are passed
+   *     to the structured logger for audit purposes.
+   */
+  async sendPixPayout(args: {
+    externalReference: string;
+    pixKey: string;
+    pixKeyType: 'PIX_CPF' | 'PIX_CNPJ' | 'PIX_EMAIL' | 'PIX_PHONE' | 'PIX_RANDOM';
+    amountBrl: number;
+    descriptionForRecipient?: string;
+  }): Promise<{ externalId: string; status: 'PROCESSING' | 'COMPLETED' }> {
+    if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot send payouts in production');
+      }
+      return this.mockPixPayout(args.externalReference);
+    }
+
+    const payoutEnabled = this.configService.get<string>(
+      'MERCADOPAGO_PAYOUT_ENABLED',
+      'false',
+    );
+    if (payoutEnabled !== 'true') {
+      // Contract not yet active. Surface a specific exception so
+      // PayoutsService can keep the row PENDING without marking it FAILED.
+      throw new MercadoPagoPayoutUnavailableError();
+    }
+
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`payout:${args.externalReference}`)
+      .digest('hex');
+
+    // Map to the MP `/v1/money_requests` contract. Key names are stable
+    // per MP's PIX disbursement docs; the shape is approximate here and
+    // the actual integration will tighten it during homologação. The
+    // structure is chosen so the translation layer lives in ONE place
+    // when the contract goes live.
+    const body = {
+      external_reference: args.externalReference,
+      transaction_amount: args.amountBrl,
+      payment_method_id: 'pix',
+      description: (args.descriptionForRecipient ?? 'Saque Vintage.br').slice(0, 140),
+      payer: { type: 'marketplace' },
+      additional_info: { payer: { registration_date: new Date().toISOString() } },
+      destination: {
+        type: 'pix',
+        pix: {
+          key: args.pixKey,
+          key_type: this.mapPixKeyType(args.pixKeyType),
+        },
+      },
+    };
+
+    const response = await this.request<{ id: string | number; status: string }>(
+      'POST',
+      '/v1/money_requests',
+      body,
+      idempotencyKey,
+    );
+
+    this.logger.log(
+      `PIX payout accepted — externalReference=${args.externalReference} mp_id=${String(response.id)} status=${response.status}`,
+    );
+
+    // MP returns `approved` for instant clearance, `in_process` for the
+    // async path. We collapse to our two-state model; webhooks promote
+    // PROCESSING to COMPLETED.
+    return {
+      externalId: String(response.id),
+      status: response.status === 'approved' ? 'COMPLETED' : 'PROCESSING',
+    };
+  }
+
+  private mapPixKeyType(
+    type: 'PIX_CPF' | 'PIX_CNPJ' | 'PIX_EMAIL' | 'PIX_PHONE' | 'PIX_RANDOM',
+  ): string {
+    switch (type) {
+      case 'PIX_CPF': return 'cpf';
+      case 'PIX_CNPJ': return 'cnpj';
+      case 'PIX_EMAIL': return 'email';
+      case 'PIX_PHONE': return 'phone';
+      case 'PIX_RANDOM': return 'random_key';
+    }
+  }
+
   // --------------- Mock implementations for dev mode ---------------
+
+  private mockPixPayout(externalReference: string) {
+    this.logger.warn(
+      'Using mock PIX payout (MERCADOPAGO_ACCESS_TOKEN not set)',
+    );
+    return {
+      externalId: `mock-${crypto.randomUUID()}`,
+      status: 'PROCESSING' as const,
+    };
+  }
 
   private mockPixPayment(orderId: string, amountBrl: number) {
     const id = crypto.randomUUID();

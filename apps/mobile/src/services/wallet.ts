@@ -88,3 +88,33 @@ export async function deletePayoutMethod(id: string): Promise<{ success: true }>
     method: 'DELETE',
   });
 }
+
+// ── Payout request history (Wave 3C) ────────────────────────────────
+
+export type PayoutRequestStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+export interface PayoutRequestView {
+  id: string;
+  amountBrl: number;
+  status: PayoutRequestStatus;
+  snapshotType: PixKeyType;
+  requestedAt: string;
+  completedAt: string | null;
+  failureReason: string | null;
+}
+
+export async function listMyPayouts(page = 1): Promise<{
+  items: PayoutRequestView[];
+  total: number;
+  page: number;
+  hasMore: boolean;
+}> {
+  const q = page > 1 ? `?page=${page}` : '';
+  return apiFetch<{
+    items: PayoutRequestView[];
+    total: number;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
+  }>(`/wallet/payouts${q}`);
+}
