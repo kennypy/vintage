@@ -16,6 +16,7 @@ import {
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { CaptchaGuard } from './captcha.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { GoogleProfile } from './google.strategy';
 import { AppleStrategy } from './apple.strategy';
@@ -44,7 +45,12 @@ export class AuthController {
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Cadastrar novo usuário' })
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Cadastrar novo usuário',
+    description:
+      'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. No-op otherwise.',
+  })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
@@ -141,7 +147,12 @@ export class AuthController {
 
   @Post('2fa/sms/login-resend')
   @Throttle(TWOFA_THROTTLE)
-  @ApiOperation({ summary: 'Reenviar código SMS durante login (requer tempToken do login)' })
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Reenviar código SMS durante login (requer tempToken do login)',
+    description:
+      'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. SMS costs money; captcha protects against resend floods on a stolen tempToken.',
+  })
   resendLoginSms(@Body() dto: ResendLoginSmsDto) {
     return this.authService.resendLoginSmsCode(dto.tempToken);
   }
@@ -213,7 +224,12 @@ export class AuthController {
 
   @Post('forgot-password')
   @Throttle(PASSWORD_THROTTLE)
-  @ApiOperation({ summary: 'Solicitar redefinição de senha por email' })
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Solicitar redefinição de senha por email',
+    description:
+      'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. Captcha stops scripted enumeration of valid emails across the response-time side-channel.',
+  })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
   }

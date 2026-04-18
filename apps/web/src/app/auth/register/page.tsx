@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiPost, setAuthToken } from '@/lib/api';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 function formatCPF(value: string): string {
   const digits = value.replace(/\D/g, '').slice(0, 11);
@@ -20,6 +21,7 @@ export default function RegisterPage() {
   const [cpf, setCpf] = useState('');
   const [password, setPassword] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -44,6 +46,11 @@ export default function RegisterPage() {
         email,
         cpf: cpf.replace(/\D/g, ''),
         password,
+        // Null when Turnstile isn't configured or the widget hasn't
+        // solved yet — the backend CaptchaGuard no-ops unless
+        // CAPTCHA_ENFORCE=true, so the server rejects only when
+        // the ops flag is flipped on.
+        captchaToken,
       });
       setAuthToken(response.accessToken);
       router.push('/');
@@ -137,6 +144,11 @@ export default function RegisterPage() {
               </Link>
             </span>
           </label>
+
+          <TurnstileWidget
+            onToken={setCaptchaToken}
+            onExpired={() => setCaptchaToken(null)}
+          />
 
           <button
             type="submit"

@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { apiPost } from '@/lib/api';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -13,7 +15,10 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await apiPost('/auth/forgot-password', { email: email.trim().toLowerCase() });
+      await apiPost('/auth/forgot-password', {
+        email: email.trim().toLowerCase(),
+        captchaToken,
+      });
     } catch {
       // Server returns neutral response; treat any error the same way
     } finally {
@@ -46,6 +51,10 @@ export default function ForgotPasswordPage() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
                 />
               </div>
+              <TurnstileWidget
+                onToken={setCaptchaToken}
+                onExpired={() => setCaptchaToken(null)}
+              />
               <button
                 type="submit"
                 disabled={loading}
