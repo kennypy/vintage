@@ -55,6 +55,8 @@ export default function SellerProfileClient({ id }: { id: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
 
   // The seller page is viewable while logged out; the block/follow actions
   // only make sense for authenticated callers. We hydrate auth-scoped data
@@ -85,8 +87,18 @@ export default function SellerProfileClient({ id }: { id: string }) {
   // Close the action menu on outside-click and on Escape. Both listeners
   // are bound only while the menu is open and torn down on close/unmount
   // so there's no dangling global handler.
+  //
+  // a11y: when the menu opens, move focus to the first item so keyboard
+  // users don't have to tab in. When it closes (via any path — outside
+  // click, Escape, or selecting an item), restore focus to the trigger
+  // button so their place in the tab order is preserved.
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) {
+      return;
+    }
+    // Defer focus to next tick so the menu is actually in the DOM.
+    const focusTimer = setTimeout(() => firstMenuItemRef.current?.focus(), 0);
+
     const onClick = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
@@ -97,9 +109,17 @@ export default function SellerProfileClient({ id }: { id: string }) {
     };
     document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
+
     return () => {
+      clearTimeout(focusTimer);
       document.removeEventListener('mousedown', onClick);
       document.removeEventListener('keydown', onKey);
+      // Restore focus to the trigger on close. Guard with a DOM check
+      // because the menu may be unmounting during a navigation, in
+      // which case focusing is a no-op anyway.
+      if (typeof document !== 'undefined' && document.contains(menuTriggerRef.current)) {
+        menuTriggerRef.current?.focus();
+      }
     };
   }, [menuOpen]);
 
@@ -244,6 +264,7 @@ export default function SellerProfileClient({ id }: { id: string }) {
             {!isSelf && (
               <div className="relative" ref={menuRef}>
                 <button
+                  ref={menuTriggerRef}
                   type="button"
                   onClick={() => setMenuOpen((v) => !v)}
                   disabled={blockLoading}
@@ -262,6 +283,7 @@ export default function SellerProfileClient({ id }: { id: string }) {
                     className="absolute right-0 top-full mt-1 min-w-[200px] bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10"
                   >
                     <button
+                      ref={firstMenuItemRef}
                       type="button"
                       role="menuitem"
                       onClick={handleBlockToggle}
