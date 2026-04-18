@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CronLockService } from '../common/services/cron-lock.service';
+import { SearchService } from '../search/search.service';
 
 @Injectable()
 export class ListingsCronService {
@@ -20,6 +21,7 @@ export class ListingsCronService {
     private readonly notifications: NotificationsService,
     private readonly config: ConfigService,
     private readonly cronLock: CronLockService,
+    private readonly search: SearchService,
   ) {
     this.staleListingDays = this.config.get<number>('STALE_LISTING_DAYS', 90);
     this.pausedCleanupDays = this.config.get<number>('PAUSED_CLEANUP_DAYS', 180);
@@ -58,6 +60,9 @@ export class ListingsCronService {
           where: { id: listing.id },
           data: { status: 'PAUSED' },
         });
+
+        // Drop from search — PAUSED listings must not appear in results.
+        this.search.removeListing(listing.id).catch(() => {});
 
         await this.notifications
           .createNotification(
@@ -108,6 +113,11 @@ export class ListingsCronService {
           where: { id: listing.id },
           data: { status: 'DELETED' },
         });
+
+        // Belt-and-braces: PAUSED listings should already be absent
+        // from the index, but a failed earlier sync could leave a
+        // stale doc behind. Issue the remove idempotently.
+        this.search.removeListing(listing.id).catch(() => {});
       } catch (err) {
         this.logger.error(
           `Failed to clean up listing ${listing.id}: ${String(err).slice(0, 200)}`,

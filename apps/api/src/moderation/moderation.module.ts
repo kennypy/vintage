@@ -4,9 +4,10 @@ import { ModerationService } from './moderation.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { AuthModule } from '../auth/auth.module';
+import { ListingsModule } from '../listings/listings.module';
 
 @Module({
-  imports: [PrismaModule, NotificationsModule, AuthModule],
+  imports: [PrismaModule, NotificationsModule, AuthModule, ListingsModule],
   controllers: [ModerationController],
   providers: [ModerationService],
 })

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingsService } from '../listings/listings.service';
 import { CreateBundleDto } from './dto/create-bundle.dto';
 import {
   BUYER_PROTECTION_FIXED_BRL,
@@ -14,7 +15,10 @@ import {
 
 @Injectable()
 export class BundlesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private listings: ListingsService,
+  ) {}
 
   async create(buyerId: string, dto: CreateBundleDto) {
     // Validate all listings exist and are ACTIVE
@@ -256,6 +260,11 @@ export class BundlesService {
 
       return orders;
     });
+
+    // All bundled listings transitioned ACTIVE → SOLD; drop them from search.
+    for (const item of bundle.items) {
+      this.listings.syncSearchIndex(item.listingId).catch(() => {});
+    }
 
     return {
       bundleId,

@@ -9,6 +9,7 @@ import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ListingsService } from '../listings/listings.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -73,6 +74,10 @@ describe('OrdersService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CouponsService, useValue: mockCoupons },
         { provide: NotificationsService, useValue: mockNotifications },
+        {
+          provide: ListingsService,
+          useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

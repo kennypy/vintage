@@ -6,6 +6,7 @@ import {
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { ListingsService } from '../listings/listings.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -68,6 +69,10 @@ describe('UsersService', () => {
             sendWelcomeEmail: jest.fn(),
             sendDeletionConfirmation: jest.fn(),
           },
+        },
+        {
+          provide: ListingsService,
+          useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
@@ -226,7 +231,8 @@ describe('UsersService', () => {
         vacationMode: true,
         vacationUntil: null,
       });
-      mockPrisma.listing.updateMany.mockResolvedValue({ count: 3 });
+      mockPrisma.listing.findMany.mockResolvedValue([{ id: 'l-1' }, { id: 'l-2' }]);
+      mockPrisma.listing.updateMany.mockResolvedValue({ count: 2 });
 
       const result = await service.toggleVacationMode('user-1', true);
 
@@ -242,7 +248,8 @@ describe('UsersService', () => {
         vacationMode: false,
         vacationUntil: null,
       });
-      mockPrisma.listing.updateMany.mockResolvedValue({ count: 3 });
+      mockPrisma.listing.findMany.mockResolvedValue([{ id: 'l-1' }]);
+      mockPrisma.listing.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.toggleVacationMode('user-1', false);
 
@@ -341,6 +348,7 @@ describe('UsersService', () => {
         socialProvider: null,
       });
       mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.listing.findMany.mockResolvedValue([]);
       mockPrisma.listing.updateMany.mockResolvedValue({ count: 0 });
       mockPrisma.order.updateMany.mockResolvedValue({ count: 0 });
       mockPrisma.offer.updateMany.mockResolvedValue({ count: 0 });

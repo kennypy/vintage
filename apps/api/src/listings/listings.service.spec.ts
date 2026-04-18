@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
 
 jest.mock('@vintage/shared', () => ({
   MAX_LISTING_IMAGES: 20,
@@ -57,6 +58,13 @@ describe('ListingsService', () => {
             get: jest.fn((k) =>
               k === 'ALLOWED_IMAGE_HOSTS' ? 'img.example.com' : undefined,
             ),
+          },
+        },
+        {
+          provide: SearchService,
+          useValue: {
+            indexListing: jest.fn().mockResolvedValue(undefined),
+            removeListing: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
@@ -409,6 +417,83 @@ describe('ListingsService', () => {
       await expect(
         service.getPriceSuggestion('invalid-cat'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // Sync contract: only ACTIVE listings live in Meilisearch. All other
+  // status values — PAUSED, SOLD, DELETED, SUSPENDED — must be evicted
+  // so buyers never see them in search results.
+  describe('syncSearchIndex', () => {
+    const activeListing = {
+      id: 'listing-1',
+      title: 'Vestido Zara',
+      description: 'midi',
+      sellerId: 'seller-1',
+      categoryId: 'cat-1',
+      brandId: 'brand-1',
+      condition: 'GOOD',
+      size: 'M',
+      color: 'azul',
+      priceBrl: { toString: () => '120.00', valueOf: () => 120 },
+      status: 'ACTIVE',
+      viewCount: 5,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      images: [{ url: 'https://img.example.com/1.jpg' }],
+      category: { namePt: 'Vestidos', slug: 'vestidos' },
+      brand: { name: 'Zara' },
+    };
+
+    it('indexes the document when listing is ACTIVE', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(activeListing);
+      const searchMock = (service as any).searchService;
+
+      await service.syncSearchIndex('listing-1');
+
+      expect(searchMock.indexListing).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'listing-1',
+          title: 'Vestido Zara',
+          status: 'ACTIVE',
+          priceBrl: 120,
+          brand: 'Zara',
+          category: 'Vestidos',
+          imageUrl: 'https://img.example.com/1.jpg',
+        }),
+      );
+      expect(searchMock.removeListing).not.toHaveBeenCalled();
+    });
+
+    it.each(['PAUSED', 'SOLD', 'DELETED', 'SUSPENDED'])(
+      'removes from index when status is %s',
+      async (status) => {
+        mockPrisma.listing.findUnique.mockResolvedValue({
+          ...activeListing,
+          status,
+        });
+        const searchMock = (service as any).searchService;
+
+        await service.syncSearchIndex('listing-1');
+
+        expect(searchMock.removeListing).toHaveBeenCalledWith('listing-1');
+        expect(searchMock.indexListing).not.toHaveBeenCalled();
+      },
+    );
+
+    it('removes from index when listing does not exist (hard-delete path)', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(null);
+      const searchMock = (service as any).searchService;
+
+      await service.syncSearchIndex('listing-1');
+
+      expect(searchMock.removeListing).toHaveBeenCalledWith('listing-1');
+    });
+
+    it('swallows search errors so a broken index never breaks DB writes', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(activeListing);
+      const searchMock = (service as any).searchService;
+      searchMock.indexListing.mockRejectedValueOnce(new Error('meili down'));
+
+      await expect(service.syncSearchIndex('listing-1')).resolves.not.toThrow();
     });
   });
 });

@@ -7,6 +7,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { BundlesService } from './bundles.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingsService } from '../listings/listings.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -46,6 +47,10 @@ describe('BundlesService', () => {
       providers: [
         BundlesService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: ListingsService,
+          useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

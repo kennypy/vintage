@@ -1,9 +1,10 @@
 import {
-  Injectable, NotFoundException, ForbiddenException, BadRequestException,
+  Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { SearchService } from '../search/search.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
@@ -17,11 +18,13 @@ const DEFAULT_ALLOWED_IMAGE_HOSTS = [
 
 @Injectable()
 export class ListingsService {
+  private readonly logger = new Logger(ListingsService.name);
   private readonly allowedImageHosts: string[];
 
   constructor(
     private prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly searchService: SearchService,
   ) {
     const raw = this.config.get<string>('ALLOWED_IMAGE_HOSTS', '');
     const bucket = this.config.get<string>('S3_BUCKET', '');
@@ -71,6 +74,55 @@ export class ListingsService {
     for (const u of urls) this.validateImageUrl(u);
   }
 
+  /**
+   * Reconcile a listing's state in Meilisearch. Only ACTIVE listings
+   * belong in the search index; anything else is removed so buyers
+   * never see SOLD/PAUSED/DELETED items in search results. Errors
+   * are swallowed — search indexing is a best-effort sidecar and must
+   * never fail a listing mutation. A nightly reindex script catches
+   * any drift.
+   */
+  async syncSearchIndex(listingId: string): Promise<void> {
+    try {
+      const listing = await this.prisma.listing.findUnique({
+        where: { id: listingId },
+        include: {
+          images: { orderBy: { position: 'asc' }, take: 1 },
+          category: { select: { namePt: true, slug: true } },
+          brand: { select: { name: true } },
+        },
+      });
+
+      if (!listing || listing.status !== 'ACTIVE') {
+        await this.searchService.removeListing(listingId);
+        return;
+      }
+
+      await this.searchService.indexListing({
+        id: listing.id,
+        title: listing.title,
+        description: listing.description,
+        sellerId: listing.sellerId,
+        categoryId: listing.categoryId,
+        brandId: listing.brandId ?? null,
+        category: listing.category?.namePt ?? null,
+        brand: listing.brand?.name ?? null,
+        condition: listing.condition,
+        size: listing.size ?? null,
+        color: listing.color ?? null,
+        priceBrl: Number(listing.priceBrl),
+        status: listing.status,
+        viewCount: listing.viewCount,
+        imageUrl: listing.images[0]?.url ?? null,
+        createdAt: listing.createdAt.getTime(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Meilisearch sync failed for listing ${listingId}: ${String(err).slice(0, 200)}`,
+      );
+    }
+  }
+
   async create(sellerId: string, dto: CreateListingDto) {
     const seller = await this.prisma.user.findUnique({
       where: { id: sellerId },
@@ -118,7 +170,7 @@ export class ListingsService {
       }
     }
 
-    return this.prisma.listing.create({
+    const created = await this.prisma.listing.create({
       data: {
         sellerId,
         title: dto.title,
@@ -145,6 +197,11 @@ export class ListingsService {
         brand: true,
       },
     });
+
+    // Fire-and-forget: Meilisearch sync never blocks the response.
+    this.syncSearchIndex(created.id).catch(() => {});
+
+    return created;
   }
 
   async findOne(id: string) {
@@ -311,11 +368,15 @@ export class ListingsService {
       data.status = dto.status;
     }
 
-    return this.prisma.listing.update({
+    const updated = await this.prisma.listing.update({
       where: { id },
       data,
       include: { images: { orderBy: { position: 'asc' } }, category: true, brand: true },
     });
+
+    this.syncSearchIndex(updated.id).catch(() => {});
+
+    return updated;
   }
 
   async remove(id: string, sellerId: string) {
@@ -326,6 +387,7 @@ export class ListingsService {
     }
 
     await this.prisma.listing.update({ where: { id }, data: { status: 'DELETED' } });
+    this.syncSearchIndex(id).catch(() => {});
     return { deleted: true };
   }
 

@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { ListingsService } from '../listings/listings.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -34,6 +35,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
+    private listings: ListingsService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -425,17 +427,21 @@ export class UsersService {
       select: { vacationMode: true, vacationUntil: true },
     });
 
-    // Pause/unpause all listings
-    if (enabled) {
-      await this.prisma.listing.updateMany({
-        where: { sellerId: userId, status: 'ACTIVE' },
-        data: { status: 'PAUSED' },
-      });
-    } else {
-      await this.prisma.listing.updateMany({
-        where: { sellerId: userId, status: 'PAUSED' },
-        data: { status: 'ACTIVE' },
-      });
+    // Pause/unpause all listings. Collect ids BEFORE the updateMany so
+    // we can reconcile search afterwards — syncSearchIndex re-reads
+    // the row and indexes/removes based on the new status.
+    const fromStatus = enabled ? 'ACTIVE' : 'PAUSED';
+    const toStatus = enabled ? 'PAUSED' : 'ACTIVE';
+    const affected = await this.prisma.listing.findMany({
+      where: { sellerId: userId, status: fromStatus },
+      select: { id: true },
+    });
+    await this.prisma.listing.updateMany({
+      where: { sellerId: userId, status: fromStatus },
+      data: { status: toStatus },
+    });
+    for (const { id } of affected) {
+      this.listings.syncSearchIndex(id).catch(() => {});
     }
 
     return user;
@@ -532,6 +538,13 @@ export class UsersService {
     const now = new Date();
     const anonymizedEmail = `deleted-${user.id}@deleted.vintage.br`;
 
+    // Snapshot the set of listings that will be DELETED inside the tx
+    // so we can drop them from search once the commit lands.
+    const listingsToDelete = await this.prisma.listing.findMany({
+      where: { sellerId: userId, status: { in: ['ACTIVE', 'PAUSED'] } },
+      select: { id: true },
+    });
+
     await this.prisma.$transaction(async (tx) => {
       // Soft-delete: anonymize PII, set deletedAt, mark as banned to block login
       await tx.user.update({
@@ -598,6 +611,12 @@ export class UsersService {
         },
       });
     });
+
+    // Evict now-DELETED listings from search. Fire-and-forget — the
+    // DB state is already correct; the index is best-effort.
+    for (const { id } of listingsToDelete) {
+      this.listings.syncSearchIndex(id).catch(() => {});
+    }
 
     this.logger.log(`Conta ${userId} soft-deleted (hard-delete em 30 dias)`);
     return { success: true };

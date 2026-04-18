@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from './orders.service';
+import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { SHIPPING_DEADLINE_DAYS } from '@vintage/shared';
 
@@ -14,6 +15,7 @@ export class OrdersCronService {
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
     private readonly cronLock: CronLockService,
+    private readonly listings: ListingsService,
   ) {}
 
   /**
@@ -142,6 +144,9 @@ export class OrdersCronService {
             data: { status: 'ACTIVE' },
           });
         });
+
+        // Listing is ACTIVE again — re-add it to search.
+        this.listings.syncSearchIndex(order.listingId).catch(() => {});
 
         this.logger.log(`Auto-cancelled order ${order.id} — buyer refunded R$${refundAmount.toFixed(2)}`);
       } catch (err) {
