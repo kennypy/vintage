@@ -250,6 +250,32 @@ A parte de submissão está detalhada em `STORE_SUBMISSION.md`. Resumo:
 
 ---
 
+## 8c. Breaking change — Wave 3C payout gate
+
+Starting in Wave 3C, `POST /wallet/payout` requires the caller's CPF to
+be **verified** (not merely linked). Verification is manual: the seller
+uploads a document in `Conta → Verificação`, admin reviews, and flips
+`cpfVerified = true`. Mercado Pago's own KYC would refuse payouts to
+unverified CPFs anyway, so failing earlier is a clearer UX.
+
+**Effect at deploy:** any seller with `cpfVerified = false` (including
+every OAuth user who used the launch window to link a CPF but hasn't
+had their doc reviewed) **cannot withdraw** until admin approves.
+
+**Mitigations:**
+- Staff the admin verification queue for 5× the usual throughput for
+  the first week after deploy.
+- The seller-facing error message points them to `Conta → Verificação`.
+- The wallet UI already shows a "CPF não verificado" banner for these
+  accounts (Wave 2D) — no code change needed on the client.
+
+**MP Marketplace contract not yet active:** also set
+`MERCADOPAGO_PAYOUT_ENABLED=false` in Fly secrets until the B2B contract
+is live. Wallet debits still succeed, but `PayoutRequest` rows stay
+`PENDING` and finance/ops processes PIX out-of-band via the new admin
+endpoint `PATCH /wallet/admin/payouts/:id/status`. Once the contract is
+active, flip the flag and the same code path calls MP directly.
+
 ## 8b. Breaking change — Wave 3B session invalidation
 
 A Wave 3B rollout adds a `tokenVersion` claim (`ver`) to every JWT. The

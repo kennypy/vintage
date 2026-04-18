@@ -68,6 +68,7 @@ model User {
   offers            Offer[]
   wallet            Wallet?
   payoutMethods     PayoutMethod[]
+  payoutRequests    PayoutRequest[]
   favorites         Favorite[]
   followersRel      Follow[]            @relation("Following")
   followingRel      Follow[]            @relation("Follower")
@@ -371,6 +372,52 @@ model PayoutMethod {
   // collision masquerading as a duplicate.
   @@unique([userId, type, pixKey])
   @@index([userId])
+}
+
+// Durable record of every wallet payout request. The WalletTransaction
+// entry is the internal ledger row that debits the balance; this row is
+// the outward-facing receipt — what the seller sees under "Meus saques",
+// what ops updates when Mercado Pago confirms/fails the transfer, and
+// what the webhook handler reconciles status changes against.
+//
+// Lifecycle: PENDING (created) → PROCESSING (MP accepted the call) →
+// COMPLETED | FAILED. On FAILED we re-credit the wallet atomically and
+// record `failureReason`. externalId is the Mercado Pago reference so
+// webhooks / admin lookups can dedupe.
+model PayoutRequest {
+  id              String              @id @default(cuid())
+  userId          String
+  payoutMethodId  String
+  // Snapshot of the method at request time so a later delete/edit of the
+  // saved method doesn't leave an orphan payout record. The raw PIX key
+  // is captured here too (it's already owned by this user and the row is
+  // owned-only by construction).
+  snapshotType    PayoutMethodType
+  snapshotPixKey  String
+  amountBrl       Decimal             @db.Decimal(10, 2)
+  status          PayoutRequestStatus @default(PENDING)
+  externalId      String?             @unique // MP reference (null until accepted)
+  failureReason   String?
+  // Reference to the wallet debit that funded this payout. On FAILED we
+  // reverse the debit by creating a credit transaction that points back
+  // at this id, so the ledger stays auditable.
+  walletTransactionId String?         @unique
+  requestedAt     DateTime            @default(now())
+  processingAt    DateTime?
+  completedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([requestedAt])
+}
+
+enum PayoutRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 // --- Social ---

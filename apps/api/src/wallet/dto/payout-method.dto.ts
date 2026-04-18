@@ -41,3 +41,18 @@ export class RequestPayoutDto {
   @IsString()
   payoutMethodId!: string;
 }
+
+const PAYOUT_TERMINAL_STATUSES = ['COMPLETED', 'FAILED'] as const;
+type PayoutTerminalStatus = (typeof PAYOUT_TERMINAL_STATUSES)[number];
+
+export class AdminUpdatePayoutStatusDto {
+  @ApiProperty({ enum: PAYOUT_TERMINAL_STATUSES, example: 'COMPLETED' })
+  @IsEnum(PAYOUT_TERMINAL_STATUSES)
+  status!: PayoutTerminalStatus;
+
+  @ApiPropertyOptional({ example: 'PIX rejeitado pelo banco destinatário.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  failureReason?: string;
+}

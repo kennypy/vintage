@@ -10,6 +10,6 @@ import { MercadoPagoClient } from './mercadopago.client';
   imports: [ConfigModule, PrismaModule, NotificationsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, MercadoPagoClient],
-  exports: [PaymentsService],
+  exports: [PaymentsService, MercadoPagoClient],
 })
 export class PaymentsModule {}

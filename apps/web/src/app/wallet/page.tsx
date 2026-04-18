@@ -32,6 +32,31 @@ interface PayoutMethodView {
   createdAt: string;
 }
 
+type PayoutRequestStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+interface PayoutRequestView {
+  id: string;
+  amountBrl: number;
+  status: PayoutRequestStatus;
+  snapshotType: PixKeyType;
+  requestedAt: string;
+  completedAt: string | null;
+  failureReason: string | null;
+}
+
+const PAYOUT_STATUS_LABEL: Record<PayoutRequestStatus, string> = {
+  PENDING: 'Aguardando',
+  PROCESSING: 'Processando',
+  COMPLETED: 'Pago',
+  FAILED: 'Falhou',
+};
+const PAYOUT_STATUS_CLASS: Record<PayoutRequestStatus, string> = {
+  PENDING: 'bg-yellow-50 text-yellow-700',
+  PROCESSING: 'bg-blue-50 text-blue-700',
+  COMPLETED: 'bg-green-50 text-green-700',
+  FAILED: 'bg-red-50 text-red-700',
+};
+
 const TYPE_LABELS: Record<string, string> = {
   sale: 'Venda',
   payout: 'Saque',
@@ -69,6 +94,7 @@ export default function WalletPage() {
   const [balance, setBalance] = useState<WalletBalance | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [methods, setMethods] = useState<PayoutMethodView[]>([]);
+  const [payouts, setPayouts] = useState<PayoutRequestView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPayout, setShowPayout] = useState(false);
@@ -78,14 +104,16 @@ export default function WalletPage() {
   const [payoutError, setPayoutError] = useState<string | null>(null);
 
   const refreshAll = async () => {
-    const [bal, txnsRaw, methodsData] = await Promise.all([
+    const [bal, txnsRaw, methodsData, payoutsData] = await Promise.all([
       apiGet<WalletBalance>('/wallet').catch(() => null),
       apiGet<{ items: WalletTransaction[] } | WalletTransaction[]>('/wallet/transactions').catch(() => []),
       apiGet<PayoutMethodView[]>('/wallet/payout-methods').catch(() => [] as PayoutMethodView[]),
+      apiGet<{ items: PayoutRequestView[] }>('/wallet/payouts').catch(() => ({ items: [] as PayoutRequestView[] })),
     ]);
     if (bal) setBalance(bal);
     setTransactions(Array.isArray(txnsRaw) ? txnsRaw : (txnsRaw.items ?? []));
     setMethods(methodsData);
+    setPayouts(payoutsData.items);
     const def = methodsData.find((m) => m.isDefault) ?? methodsData[0];
     if (def) setSelectedMethodId(def.id);
   };
@@ -285,6 +313,42 @@ export default function WalletPage() {
               Cancelar
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Payout requests (Wave 3C) */}
+      {payouts.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Saques</h2>
+          <ul className="space-y-2">
+            {payouts.slice(0, 5).map((p) => (
+              <li
+                key={p.id}
+                className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {formatBRL(p.amountBrl)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {p.snapshotType.replace('PIX_', '')}
+                    {' · '}
+                    {new Date(p.requestedAt).toLocaleDateString('pt-BR')}
+                  </p>
+                  {p.status === 'FAILED' && p.failureReason && (
+                    <p className="text-xs text-red-600 mt-1 truncate">
+                      {p.failureReason}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${PAYOUT_STATUS_CLASS[p.status]}`}
+                >
+                  {PAYOUT_STATUS_LABEL[p.status]}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
