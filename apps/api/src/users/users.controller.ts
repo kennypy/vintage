@@ -10,6 +10,8 @@ import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
+import { SetCpfDto } from './dto/set-cpf.dto';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('users')
 @Controller()
@@ -118,6 +120,21 @@ export class UsersController {
   @ApiOperation({ summary: 'Perfil do usuário autenticado' })
   getMyProfile(@CurrentUser() user: AuthUser) {
     return this.usersService.getMyProfile(user.id);
+  }
+
+  @Post('users/me/cpf')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  // Tight throttle: CPF-set is a one-shot for OAuth accounts. Three attempts
+  // per 15 minutes is enough for typos; more than that is brute-forcing.
+  @Throttle({ default: { limit: 3, ttl: 15 * 60 * 1000 } })
+  @ApiOperation({
+    summary: 'Adicionar CPF à conta (contas OAuth criadas sem CPF)',
+    description:
+      'CPF é set-once: depois de cadastrado, alterações só via suporte para preservar a integridade de repasses e NF-e.',
+  })
+  setCpf(@CurrentUser() user: AuthUser, @Body() dto: SetCpfDto) {
+    return this.usersService.setCpf(user.id, dto.cpf);
   }
 
   @Get('users/:id')
