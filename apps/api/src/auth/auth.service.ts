@@ -19,6 +19,7 @@ import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
+import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { isValidCPF } from '@vintage/shared';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -53,6 +54,7 @@ export class AuthService {
     private smsService: SmsService,
     private notificationsService: NotificationsService,
     private redis: RedisService,
+    private analytics: AnalyticsService,
   ) {}
 
   // ── 2FA brute-force helpers ───────────────────────────────────────────
@@ -141,6 +143,14 @@ export class AuthService {
 
     // Send welcome email (non-blocking, non-critical)
     this.emailService.sendWelcomeEmail(user.email, user.name);
+
+    // Analytics — fires the top of the activation funnel. Property
+    // set deliberately minimal (no email / CPF / phone) — the user
+    // id is the only identifier PostHog gets from us.
+    this.analytics.capture(user.id, AnalyticsEvents.USER_REGISTERED, {
+      hasPhone: Boolean(user.phone),
+      tosVersion: dto.tosVersion,
+    });
 
     return tokens;
   }

@@ -12,6 +12,7 @@ import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
+import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -28,6 +29,7 @@ export class OrdersService {
     private notifications: NotificationsService,
     private listings: ListingsService,
     private fraud: FraudService,
+    private analytics: AnalyticsService,
   ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
@@ -290,6 +292,26 @@ export class OrdersService {
     // don't see a purchased item in results.
     this.listings.syncSearchIndex(dto.listingId).catch(() => {});
 
+    this.analytics.capture(buyerId, AnalyticsEvents.ORDER_CREATED, {
+      orderId: order.id,
+      listingId: order.listingId,
+      sellerId: order.sellerId,
+      totalBrl: Number(order.totalBrl),
+      itemPriceBrl: Number(order.itemPriceBrl),
+      paymentMethod: order.paymentMethod,
+      isFreeOrder,
+      usedCoupon: Boolean(order.couponId),
+    });
+    if (isFreeOrder) {
+      // Coupon-100% orders are paid at creation, so fire the
+      // order_paid signal now to keep funnels consistent.
+      this.analytics.capture(buyerId, AnalyticsEvents.ORDER_PAID, {
+        orderId: order.id,
+        itemPriceBrl: Number(order.itemPriceBrl),
+        paymentMethod: 'FREE',
+      });
+    }
+
     return order;
   }
 
@@ -524,6 +546,18 @@ export class OrdersService {
         { orderId: updated.id },
       )
       .catch(() => {});
+
+    this.analytics.capture(updated.buyerId, AnalyticsEvents.ORDER_DELIVERED, {
+      orderId: updated.id,
+      sellerId: updated.sellerId,
+      transitDays:
+        updated.shippedAt
+          ? Math.round(
+              (now.getTime() - updated.shippedAt.getTime()) /
+                (24 * 60 * 60 * 1000),
+            )
+          : null,
+    });
 
     return updated;
   }

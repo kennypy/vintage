@@ -9,6 +9,7 @@ import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -102,6 +103,7 @@ describe('AuthService', () => {
         { provide: SmsService, useValue: mockSmsService },
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: RedisService, useValue: mockRedisService },
+        { provide: AnalyticsService, useValue: { capture: jest.fn() } },
       ],
     }).compile();
 

@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
+import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
@@ -25,6 +26,7 @@ export class ListingsService {
     private prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly searchService: SearchService,
+    private readonly analytics: AnalyticsService,
   ) {
     const raw = this.config.get<string>('ALLOWED_IMAGE_HOSTS', '');
     const bucket = this.config.get<string>('S3_BUCKET', '');
@@ -200,6 +202,13 @@ export class ListingsService {
 
     // Fire-and-forget: Meilisearch sync never blocks the response.
     this.syncSearchIndex(created.id).catch(() => {});
+
+    this.analytics.capture(sellerId, AnalyticsEvents.LISTING_CREATED, {
+      listingId: created.id,
+      categoryId: created.categoryId,
+      priceBrl: Number(created.priceBrl),
+      imageCount: dto.imageUrls.length,
+    });
 
     return created;
   }

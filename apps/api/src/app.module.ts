@@ -43,6 +43,7 @@ import { CouponsModule } from './coupons/coupons.module';
 import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { FraudModule } from './fraud/fraud.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -102,6 +103,7 @@ import { FraudModule } from './fraud/fraud.module';
     FeatureFlagsModule,
     AdminAnalyticsModule,
     FraudModule,
+    AnalyticsModule,
   ],
   providers: [
     {
