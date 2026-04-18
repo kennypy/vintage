@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingsService } from '../listings/listings.service';
 import { ReportTargetType } from './dto/create-report.dto';
 
 const mockPrisma = {
@@ -31,6 +32,10 @@ describe('ReportsService', () => {
       providers: [
         ReportsService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: ListingsService,
+          useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

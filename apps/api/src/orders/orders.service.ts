@@ -355,6 +355,10 @@ export class OrdersService {
       return next;
     });
 
+    // Listing may have transitioned SOLD → ACTIVE inside the tx; re-add
+    // it to search so buyers can find it again.
+    this.listings.syncSearchIndex(order.listingId).catch(() => {});
+
     // Notify seller (fire-and-forget)
     this.notifications
       .createNotification(

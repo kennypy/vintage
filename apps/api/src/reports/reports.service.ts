@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListingsService } from '../listings/listings.service';
 import { CreateReportDto, ReportTargetType } from './dto/create-report.dto';
 import { ResolveReportDto, ResolveAction } from './dto/resolve-report.dto';
 
@@ -13,7 +14,10 @@ export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
   private readonly DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private listings: ListingsService,
+  ) {}
 
   async createReport(reporterId: string, dto: CreateReportDto) {
     // Validate target exists for each supported type
@@ -179,6 +183,8 @@ export class ReportsService {
             data: { status: 'DELETED' },
           })
           .catch(() => undefined);
+        // Drop the hidden listing from search.
+        this.listings.syncSearchIndex(report.targetId).catch(() => {});
       } else if (report.targetType === 'user') {
         await this.prisma.user
           .update({
