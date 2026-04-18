@@ -155,6 +155,15 @@ Following [STORE_SUBMISSION.md](./STORE_SUBMISSION.md):
         payouts manually via `/admin/payouts`.
 - [ ] Admin verification queue owner assigned (doc review throughput:
       budget 5× normal for launch week).
+- [ ] 🔴 First production admin user promoted via the one-shot CLI:
+      the chosen operator signs up through the normal flow, then ops
+      runs from the API server (or locally with prod `DATABASE_URL`):
+      ```bash
+      npm run admin:promote -- ops@vintage.br --workspace @vintage/api
+      ```
+      (The `prisma/seed.ts` script refuses to run with
+      `NODE_ENV=production` — it creates a known-password admin for
+      local dev only.)
 - [ ] Communications drafted:
   - [ ] In-app banner: "Confirme seu acesso — você pode ser solicitado
         a entrar novamente após nossa atualização".
