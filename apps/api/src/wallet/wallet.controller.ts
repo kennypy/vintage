@@ -91,6 +91,22 @@ export class WalletController {
 
   // ── Admin: manually reconcile payouts while MP contract isn't active ──
 
+  @Get('admin/payouts')
+  @UseGuards(AdminGuard)
+  @ApiOperation({
+    summary: 'Admin: listar saques que precisam de reconciliação',
+    description:
+      'Default filter = PENDING | PROCESSING (ainda acionáveis). ' +
+      'Use ?status=FAILED ou ?status=COMPLETED para audit de histórico.',
+  })
+  adminListPayouts(
+    @Query('page') page: number = 1,
+    @Query('pageSize') pageSize: number = 20,
+    @Query('status') status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+  ) {
+    return this.payouts.adminList(page, pageSize, status);
+  }
+
   @Patch('admin/payouts/:id/status')
   @UseGuards(AdminGuard)
   @ApiOperation({

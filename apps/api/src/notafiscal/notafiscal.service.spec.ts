@@ -11,6 +11,8 @@ const mockPrisma = {
   notaFiscal: {
     create: jest.fn(),
     findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
   },
   $queryRaw: jest.fn(),
 };
@@ -264,6 +266,94 @@ describe('NotaFiscalService', () => {
     it('should calculate ISS at 5% of commission', () => {
       expect(service.calculatePlatformIssBrl(100)).toBe(5);
       expect(service.calculatePlatformIssBrl(49.90)).toBe(2.5);
+    });
+  });
+
+  // Wave 3D: background sweep for NF-es stuck in PENDING after the
+  // synchronous POST. The provider is the source of truth for status
+  // transitions; we NEVER derive AUTHORIZED from user input.
+  describe('pollPendingNFeStatus', () => {
+    it('promotes PENDING rows that the provider has moved to authorized', async () => {
+      mockPrisma.notaFiscal.findMany.mockResolvedValue([
+        { id: 'nf-1', nfeId: 'ext-1', orderId: 'ord-1' },
+      ]);
+      mockNFeClient.getNFe.mockResolvedValue({
+        nfeId: 'ext-1',
+        accessKey: '44-digit-key',
+        xml: '<xml/>',
+        pdfUrl: 'https://p/ext-1.pdf',
+        status: 'authorized',
+        issuedAt: '2026-04-18T12:00:00Z',
+      });
+      mockPrisma.notaFiscal.update.mockResolvedValue({});
+
+      await service.pollPendingNFeStatus();
+
+      expect(mockPrisma.notaFiscal.update).toHaveBeenCalledWith({
+        where: { id: 'nf-1' },
+        data: expect.objectContaining({
+          status: 'AUTHORIZED',
+          accessKey: '44-digit-key',
+        }),
+      });
+    });
+
+    it('leaves PENDING rows untouched when the provider still reports pending', async () => {
+      mockPrisma.notaFiscal.findMany.mockResolvedValue([
+        { id: 'nf-1', nfeId: 'ext-1', orderId: 'ord-1' },
+      ]);
+      mockNFeClient.getNFe.mockResolvedValue({
+        nfeId: 'ext-1',
+        accessKey: '',
+        xml: '',
+        pdfUrl: '',
+        status: 'pending',
+        issuedAt: '',
+      });
+
+      await service.pollPendingNFeStatus();
+
+      expect(mockPrisma.notaFiscal.update).not.toHaveBeenCalled();
+    });
+
+    it('swallows provider errors so one broken row does not poison the sweep', async () => {
+      mockPrisma.notaFiscal.findMany.mockResolvedValue([
+        { id: 'nf-1', nfeId: 'ext-1', orderId: 'ord-1' },
+        { id: 'nf-2', nfeId: 'ext-2', orderId: 'ord-2' },
+      ]);
+      mockNFeClient.getNFe
+        .mockRejectedValueOnce(new Error('provider 500'))
+        .mockResolvedValueOnce({
+          nfeId: 'ext-2',
+          accessKey: 'key-2',
+          xml: '<x/>',
+          pdfUrl: 'u',
+          status: 'authorized',
+          issuedAt: '2026-04-18T12:00:00Z',
+        });
+      mockPrisma.notaFiscal.update.mockResolvedValue({});
+
+      await service.pollPendingNFeStatus();
+
+      // The second row was promoted despite the first throwing.
+      expect(mockPrisma.notaFiscal.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'nf-2' } }),
+      );
+    });
+
+    it('skips rows older than 24h (ops must investigate)', async () => {
+      mockPrisma.notaFiscal.findMany.mockResolvedValue([]);
+
+      await service.pollPendingNFeStatus();
+
+      expect(mockPrisma.notaFiscal.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            createdAt: expect.objectContaining({ gt: expect.any(Date) }),
+          }),
+        }),
+      );
+      expect(mockNFeClient.getNFe).not.toHaveBeenCalled();
     });
   });
 });

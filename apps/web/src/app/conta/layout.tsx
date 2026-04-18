@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 const NAV = [
   { href: '/conta/configuracoes', label: 'Configurações', icon: '⚙️' },
@@ -14,8 +15,45 @@ const NAV = [
   { href: '/conta/ajuda', label: 'Ajuda', icon: '❓' },
 ];
 
+/**
+ * Layout-level auth gate for every /conta/* page. Before Wave 3F each
+ * page fetched /users/me independently and redirected to login on 401,
+ * which produced a brief skeleton flicker before the redirect fired on
+ * logged-out visits. Gating at the layout removes the flicker AND any
+ * duplicated auth checks in every child page.
+ *
+ * Uses the token in localStorage as the presence check — the API would
+ * still reject a stale/expired token via JwtStrategy, so a child page
+ * can still receive a 401 on its own fetch. The layout only guards the
+ * "no token at all" case to avoid rendering account-scoped chrome to
+ * anonymous visitors.
+ */
 export default function ContaLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined'
+      ? window.localStorage.getItem('vintage_token')
+      : null;
+    if (!token) {
+      router.replace('/auth/login');
+      return;
+    }
+    setReady(true);
+  }, [router]);
+
+  if (!ready) {
+    // Tiny placeholder while the auth check resolves. Prevents the
+    // flicker of nav + child skeleton before the redirect.
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="h-8 w-40 bg-gray-200 rounded animate-pulse mb-6" />
+        <div className="h-64 bg-white border border-gray-100 rounded-xl animate-pulse" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

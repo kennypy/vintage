@@ -128,6 +128,44 @@ export class DisputesService {
   }
 
   /**
+   * Admin: lista disputas em aberto (status OPEN) priorizando as mais
+   * antigas. Usada pela tela /admin/disputes para triagem.
+   */
+  async findOpenDisputes(page: number = 1, pageSize: number = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const where = { status: 'OPEN' as const };
+
+    const [items, total] = await Promise.all([
+      this.prisma.dispute.findMany({
+        where,
+        include: {
+          order: {
+            include: {
+              listing: {
+                include: {
+                  images: { orderBy: { position: 'asc' }, take: 1 },
+                },
+              },
+              seller: { select: { id: true, name: true } },
+              buyer: { select: { id: true, name: true } },
+            },
+          },
+          openedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: 'asc' }, // oldest first — FIFO triage
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.dispute.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+  }
+
+  /**
    * Resolve uma disputa (ação administrativa).
    *
    * - refund=true  → buyer wins: refund buyer, reverse seller escrow hold

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { NFeClient } from './nfe.client';
 import { Decimal } from '@prisma/client/runtime/client';
@@ -216,6 +217,69 @@ export class NotaFiscalService {
    */
   calculatePlatformIssBrl(commissionBrl: number): number {
     return Math.round(commissionBrl * ISS_PLATFORM_FEE_RATE * 100) / 100;
+  }
+
+  /**
+   * Sweep NF-e rows that are still PENDING after the synchronous issuance
+   * call and ask the provider for their current status. Enotas / NFe.io
+   * asynchronously validate most NF-es within 30–120s, so rows that
+   * didn't settle in the POST response usually settle within minutes.
+   *
+   * Runs every minute, bounded to 25 rows per sweep. At steady state
+   * that's ~0.4 req/s against the NF-e provider — well inside Enotas /
+   * NFe.io's published limits (~5 req/s/account). Under a 1000-row
+   * backlog the sweep takes ~40 minutes to drain, which is slower than
+   * 30s/50-row tuning but avoids risking a 429 during an order surge.
+   * If ops sees the backlog growing, bump `take:` after confirming the
+   * contracted rate limit with the provider.
+   *
+   * Rows older than 24 hours are skipped — they're past the usual
+   * settlement window and ops should investigate manually.
+   *
+   * Status transitions only come from the provider's response; never
+   * from user input. The provider is the source of truth.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async pollPendingNFeStatus(): Promise<void> {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const pending = await this.prisma.notaFiscal.findMany({
+      where: {
+        status: 'PENDING',
+        nfeId: { not: null },
+        createdAt: { gt: cutoff },
+      },
+      take: 25,
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, nfeId: true, orderId: true },
+    });
+
+    for (const row of pending) {
+      if (!row.nfeId) continue;
+      try {
+        const fresh = await this.nfeClient.getNFe(row.nfeId);
+        if (fresh.status !== 'pending') {
+          await this.prisma.notaFiscal.update({
+            where: { id: row.id },
+            data: {
+              status: this.mapStatusToEnum(fresh.status),
+              accessKey: fresh.accessKey || undefined,
+              xml: fresh.xml || undefined,
+              pdfUrl: fresh.pdfUrl || undefined,
+              issuedAt: fresh.issuedAt ? new Date(fresh.issuedAt) : undefined,
+            },
+          });
+          this.logger.log(
+            `NF-e ${row.nfeId} for order ${row.orderId} promoted: PENDING → ${fresh.status}`,
+          );
+        }
+      } catch (err) {
+        // Never let a single provider failure block the rest of the sweep
+        // or crash the worker. The row stays PENDING for the next run.
+        this.logger.warn(
+          `pollPendingNFeStatus: ${row.nfeId} — ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
   }
 
   private mapStatusToEnum(status: string): 'PENDING' | 'AUTHORIZED' | 'REJECTED' | 'CANCELLED' {
