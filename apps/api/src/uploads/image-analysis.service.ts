@@ -205,12 +205,69 @@ interface VisionImageProperties {
   };
 }
 
+/**
+ * Google Vision SafeSearch likelihoods. Ordered; treat as comparable
+ * strings, not an enum — matches the raw API response verbatim.
+ */
+export type SafeSearchLikelihood =
+  | 'UNKNOWN'
+  | 'VERY_UNLIKELY'
+  | 'UNLIKELY'
+  | 'POSSIBLE'
+  | 'LIKELY'
+  | 'VERY_LIKELY';
+
+interface VisionSafeSearch {
+  adult?: SafeSearchLikelihood;
+  spoof?: SafeSearchLikelihood;
+  medical?: SafeSearchLikelihood;
+  violence?: SafeSearchLikelihood;
+  racy?: SafeSearchLikelihood;
+}
+
+export interface ImageModerationFindings {
+  adult: SafeSearchLikelihood;
+  violence: SafeSearchLikelihood;
+  racy: SafeSearchLikelihood;
+  spoof: SafeSearchLikelihood;
+  medical: SafeSearchLikelihood;
+}
+
+export type ModerationDecision = 'REJECT' | 'FLAG' | 'CLEAN';
+
+/**
+ * Classify SafeSearch findings into a decision the upload pipeline
+ * can act on. Only `adult`, `violence`, and `racy` gate uploads —
+ * `spoof` (meme-like manipulation) and `medical` are carried for
+ * audit but not enforced, since medical imagery is not prohibited
+ * on a fashion resale platform.
+ *
+ *   VERY_LIKELY → REJECT (upload refused outright)
+ *   LIKELY      → FLAG   (upload succeeds + queued for admin review)
+ *   else        → CLEAN
+ */
+export function classifyModeration(
+  m: ImageModerationFindings | null,
+): ModerationDecision {
+  if (!m) return 'CLEAN';
+  const checked: SafeSearchLikelihood[] = [m.adult, m.violence, m.racy];
+  if (checked.includes('VERY_LIKELY')) return 'REJECT';
+  if (checked.includes('LIKELY')) return 'FLAG';
+  return 'CLEAN';
+}
+
+export interface AnalysisResult {
+  suggestions: ListingSuggestions;
+  moderation: ImageModerationFindings | null;
+}
+
 interface VisionResponse {
   labelAnnotations?: VisionLabel[];
   logoAnnotations?: VisionLogo[];
   webDetection?: VisionWebDetection;
   imagePropertiesAnnotation?: VisionImageProperties;
   textAnnotations?: VisionTextAnnotation[];
+  safeSearchAnnotation?: VisionSafeSearch;
 }
 
 @Injectable()
@@ -232,12 +289,15 @@ export class ImageAnalysisService {
   }
 
   /**
-   * Analyse an image buffer and return listing field suggestions.
-   * Always returns a (possibly empty) suggestions object — never throws.
+   * Analyse an image buffer and return listing field suggestions
+   * PLUS SafeSearch moderation findings. Never throws — a Vision
+   * outage silently degrades to `{ suggestions: {}, moderation: null }`
+   * so uploads don't break during third-party incidents. Callers
+   * decide whether to gate on moderation=null (fail-open for launch).
    */
-  async analyze(imageBuffer: Buffer): Promise<ListingSuggestions> {
+  async analyze(imageBuffer: Buffer): Promise<AnalysisResult> {
     if (!this.apiKey) {
-      return {};
+      return { suggestions: {}, moderation: null };
     }
 
     try {
@@ -256,6 +316,10 @@ export class ImageAnalysisService {
                 { type: 'WEB_DETECTION', maxResults: 5 },
                 { type: 'IMAGE_PROPERTIES' },
                 { type: 'TEXT_DETECTION', maxResults: 1 },
+                // SafeSearch rides on the same API call as the
+                // autofill features — no extra round-trip, just one
+                // additional feature unit of billing.
+                { type: 'SAFE_SEARCH_DETECTION' },
               ],
             },
           ],
@@ -264,7 +328,7 @@ export class ImageAnalysisService {
 
       if (!response.ok) {
         this.logger.warn(`Vision API respondeu com status ${response.status}`);
-        return {};
+        return { suggestions: {}, moderation: null };
       }
 
       const data = (await response.json()) as {
@@ -272,16 +336,32 @@ export class ImageAnalysisService {
       };
       const result = data?.responses?.[0];
       if (!result) {
-        return {};
+        return { suggestions: {}, moderation: null };
       }
 
-      return this.mapToSuggestions(result);
+      const suggestions = await this.mapToSuggestions(result);
+      const moderation = this.mapToModeration(result);
+      return { suggestions, moderation };
     } catch (error) {
       this.logger.warn(
         `Análise de imagem falhou: ${String(error).slice(0, 200)}`,
       );
-      return {};
+      return { suggestions: {}, moderation: null };
     }
+  }
+
+  private mapToModeration(
+    result: VisionResponse,
+  ): ImageModerationFindings | null {
+    const ss = result.safeSearchAnnotation;
+    if (!ss) return null;
+    return {
+      adult: ss.adult ?? 'UNKNOWN',
+      violence: ss.violence ?? 'UNKNOWN',
+      racy: ss.racy ?? 'UNKNOWN',
+      spoof: ss.spoof ?? 'UNKNOWN',
+      medical: ss.medical ?? 'UNKNOWN',
+    };
   }
 
   private async mapToSuggestions(

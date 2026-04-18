@@ -44,6 +44,16 @@ class BanUserDto {
   reason!: string;
 }
 
+class ResolveImageFlagDto {
+  @IsIn(['DISMISS', 'REJECT'])
+  action!: 'DISMISS' | 'REJECT';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
 @ApiTags('moderation')
 @ApiBearerAuth()
 @UseGuards(AdminGuard)
@@ -108,6 +118,32 @@ export class ModerationController {
   @ApiResponse({ status: 200, description: 'Banimento removido' })
   unbanUser(@Param('id') id: string) {
     return this.moderationService.unbanUser(id);
+  }
+
+  @Get('image-flags')
+  @ApiOperation({ summary: 'Listar imagens sinalizadas pelo SafeSearch (admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Fila de imagens aguardando revisão' })
+  listImageFlags(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('pageSize', new DefaultValuePipe(20), ParseIntPipe) pageSize: number,
+  ) {
+    return this.moderationService.listPendingImageFlags(page, pageSize);
+  }
+
+  @Patch('image-flags/:id')
+  @ApiOperation({
+    summary: 'Resolver sinalização de imagem (admin)',
+    description:
+      'DISMISS: marca a sinalização como falso-positivo. REJECT: remove a imagem de qualquer anúncio que a utilize e suspende o anúncio.',
+  })
+  @ApiResponse({ status: 200, description: 'Sinalização resolvida' })
+  resolveImageFlag(
+    @Param('id') id: string,
+    @Body() body: ResolveImageFlagDto,
+  ) {
+    return this.moderationService.resolveImageFlag(id, body.action, 'admin', body.note);
   }
 
   @Post('users/:id/force-logout')
