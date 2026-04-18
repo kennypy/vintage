@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { apiPost, setAuthToken } from '@/lib/api';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 function TwoFaChallengeInner() {
   const router = useRouter();
@@ -17,6 +18,10 @@ function TwoFaChallengeInner() {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // Only needed when the user taps "resend SMS". TOTP path never calls
+  // the gated endpoint, but we mount the widget once regardless — it's
+  // invisible when NEXT_PUBLIC_TURNSTILE_SITE_KEY is unset.
+  const [resendCaptchaToken, setResendCaptchaToken] = useState<string | null>(null);
 
   if (!tempToken) {
     return (
@@ -66,7 +71,7 @@ function TwoFaChallengeInner() {
     try {
       const res = await apiPost<{ success: boolean; phoneHint: string }>(
         '/auth/2fa/sms/login-resend',
-        { tempToken },
+        { tempToken, captchaToken: resendCaptchaToken },
       );
       setNotice(`Novo código enviado para ${res.phoneHint}.`);
     } catch (err) {
@@ -121,14 +126,20 @@ function TwoFaChallengeInner() {
           </button>
 
           {method === 'SMS' && (
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={resending}
-              className="w-full text-sm text-brand-600 font-medium hover:text-brand-700 disabled:opacity-40"
-            >
-              {resending ? 'Reenviando…' : 'Reenviar código'}
-            </button>
+            <>
+              <TurnstileWidget
+                onToken={setResendCaptchaToken}
+                onExpired={() => setResendCaptchaToken(null)}
+              />
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="w-full text-sm text-brand-600 font-medium hover:text-brand-700 disabled:opacity-40"
+              >
+                {resending ? 'Reenviando…' : 'Reenviar código'}
+              </button>
+            </>
           )}
 
           <button

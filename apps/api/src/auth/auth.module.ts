@@ -7,6 +7,8 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { GoogleStrategy } from './google.strategy';
 import { AppleStrategy } from './apple.strategy';
+import { CaptchaService } from './captcha.service';
+import { CaptchaGuard } from './captcha.guard';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
@@ -39,7 +41,15 @@ import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, AppleStrategy, CsrfMiddleware],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleStrategy,
+    AppleStrategy,
+    CsrfMiddleware,
+    CaptchaService,
+    CaptchaGuard,
+  ],
   controllers: [AuthController],
   exports: [AuthService, CsrfMiddleware],
 })
