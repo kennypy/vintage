@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ListingsService } from '../listings/listings.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -24,6 +25,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private coupons: CouponsService,
     private notifications: NotificationsService,
+    private listings: ListingsService,
   ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
@@ -235,6 +237,10 @@ export class OrdersService {
         { orderId: order.id },
       )
       .catch(() => {});
+
+    // Listing is now SOLD — remove it from search so other shoppers
+    // don't see a purchased item in results.
+    this.listings.syncSearchIndex(dto.listingId).catch(() => {});
 
     return order;
   }

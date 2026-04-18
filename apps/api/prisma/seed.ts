@@ -39,6 +39,24 @@ const PLACEHOLDER_IMAGES = [
 ];
 
 async function main() {
+  // Production safety gate — this seed creates demo users (including a
+  // hard-coded admin with a known password) that MUST NOT exist in a
+  // real deployment. Running with `NODE_ENV=production` is almost
+  // always a mistake (someone pointed the seed at the prod DATABASE_URL),
+  // so fail fast with a clear message instead of silently seeding.
+  //
+  // Production admin bootstrap uses apps/api/scripts/promote-admin.ts
+  // against an existing user row — never this seed.
+  if (process.env.NODE_ENV === 'production') {
+    console.error(
+      '❌ prisma/seed.ts refuses to run with NODE_ENV=production.\n' +
+      '   To promote a production user to admin use:\n' +
+      '     npm run admin:promote -- <email>\n' +
+      '   (see apps/api/scripts/promote-admin.ts).',
+    );
+    process.exit(1);
+  }
+
   console.log('🌱 Seeding database...');
 
   // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ListingsService } from '../listings/listings.service';
 
 export type ReviewAction = 'SUSPEND_LISTING' | 'BAN_USER' | 'DISMISS';
 
@@ -13,6 +14,7 @@ export class ModerationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly listings: ListingsService,
   ) {}
 
   async listPendingReports(page = 1, pageSize = 20, targetType?: string) {
@@ -81,6 +83,9 @@ export class ModerationService {
       data: { status: 'SUSPENDED' },
     });
 
+    // Drop from search — SUSPENDED must not surface in buyer queries.
+    this.listings.syncSearchIndex(listingId).catch(() => {});
+
     // Notify seller (non-critical)
     this.notifications.createNotification(
       listing.sellerId,
@@ -108,6 +113,9 @@ export class ModerationService {
       data: { status: 'ACTIVE' },
     });
 
+    // Re-add to search now that it's ACTIVE again.
+    this.listings.syncSearchIndex(listingId).catch(() => {});
+
     return { unsuspended: true, listingId };
   }
 
@@ -118,6 +126,13 @@ export class ModerationService {
     });
     if (!user) throw new NotFoundException('Usuário não encontrado');
     if (user.isBanned) throw new BadRequestException('Usuário já está banido');
+
+    // Collect affected listings before the updateMany so we know which
+    // docs to drop from search afterwards.
+    const suspendedIds = await this.prisma.listing.findMany({
+      where: { sellerId: userId, status: 'ACTIVE' },
+      select: { id: true },
+    });
 
     // Ban the user and suspend all their active listings in a transaction
     await this.prisma.$transaction(async (tx) => {
@@ -141,6 +156,12 @@ export class ModerationService {
         data: { status: 'SUSPENDED' },
       });
     });
+
+    // Drop every newly-suspended listing from search. syncSearchIndex
+    // re-reads the row and removes it since status !== ACTIVE.
+    for (const { id } of suspendedIds) {
+      this.listings.syncSearchIndex(id).catch(() => {});
+    }
 
     return { banned: true, userId };
   }
