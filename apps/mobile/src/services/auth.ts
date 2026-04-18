@@ -9,7 +9,8 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  cpf: string;
+  // null for OAuth accounts that haven't linked a CPF yet.
+  cpf: string | null;
   avatarUrl?: string;
   createdAt: string;
 }

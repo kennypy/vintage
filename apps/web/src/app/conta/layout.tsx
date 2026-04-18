@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV = [
   { href: '/conta/configuracoes', label: 'Configurações', icon: '⚙️' },
+  { href: '/conta/cpf', label: 'CPF', icon: '🪪' },
   { href: '/conta/verificacao', label: 'Verificação', icon: '🛡️' },
   { href: '/conta/payout-methods', label: 'Chaves PIX', icon: '💳' },
   { href: '/conta/blocked-users', label: 'Usuários bloqueados', icon: '🚫' },

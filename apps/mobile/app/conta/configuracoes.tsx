@@ -37,7 +37,10 @@ async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
 export default function ConfiguracoesScreen() {
   const router = useRouter();
   const { theme, mode, setMode, fullScreen, setFullScreen } = useTheme();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
+  // OAuth accounts land here with `cpf: null`. Show a prominent "add CPF"
+  // row so they can link one before hitting a flow that requires it.
+  const cpfMissing = !user?.cpf;
 
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -180,6 +183,21 @@ export default function ConfiguracoesScreen() {
         >
           <Ionicons name="shield-checkmark-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Segurança e 2FA</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/conta/cpf')}
+          accessibilityRole="button"
+        >
+          <Ionicons
+            name={cpfMissing ? 'alert-circle-outline' : 'finger-print-outline'}
+            size={22}
+            color={cpfMissing ? colors.warning[600] : theme.textSecondary}
+          />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>
+            {cpfMissing ? 'Adicionar CPF' : 'CPF'}
+          </Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
         <TouchableOpacity

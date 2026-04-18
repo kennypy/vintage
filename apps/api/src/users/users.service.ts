@@ -14,6 +14,7 @@ import { EmailService } from '../email/email.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
+import { isValidCPF } from '@vintage/shared';
 
 /** In-memory store for OAuth-user deletion confirmation codes.
  *  (Acceptable for a low-volume, short-lived ephemeral flow; backed by
@@ -47,6 +48,13 @@ export class UsersService {
         avatarUrl: true,
         bio: true,
         verified: true,
+        // OWNER-ONLY fields: the public endpoint `getProfile` does NOT select
+        // these. We expose them on /users/me so the client can tell whether
+        // the user needs to add a CPF (OAuth signup leaves this null) and
+        // whether Receita Federal verification has run.
+        cpf: true,
+        cpfVerified: true,
+        socialProvider: true,
         vacationMode: true,
         ratingAvg: true,
         ratingCount: true,
@@ -119,6 +127,69 @@ export class UsersService {
         avatarUrl: true,
       },
     });
+  }
+
+  /**
+   * Add a CPF to an account that was created without one (OAuth signup).
+   * CPF is set-once: once stored, it cannot be changed via this endpoint —
+   * a change would orphan every payout/NF-e record tied to the account.
+   * Corrections go through support and touch the DB directly.
+   *
+   * Enumeration-resistant by design:
+   *   - A single `updateMany({ where: { id, cpf: null } })` is the only
+   *     DB interaction. There is NO pre-flight `findUnique` — the earlier
+   *     version had one, which produced a measurable timing difference
+   *     between "user already has CPF" (fast early return) and "CPF taken
+   *     elsewhere" (full update + exception), turning the endpoint into
+   *     a timing oracle under session-cookie theft scenarios.
+   *   - Every failure path (user doesn't exist, user already has CPF,
+   *     CPF belongs to another account, concurrent race) returns the
+   *     SAME BadRequestException with the SAME message. The server-side
+   *     distinction is logged structurally for support without being
+   *     revealed to the client.
+   *
+   * Race safety:
+   *   - The single UPDATE with `WHERE cpf IS NULL` is atomic in Postgres
+   *     — a concurrent setCpf for the same user locks the row, and the
+   *     losing side sees `count = 0`.
+   *   - The DB-level @unique on User.cpf catches concurrent DIFFERENT-user
+   *     sets of the same CPF (P2002). Collapsed into the same uniform
+   *     error.
+   */
+  async setCpf(userId: string, rawCpf: string) {
+    const cleanCpf = rawCpf.replace(/\D/g, '');
+    if (!isValidCPF(cleanCpf)) {
+      throw new BadRequestException('CPF inválido.');
+    }
+
+    const UNIFORM_ERROR =
+      'Não foi possível cadastrar este CPF. Se você já tem um CPF cadastrado, entre em contato com o suporte.';
+
+    try {
+      const result = await this.prisma.user.updateMany({
+        where: { id: userId, cpf: null },
+        data: { cpf: cleanCpf, cpfVerified: false },
+      });
+      if (result.count === 0) {
+        // Covers: user doesn't exist, user already has a CPF, or a
+        // concurrent writer claimed the slot first. The client never
+        // learns which.
+        this.logger.warn(
+          `setCpf: no rows updated for user ${userId} (not found, already set, or raced).`,
+        );
+        throw new BadRequestException(UNIFORM_ERROR);
+      }
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        this.logger.warn(`setCpf: CPF already on another account (P2002).`);
+        throw new BadRequestException(UNIFORM_ERROR);
+      }
+      throw err;
+    }
+
+    return { success: true };
   }
 
   async getUserListings(userId: string, page: number = 1, pageSize: number = 20) {

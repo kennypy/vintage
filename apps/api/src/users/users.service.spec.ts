@@ -12,6 +12,7 @@ const mockPrisma = {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   listing: {
     findMany: jest.fn(),
@@ -233,6 +234,77 @@ describe('UsersService', () => {
       expect(mockPrisma.listing.updateMany).toHaveBeenCalledWith({
         where: { sellerId: 'user-1', status: 'PAUSED' },
         data: { status: 'ACTIVE' },
+      });
+    });
+  });
+
+  describe('setCpf', () => {
+    // Real CPF with a valid check-digit (Modulo 11). Never use the 11-same-
+    // digit masks (111…) — the validator correctly rejects those.
+    const VALID_CPF_PLAIN = '52998224725';
+    const VALID_CPF_FORMATTED = '529.982.247-25';
+
+    it('rejects an invalid CPF (fails Modulo 11) before touching the DB', async () => {
+      await expect(service.setCpf('user-1', '111.111.111-11')).rejects.toThrow(
+        'CPF inválido',
+      );
+      // No DB calls AT ALL: validation happens before updateMany.
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does NOT pre-fetch the user (defeats the timing side channel)', async () => {
+      mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.setCpf('user-1', VALID_CPF_FORMATTED);
+
+      // The earlier implementation did a findUnique first, which made
+      // "user already has CPF" return ~3x faster than "CPF taken
+      // elsewhere". A session-cookie attacker could measure the
+      // difference to probe whether a target had linked a CPF.
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('returns the UNIFORM error when count=0 (covers not-found, already-set, and race)', async () => {
+      mockPrisma.user.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.setCpf('user-1', VALID_CPF_FORMATTED)).rejects.toThrow(
+        'Não foi possível cadastrar',
+      );
+      // Critical: we must NOT throw NotFoundException even if the user
+      // doesn't exist, because that would enumerate valid user IDs.
+      await expect(service.setCpf('user-1', VALID_CPF_FORMATTED)).rejects.not.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('returns the UNIFORM error on Prisma P2002 (CPF belongs to another account)', async () => {
+      const p2002 = Object.assign(new Error('Unique constraint'), { code: 'P2002' });
+      mockPrisma.user.updateMany.mockRejectedValue(p2002);
+
+      await expect(service.setCpf('user-1', VALID_CPF_FORMATTED)).rejects.toThrow(
+        'Não foi possível cadastrar',
+      );
+    });
+
+    it('re-throws unexpected DB errors (not swallowed as BadRequest)', async () => {
+      const unknown = new Error('connection timeout');
+      mockPrisma.user.updateMany.mockRejectedValue(unknown);
+
+      await expect(service.setCpf('user-1', VALID_CPF_FORMATTED)).rejects.toThrow(
+        'connection timeout',
+      );
+    });
+
+    it('persists the CPF as digits-only and leaves cpfVerified=false', async () => {
+      mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.setCpf('user-1', VALID_CPF_FORMATTED);
+
+      expect(result).toEqual({ success: true });
+      expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'user-1', cpf: null },
+        data: { cpf: VALID_CPF_PLAIN, cpfVerified: false },
       });
     });
   });

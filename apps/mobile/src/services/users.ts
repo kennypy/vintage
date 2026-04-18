@@ -7,6 +7,12 @@ export interface UserProfile {
   avatarUrl?: string;
   bio?: string;
   phone?: string;
+  // null for OAuth accounts that haven't linked a CPF yet. Owner-only field
+  // from /users/me — never exposed on public /users/:id.
+  cpf?: string | null;
+  cpfVerified?: boolean;
+  // 'google' | 'apple' for OAuth accounts, null for email+password signups.
+  socialProvider?: string | null;
   verified: boolean;
   ratingAvg: number;
   ratingCount: number;
@@ -99,4 +105,16 @@ export async function getUserListings(
     `/listings?sellerId=${encodeURIComponent(id)}${query}`,
     { authenticated: false },
   );
+}
+
+/**
+ * One-shot CPF linker for OAuth accounts. The server rejects repeat calls
+ * once a CPF is on file, so the UI should hide/disable the entry after
+ * success. Pass the formatted or digits-only CPF — the server canonicalises.
+ */
+export async function setCpf(cpf: string): Promise<{ success: true }> {
+  return apiFetch<{ success: true }>('/users/me/cpf', {
+    method: 'POST',
+    body: JSON.stringify({ cpf }),
+  });
 }
