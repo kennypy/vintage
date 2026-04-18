@@ -185,8 +185,8 @@ run_step "Build Web" \
   "npx turbo build --filter=@vintage/web --force"
 
 # ── security-audit job ────────────────────────────────────────────────
-run_step "Security audit (critical-only, CI launch gate)" \
-  "npm audit --audit-level=critical"
+run_step "Security audit (high gate, CI launch gate)" \
+  "npm audit --audit-level=high"
 
 # ── Summary ───────────────────────────────────────────────────────────
 TOTAL_END=$(date +%s)

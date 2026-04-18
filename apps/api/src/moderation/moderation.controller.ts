@@ -109,4 +109,16 @@ export class ModerationController {
   unbanUser(@Param('id') id: string) {
     return this.moderationService.unbanUser(id);
   }
+
+  @Post('users/:id/force-logout')
+  @ApiOperation({
+    summary: 'Forçar logout global do usuário (admin)',
+    description:
+      'Incrementa tokenVersion e invalida toda sessão atual sem banir a conta. ' +
+      'Para suspender a conta inteira, use POST /users/:id/ban.',
+  })
+  @ApiResponse({ status: 201, description: 'Todas as sessões invalidadas' })
+  forceLogout(@Param('id') id: string) {
+    return this.moderationService.forceLogout(id);
+  }
 }

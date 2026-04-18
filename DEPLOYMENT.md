@@ -250,6 +250,31 @@ A parte de submissão está detalhada em `STORE_SUBMISSION.md`. Resumo:
 
 ---
 
+## 8b. Breaking change — Wave 3B session invalidation
+
+A Wave 3B rollout adds a `tokenVersion` claim (`ver`) to every JWT. The
+JWT auth guard + refresh handler both reject tokens whose `ver` doesn't
+match the user's current `tokenVersion`. Existing users' in-flight
+tokens were minted **before** this commit and therefore have no `ver`
+claim — the guard treats that as "stale" and returns 401 on the next
+request.
+
+**Effect at deploy:** every logged-in user is signed out and prompted to
+re-authenticate. This is intentional (the whole point of the feature
+was to make session invalidation possible), but it will spike the login
+endpoint and may confuse users who haven't seen a "please sign in again"
+message before.
+
+**Mitigations:**
+- Announce the re-login in the mobile/web app (one-time banner) the day
+  before deploy.
+- Stagger the deploy off-peak.
+- Warm Mercado Pago/Twilio quotas in advance in case every returning
+  user redoes 2FA SMS (for 2FA-SMS accounts).
+- There is a new admin endpoint `POST /moderation/users/:id/force-logout`
+  that bumps `tokenVersion` without banning — useful for support tickets
+  reporting "I think my account is compromised."
+
 ## 9. Pós-deploy
 
 1. **Smoke tests em produção** (pode ser um script cURL em `scripts/smoke.sh`):

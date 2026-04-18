@@ -40,6 +40,9 @@ const mockPrisma = {
   loginEvent: {
     create: jest.fn(),
   },
+  passwordResetToken: {
+    updateMany: jest.fn(),
+  },
 };
 
 const mockJwtService = {
@@ -121,6 +124,14 @@ describe('AuthService', () => {
       mockPrisma.user.findFirst.mockResolvedValue(null);
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
       mockPrisma.user.create.mockResolvedValue({ id: 'user-1', email: 'test@example.com', name: 'Maria Silva' });
+      // generateTokens now reads tokenVersion to embed it in the JWT
+      // payload (Wave 3B) — then generateTokensWithUser reads the user
+      // again for the response body.
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1', name: 'Maria Silva', email: 'test@example.com',
+        cpf: '52998224725', avatarUrl: null, createdAt: new Date(),
+        tokenVersion: 0,
+      });
       mockJwtService.sign
         .mockReturnValueOnce('access-token')
         .mockReturnValueOnce('refresh-token');
@@ -233,9 +244,11 @@ describe('AuthService', () => {
   });
 
   describe('refreshToken', () => {
-    it('should return new tokens for valid refresh token', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh' });
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1' });
+    it('should return new tokens for valid refresh token with matching ver', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh', ver: 3 });
+      // First findUnique is for the ver check in refreshToken; second is
+      // generateTokens re-reading tokenVersion for the fresh JWT payload.
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 3 });
       mockJwtService.sign
         .mockReturnValueOnce('new-access-token')
         .mockReturnValueOnce('new-refresh-token');
@@ -247,6 +260,31 @@ describe('AuthService', () => {
         accessToken: 'new-access-token',
         refreshToken: 'new-refresh-token',
       });
+      // New tokens must carry the current tokenVersion as `ver`.
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: 'user-1', ver: 3 }),
+      );
+    });
+
+    it('rejects a refresh token whose ver is stale (email/password changed since issuance)', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh', ver: 2 });
+      // User's tokenVersion has been bumped to 3 (e.g. email change) —
+      // the old refresh token minted at ver=2 must NOT mint new access
+      // tokens.
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 3 });
+
+      await expect(service.refreshToken('stale-refresh-token')).rejects.toThrow(
+        /Session invalidated/,
+      );
+    });
+
+    it('rejects a refresh token that lacks the ver claim (legacy pre-3B token)', async () => {
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh' }); // no ver
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 0 });
+
+      await expect(service.refreshToken('legacy-token')).rejects.toThrow(
+        /Session invalidated/,
+      );
     });
 
     it('should reject if token type is not refresh', async () => {
@@ -463,6 +501,39 @@ describe('AuthService', () => {
 
       await expect(service.enableSms2Fa('user-1', '123456')).rejects.toThrow(
         'setup',
+      );
+    });
+  });
+
+  // ── Session invalidation via tokenVersion (Wave 3B) ─────────────────
+  // Every flow that must kick existing sessions MUST include
+  // `tokenVersion: { increment: 1 }` in its User UPDATE. These assertions
+  // pin that invariant directly so a future refactor can't silently drop
+  // it — a bug the Wave 3B review agent flagged as the most likely
+  // long-term regression vector.
+
+  describe('tokenVersion invariants', () => {
+    it('changePassword bumps tokenVersion in the same UPDATE as passwordHash', async () => {
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        passwordHash: 'old-hash',
+        deletedAt: null,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.passwordResetToken.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.changePassword('user-1', 'current', 'new-password');
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({
+            passwordHash: 'new-hash',
+            tokenVersion: { increment: 1 },
+          }),
+        }),
       );
     });
   });

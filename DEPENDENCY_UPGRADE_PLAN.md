@@ -1,13 +1,15 @@
 # Vintage.br — Plano Pós-Lançamento de Atualização de Dependências
 
-`./scripts/ci-parity.sh` é gateado em **`npm audit --audit-level=critical`**
-(0 criticais hoje, portanto: verde). Os 10 `high` atuais estão em deps
-transitivas cuja atualização **breaking** introduz mais vulnerabilidades do
-que resolve (`npm audit fix --force` levou 28 → 48 vulns com 5 críticos em
-uma corrida anterior).
+**Status atual (2026-04-18, pós Wave 3A + 3B):** o gate foi **elevado para
+`--audit-level=high`**. 0 vulns `high` em prod AND dev após o NestJS 10→11
++ multer v2 + nodemailer v8 + bcrypt v6 + dedupe.
 
-Este documento é a fila priorizada para subir o gate para `--audit-level=high`
-depois do lançamento, um pacote de cada vez, com regressão controlada.
+**Também resolvido em 3B:** Redis-backed ThrottlerStorage substituiu o
+default in-memory — rate limits agora sobrevivem a escala horizontal da
+API (ver `apps/api/src/common/throttler/redis-throttler.storage.ts`).
+
+Este documento passa a ser uma referência histórica do caminho percorrido
++ backlog de moderadas/baixas que podem ser endereçadas quando conveniente.
 
 > **Atualizado em:** 2026-04-18, imediatamente após o lançamento da Wave 2.
 > Rode `npm audit --audit-level=high --omit=dev` antes de abrir a PR de

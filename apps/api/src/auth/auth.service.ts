@@ -862,9 +862,14 @@ export class AuthService {
       throw new BadRequestException('A nova senha deve ser diferente da atual');
     }
     const passwordHash = await bcrypt.hash(newPassword, 12);
+    // Bump tokenVersion in the same UPDATE that changes the password so
+    // any outstanding access/refresh tokens issued to the old password
+    // are rejected by JwtStrategy on their next request. Without this,
+    // an attacker who phished the old password could keep a valid
+    // session going after the legitimate owner rotated it.
     await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
     });
     // Invalidate any outstanding reset tokens so a stolen reset link is neutralized.
     await this.prisma.passwordResetToken.updateMany({
@@ -921,7 +926,10 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.id },
-        data: { passwordHash },
+        // Same tokenVersion bump as changePassword — password reset
+        // is specifically used to kick out an attacker who knows the
+        // previous password, so every outstanding session MUST die.
+        data: { passwordHash, tokenVersion: { increment: 1 } },
       }),
       this.prisma.passwordResetToken.update({
         where: { id: record.id },
@@ -1022,7 +1030,12 @@ export class AuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: user.id },
-        data: { email: record.newEmail },
+        // tokenVersion bump invalidates every outstanding access +
+        // refresh token minted against the previous email. An attacker
+        // who had session access to the old email (or a leaked JWT)
+        // cannot keep using it once the owner confirms the change —
+        // the next request hits JwtStrategy's ver check and gets a 401.
+        data: { email: record.newEmail, tokenVersion: { increment: 1 } },
       }),
       this.prisma.emailChangeToken.update({
         where: { id: record.id },
@@ -1082,9 +1095,13 @@ export class AuthService {
   }
 
   async refreshToken(rawToken: string) {
-    let payload: { sub: string; type?: string };
+    let payload: { sub: string; type?: string; ver?: number };
     try {
-      payload = this.jwtService.verify(rawToken) as { sub: string; type?: string };
+      payload = this.jwtService.verify(rawToken) as {
+        sub: string;
+        type?: string;
+        ver?: number;
+      };
     } catch {
       throw new UnauthorizedException('Token inválido ou expirado');
     }
@@ -1093,25 +1110,66 @@ export class AuthService {
       throw new UnauthorizedException('Token inválido para renovação — use o refresh token');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, tokenVersion: true },
+    });
     if (!user) {
       throw new UnauthorizedException('Usuário não encontrado');
     }
+
+    // Refresh tokens minted before a tokenVersion bump (email change /
+    // password change / admin force-logout) must NOT be usable to mint
+    // new access tokens. Without this check, a compromised refresh
+    // token could cheerfully keep an attacker authenticated indefinitely
+    // after the owner changed their email/password to kick them out.
+    if (typeof payload.ver !== 'number' || payload.ver !== user.tokenVersion) {
+      throw new UnauthorizedException('Session invalidated. Sign in again.');
+    }
+
     return this.generateTokens(user.id);
   }
 
-  private generateTokens(userId: string) {
-    const accessToken = this.jwtService.sign({ sub: userId });
+  /**
+   * Mint an access + refresh token pair bound to the user's current
+   * tokenVersion. JwtStrategy checks that `ver` matches on every
+   * authenticated request; the refresh controller re-reads the user and
+   * re-signs so a refresh token issued before a version bump is
+   * immediately rejected.
+   */
+  private async generateTokens(userId: string) {
+    // Read tokenVersion as part of the same boot path so both tokens agree.
+    // A concurrent email-change/password-change that bumps the version
+    // between issuance of access and refresh would normally leave one of
+    // them already stale; reading once is the cheapest way to keep them
+    // in lock-step.
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tokenVersion: true },
+    });
+    if (!u) throw new UnauthorizedException('Usuário não encontrado');
+    const ver = u.tokenVersion;
 
-    const refreshExpiry = this.config.get<string>('JWT_REFRESH_EXPIRY', '7d');
-    const refreshToken = this.jwtService.sign({ sub: userId, type: 'refresh' }, { expiresIn: refreshExpiry });
+    const accessToken = this.jwtService.sign({ sub: userId, ver });
+
+    // jsonwebtoken@9 (pulled by @nestjs/jwt v11) requires expiresIn to be
+    // a number of seconds or a `ms`-compatible template literal like
+    // `"7d"` / `"15m"`. The env value is one of those by convention.
+    const refreshExpiry = this.config.get<string>(
+      'JWT_REFRESH_EXPIRY',
+      '7d',
+    ) as `${number}${'s' | 'm' | 'h' | 'd'}`;
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, type: 'refresh', ver },
+      { expiresIn: refreshExpiry },
+    );
 
     return { accessToken, refreshToken };
   }
 
   /** Returns tokens + the user object expected by the mobile client. */
   private async generateTokensWithUser(userId: string) {
-    const tokens = this.generateTokens(userId);
+    const tokens = await this.generateTokens(userId);
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, email: true, cpf: true, avatarUrl: true, createdAt: true },

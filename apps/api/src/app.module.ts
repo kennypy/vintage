@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { HashThrottlerGuard } from './common/guards/hash-throttler.guard';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler.storage';
 import { CsrfMiddleware } from './common/middleware/csrf.middleware';
 import { CommonModule } from './common/common.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -46,12 +47,23 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000, // 1 minute
-        limit: 60, // 60 requests per minute
-      },
-    ]),
+    // Redis-backed storage (see RedisThrottlerStorage). Required for
+    // horizontal scale — the in-memory default would let an attacker
+    // reset their rate-limit counter just by hitting a different API
+    // instance.
+    ThrottlerModule.forRootAsync({
+      imports: [CommonModule],
+      inject: [RedisThrottlerStorage],
+      useFactory: (storage: RedisThrottlerStorage) => ({
+        throttlers: [
+          {
+            ttl: 60000, // 1 minute
+            limit: 60, // 60 requests per minute per tracker
+          },
+        ],
+        storage,
+      }),
+    }),
     CommonModule,
     PrismaModule,
     AuthModule,

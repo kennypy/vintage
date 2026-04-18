@@ -26,6 +26,13 @@ model User {
   verified           Boolean   @default(false)
   cpfVerified        Boolean   @default(false)
   twoFaEnabled       Boolean   @default(false)
+  // Monotonically-incremented every time we need to globally invalidate
+  // existing sessions for this user (email change, password change, admin
+  // force-logout). Every issued JWT carries the ver claim at sign time; the
+  // JWT auth guard rejects tokens whose ver ≠ current tokenVersion. Bumped
+  // in the same DB transaction that commits the triggering change so a
+  // window of valid tokens never exists after the event.
+  tokenVersion       Int       @default(0)
   twoFaMethod        TwoFaMethod @default(TOTP) // TOTP authenticator app or SMS
   twoFaSecret        String?   // Encrypted TOTP secret (null when 2FA disabled or SMS)
   // Phone number verified for SMS 2FA. E.164 format (+55...). Separate from
