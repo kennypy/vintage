@@ -147,6 +147,7 @@ npm run format       # Formatar código com Prettier
 
 - **[PLAN.md](./PLAN.md)** — Plano completo do projeto, análise de concorrentes (Vinted, Enjoei), fases de implementação, guia de abertura de empresa no Brasil
 - **[CLAUDE.md](./CLAUDE.md)** — Guidelines de desenvolvimento, gate obrigatório `./scripts/ci-parity.sh`, anti-padrões que quebraram CI
+- **[LAUNCH_CHECKLIST.md](./LAUNCH_CHECKLIST.md)** — Top-to-bottom pre-launch + post-launch operational checklist (English)
 - **[LOCAL_TEST_PLAN.md](./LOCAL_TEST_PLAN.md)** — Smoke test 30–45min cobrindo auth, 2FA (TOTP + SMS), bloqueios, CPF linker OAuth, saques com chaves PIX salvas
 - **[DEPENDENCY_UPGRADE_PLAN.md](./DEPENDENCY_UPGRADE_PLAN.md)** — Fila priorizada para elevar `npm audit` gate de `critical` para `high` pós-lançamento
 - **[DEPLOYMENT.md](./DEPLOYMENT.md)** — Runbook de deploy em Supabase / Upstash / Meilisearch / Fly.io / R2 / Vercel / Resend
