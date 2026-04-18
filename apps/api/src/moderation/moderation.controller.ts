@@ -54,6 +54,16 @@ class ResolveImageFlagDto {
   note?: string;
 }
 
+class ResolveFraudFlagDto {
+  @IsIn(['DISMISS', 'REVIEWED'])
+  action!: 'DISMISS' | 'REVIEWED';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
 @ApiTags('moderation')
 @ApiBearerAuth()
 @UseGuards(AdminGuard)
@@ -144,6 +154,32 @@ export class ModerationController {
     @Body() body: ResolveImageFlagDto,
   ) {
     return this.moderationService.resolveImageFlag(id, body.action, 'admin', body.note);
+  }
+
+  @Get('fraud-flags')
+  @ApiOperation({ summary: 'Listar sinalizações de fraude pendentes (admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'Fila FIFO de fraude pendente' })
+  listFraudFlags(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('pageSize', new DefaultValuePipe(20), ParseIntPipe) pageSize: number,
+  ) {
+    return this.moderationService.listPendingFraudFlags(page, pageSize);
+  }
+
+  @Patch('fraud-flags/:id')
+  @ApiOperation({
+    summary: 'Resolver sinalização de fraude (admin)',
+    description:
+      'DISMISS: falso-positivo, nenhuma ação. REVIEWED: investigação concluída (pode ter levado a ban/unban separado).',
+  })
+  @ApiResponse({ status: 200, description: 'Sinalização resolvida' })
+  resolveFraudFlag(
+    @Param('id') id: string,
+    @Body() body: ResolveFraudFlagDto,
+  ) {
+    return this.moderationService.resolveFraudFlag(id, body.action, 'admin', body.note);
   }
 
   @Post('users/:id/force-logout')

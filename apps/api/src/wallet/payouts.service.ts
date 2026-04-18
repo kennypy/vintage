@@ -12,6 +12,7 @@ import {
   MercadoPagoClient,
   MercadoPagoPayoutUnavailableError,
 } from '../payments/mercadopago.client';
+import { FraudService } from '../fraud/fraud.service';
 import type { PayoutRequestStatus } from '@prisma/client';
 
 /**
@@ -38,6 +39,7 @@ export class PayoutsService {
     private prisma: PrismaService,
     private payoutMethods: PayoutMethodsService,
     private mp: MercadoPagoClient,
+    private fraud: FraudService,
   ) {}
 
   async requestPayout(userId: string, amountBrl: number, payoutMethodId: string) {
@@ -73,6 +75,16 @@ export class PayoutsService {
     // Ownership — throws ForbiddenException if the method belongs to
     // another user. Must run before debiting.
     const method = await this.payoutMethods.getOwnedOrThrow(userId, payoutMethodId);
+
+    // Fraud check: a payout against a freshly-added payout method is
+    // the classic account-compromise drain pattern. FLAG lets the
+    // payout through with an admin flag; BLOCK short-circuits.
+    const fraudDecision = await this.fraud.evaluatePayout(userId, payoutMethodId);
+    if (fraudDecision.action === 'BLOCK') {
+      throw new ForbiddenException(
+        'Saque temporariamente bloqueado por nossa proteção contra fraude. Entre em contato com o suporte.',
+      );
+    }
 
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Carteira não encontrada');

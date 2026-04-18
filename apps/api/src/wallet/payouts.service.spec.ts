@@ -11,6 +11,7 @@ import {
   MercadoPagoClient,
   MercadoPagoPayoutUnavailableError,
 } from '../payments/mercadopago.client';
+import { FraudService } from '../fraud/fraud.service';
 
 jest.mock('@vintage/shared', () => ({
   MIN_PAYOUT_BRL: 10.0,
@@ -62,6 +63,12 @@ describe('PayoutsService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PayoutMethodsService, useValue: mockPayoutMethods },
         { provide: MercadoPagoClient, useValue: mockMp },
+        {
+          provide: FraudService,
+          useValue: {
+            evaluatePayout: jest.fn().mockResolvedValue({ action: 'ALLOW' }),
+          },
+        },
       ],
     }).compile();
 
