@@ -45,6 +45,7 @@ export default [
         HTMLDivElement: 'readonly',
         HTMLButtonElement: 'readonly',
         HTMLElement: 'readonly',
+        HTMLImageElement: 'readonly',
         HTMLScriptElement: 'readonly',
         Window: 'readonly',
         AbortController: 'readonly',

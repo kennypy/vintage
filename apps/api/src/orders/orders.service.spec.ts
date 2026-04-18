@@ -11,6 +11,7 @@ import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -89,6 +90,7 @@ describe('OrdersService', () => {
             evaluatePurchase: jest.fn().mockResolvedValue({ action: 'ALLOW' }),
           },
         },
+        { provide: AnalyticsService, useValue: { capture: jest.fn() } },
       ],
     }).compile();
 

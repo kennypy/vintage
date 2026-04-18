@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 jest.mock('@vintage/shared', () => ({
   MAX_LISTING_IMAGES: 20,
@@ -72,6 +73,7 @@ describe('ListingsService', () => {
             removeListing: jest.fn().mockResolvedValue(undefined),
           },
         },
+        { provide: AnalyticsService, useValue: { capture: jest.fn() } },
       ],
     }).compile();
 

@@ -5,6 +5,7 @@ import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -57,6 +58,7 @@ function createService(nodeEnv: string): Promise<PaymentsService> {
           notifyAdmins: jest.fn(),
         },
       },
+      { provide: AnalyticsService, useValue: { capture: jest.fn() } },
     ],
   })
     .compile()

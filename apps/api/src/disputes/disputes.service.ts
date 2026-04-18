@@ -7,12 +7,16 @@ import {
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { DISPUTE_WINDOW_DAYS } from '@vintage/shared';
 
 @Injectable()
 export class DisputesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private analytics: AnalyticsService,
+  ) {}
 
   /**
    * Abre uma disputa para um pedido entregue.
@@ -89,6 +93,16 @@ export class DisputesService {
       });
 
       return createdDispute;
+    });
+
+    this.analytics.capture(buyerId, AnalyticsEvents.DISPUTE_OPENED, {
+      orderId: dto.orderId,
+      reason: dto.reason,
+      hoursSinceDelivery: order.deliveredAt
+        ? Math.round(
+            (Date.now() - order.deliveredAt.getTime()) / (60 * 60 * 1000),
+          )
+        : null,
     });
 
     return dispute;

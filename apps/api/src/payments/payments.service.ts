@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { MercadoPagoClient } from './mercadopago.client';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
@@ -25,6 +26,7 @@ export class PaymentsService {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly analytics: AnalyticsService,
   ) {
     this.nodeEnv = this.configService.get<string>(
       'NODE_ENV',
@@ -311,6 +313,17 @@ export class PaymentsService {
     this.logger.log(
       `Order ${order.id} marked PAID — R$${itemAmount.toFixed(2)} held in escrow for seller ${order.sellerId}`,
     );
+
+    // Funnel: payment confirmed → escrow opened. Attributed to the
+    // buyer because the payment originates there — the analytics
+    // slice will join this back to the seller via the orderId.
+    this.analytics.capture(order.buyerId, AnalyticsEvents.ORDER_PAID, {
+      orderId: order.id,
+      sellerId: order.sellerId,
+      itemPriceBrl: itemAmount,
+      paymentMethod: 'MP',
+      paymentId,
+    });
   }
 
   async getPaymentStatus(paymentId: string) {

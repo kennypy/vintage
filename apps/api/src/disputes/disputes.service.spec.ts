@@ -8,6 +8,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { DisputesService } from './disputes.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { DisputeReason } from './dto/create-dispute.dto';
 
 jest.mock('@vintage/shared', () => ({
@@ -46,6 +47,7 @@ describe('DisputesService', () => {
       providers: [
         DisputesService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: AnalyticsService, useValue: { capture: jest.fn() } },
       ],
     }).compile();
 
