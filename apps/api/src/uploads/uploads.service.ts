@@ -13,7 +13,12 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as sharp from 'sharp';
-import { ImageAnalysisService } from './image-analysis.service';
+import {
+  ImageAnalysisService,
+  ImageModerationFindings,
+  classifyModeration,
+} from './image-analysis.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { UploadImageResponse } from './dto/upload-response.dto';
 import { assertSafeS3Endpoint } from '../common/services/url-validator';
 
@@ -68,6 +73,7 @@ export class UploadsService {
   constructor(
     private readonly configService: ConfigService,
     private readonly imageAnalysisService: ImageAnalysisService,
+    private readonly prisma: PrismaService,
   ) {
     const region = this.configService.get<string>('S3_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('S3_ENDPOINT', '');
@@ -186,11 +192,15 @@ export class UploadsService {
 
   /**
    * Upload a listing image: validates, processes with Sharp, stores in S3.
+   * SafeSearch moderation gates the write: VERY_LIKELY for adult /
+   * violence / racy aborts before S3; LIKELY proceeds but queues a
+   * ListingImageFlag for admin review.
    */
   async uploadListingImage(
     file: Buffer,
     filename: string,
     mimeType: string,
+    uploaderId: string,
     _listingImageCount?: number,
   ): Promise<UploadImageResponse> {
     // 1. Validate file size with early abort
@@ -216,7 +226,22 @@ export class UploadsService {
     const key = `listings/${timestamp}-${safeName}.jpg`;
 
     // 5. Run image analysis on the validated buffer (non-blocking, never throws)
-    const suggestions = await this.imageAnalysisService.analyze(file);
+    const { suggestions, moderation } =
+      await this.imageAnalysisService.analyze(file);
+
+    // 5a. SafeSearch gate. classifyModeration returns 'CLEAN' when
+    // moderation is null (Vision disabled / outage) — fail-open is
+    // acceptable for launch; tighten to REJECT-on-null once Vision
+    // is confirmed stable for our traffic.
+    const decision = classifyModeration(moderation);
+    if (decision === 'REJECT') {
+      this.logger.warn(
+        `Upload rejected by SafeSearch for user ${uploaderId}: ${JSON.stringify(moderation)}`,
+      );
+      throw new BadRequestException(
+        'Esta imagem foi rejeitada pela moderação automática. Envie uma foto do produto em um ambiente neutro.',
+      );
+    }
 
     // Dev fallback: when S3 is not configured return a stable placeholder URL
     if (!this.s3Configured) {
@@ -224,8 +249,10 @@ export class UploadsService {
         throw new Error('S3 storage not configured — cannot upload images in production');
       }
       const seed = timestamp % 1000;
+      const placeholderUrl = `https://picsum.photos/seed/${seed}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`;
+      await this.flagIfFlagged(decision, moderation, uploaderId, placeholderUrl, key);
       return {
-        url: `https://picsum.photos/seed/${seed}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`,
+        url: placeholderUrl,
         key,
         width: PLACEHOLDER_WIDTH,
         height: PLACEHOLDER_HEIGHT,
@@ -255,6 +282,11 @@ export class UploadsService {
 
       const url = await this.generatePresignedUrl(key);
 
+      // 8. If SafeSearch flagged this as borderline, queue for admin
+      // review. Fire-and-forget: a flag-write failure must not fail
+      // the upload — the image is already safely in S3.
+      await this.flagIfFlagged(decision, moderation, uploaderId, url, key);
+
       return {
         url,
         key,
@@ -273,6 +305,44 @@ export class UploadsService {
         'Erro ao processar imagem. Tente novamente.',
       );
     }
+  }
+
+  /** Create a ListingImageFlag row when SafeSearch returned LIKELY. */
+  private async flagIfFlagged(
+    decision: 'REJECT' | 'FLAG' | 'CLEAN',
+    findings: ImageModerationFindings | null,
+    uploaderId: string,
+    imageUrl: string,
+    s3Key: string,
+  ): Promise<void> {
+    if (decision !== 'FLAG' || !findings) return;
+    const reason = this.describeFindings(findings);
+    try {
+      await this.prisma.listingImageFlag.create({
+        data: {
+          uploaderId,
+          imageUrl,
+          s3Key,
+          findings: findings as unknown as object,
+          reason,
+        },
+      });
+    } catch (err) {
+      // A failure here is logged but never propagated — the upload
+      // already succeeded; leaving the flag missing is degraded but
+      // non-fatal, and the moderation queue sees nothing-bad-yet.
+      this.logger.warn(
+        `Failed to persist ListingImageFlag for ${s3Key}: ${String(err).slice(0, 200)}`,
+      );
+    }
+  }
+
+  private describeFindings(f: ImageModerationFindings): string {
+    const flagged: string[] = [];
+    if (f.adult === 'LIKELY') flagged.push('adulto');
+    if (f.violence === 'LIKELY') flagged.push('violência');
+    if (f.racy === 'LIKELY') flagged.push('sugestivo');
+    return `SafeSearch sinalizou conteúdo potencialmente impróprio: ${flagged.join(', ') || 'desconhecido'}.`;
   }
 
   /**

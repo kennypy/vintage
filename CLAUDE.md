@@ -239,6 +239,12 @@ All HTTP responses must include:
 - Keep dependencies pinned and regularly updated
 - Review new dependencies for security implications before adding them
 
+### Vendor Consolidation (MANDATORY)
+- **Prefer an existing vendor over a new one** whenever the existing vendor can cover the new need with equivalent quality. Smaller vendor surface = fewer credentials to rotate, fewer SDKs to patch, fewer billing lines, fewer incident-response runbooks.
+- Before proposing a second vendor for an overlapping capability, explicitly check what every currently-integrated vendor already does. Concrete example: Google Vision is already wired for listing autofill (labels/logos/web/OCR/colors), so image moderation goes through Google Vision's `SAFE_SEARCH_DETECTION` — do NOT add AWS Rekognition.
+- If the existing vendor is genuinely insufficient, document the specific gap in the PR description (what feature the existing vendor lacks) before pulling in a new one.
+- When a request naturally implies "add vendor X", treat that as a hypothesis to disprove, not a spec.
+
 ### Logging
 - Use structured JSON logging
 - Never log secrets, API keys, passwords, PIX keys, or CPF numbers

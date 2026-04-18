@@ -17,6 +17,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UploadsService } from './uploads.service';
 import { UploadImageResponse } from './dto/upload-response.dto';
 
@@ -43,6 +44,7 @@ export class UploadsController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido' })
   async uploadListingImage(
     @UploadedFile() file: UploadedFileInfo,
+    @CurrentUser() user: AuthUser,
   ): Promise<UploadImageResponse> {
     if (!file || !file.buffer) {
       throw new BadRequestException('Nenhum arquivo enviado.');
@@ -52,6 +54,7 @@ export class UploadsController {
       file.buffer,
       file.originalname,
       file.mimetype,
+      user.id,
     );
   }
 

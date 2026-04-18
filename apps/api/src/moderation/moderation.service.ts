@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ export type ReviewAction = 'SUSPEND_LISTING' | 'BAN_USER' | 'DISMISS';
 
 @Injectable()
 export class ModerationService {
+  private readonly logger = new Logger(ModerationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -200,5 +203,104 @@ export class ModerationService {
       data: { tokenVersion: { increment: 1 } },
     });
     return { success: true, userId };
+  }
+
+  // --- Image Flag queue (SafeSearch LIKELY hits on uploads) ---
+  //
+  // ListingImageFlag rows are written by UploadsService when Google
+  // Vision returns LIKELY on adult / violence / racy. VERY_LIKELY
+  // uploads are refused at the boundary and never reach this table.
+
+  async listPendingImageFlags(page = 1, pageSize = 20) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const where = { status: 'PENDING' as const };
+
+    const [items, total] = await Promise.all([
+      this.prisma.listingImageFlag.findMany({
+        where,
+        include: {
+          uploader: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: 'asc' }, // oldest-first FIFO triage
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.listingImageFlag.count({ where }),
+    ]);
+
+    return { items, total, page, pageSize, hasMore: skip + items.length < total };
+  }
+
+  /**
+   * Resolve a pending flag. On REJECT we also delete any ListingImage
+   * row that points at the same URL and soft-delete the listing; the
+   * S3 object is deleted via a separate cron (not the controller,
+   * to avoid a permission surface on the admin token).
+   */
+  async resolveImageFlag(
+    flagId: string,
+    action: 'DISMISS' | 'REJECT',
+    adminId: string,
+    note?: string,
+  ) {
+    const flag = await this.prisma.listingImageFlag.findUnique({
+      where: { id: flagId },
+    });
+    if (!flag) throw new NotFoundException('Sinalização não encontrada');
+    if (flag.status !== 'PENDING') {
+      throw new BadRequestException('Esta sinalização já foi resolvida');
+    }
+
+    const nextStatus = action === 'DISMISS' ? 'DISMISSED' : 'REJECTED';
+    let suspendedListingIds: string[] = [];
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.listingImageFlag.update({
+        where: { id: flagId },
+        data: {
+          status: nextStatus,
+          reviewedById: adminId,
+          reviewedAt: new Date(),
+          reviewNote: note?.slice(0, 500) ?? null,
+        },
+      });
+
+      if (action === 'REJECT') {
+        // Remove the image row from any listing that ended up using
+        // this URL, and suspend the parent listing so the remaining
+        // images don't keep the now-offending listing live.
+        const images = await tx.listingImage.findMany({
+          where: { url: flag.imageUrl },
+          select: { id: true, listingId: true },
+        });
+        suspendedListingIds = [...new Set(images.map((i) => i.listingId))];
+        if (images.length > 0) {
+          await tx.listingImage.deleteMany({
+            where: { id: { in: images.map((i) => i.id) } },
+          });
+        }
+        if (suspendedListingIds.length > 0) {
+          await tx.listing.updateMany({
+            where: { id: { in: suspendedListingIds } },
+            data: { status: 'SUSPENDED' },
+          });
+        }
+      }
+    });
+
+    // Post-tx: drop the now-SUSPENDED listings from Meilisearch so
+    // buyers stop seeing them in search results.
+    for (const id of suspendedListingIds) {
+      this.listings.syncSearchIndex(id).catch(() => {});
+    }
+
+    this.logger.log(
+      `ListingImageFlag ${flagId} resolved as ${nextStatus} by ${adminId}`,
+    );
+
+    return { resolved: true, status: nextStatus };
   }
 }

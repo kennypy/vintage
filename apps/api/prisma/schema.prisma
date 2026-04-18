@@ -90,6 +90,8 @@ model User {
   deletionAuditLogs      DeletionAuditLog[]
   blocksMade             UserBlock[]         @relation("UserBlocker")
   blocksReceived         UserBlock[]         @relation("UserBlocked")
+  listingImageFlags      ListingImageFlag[]  @relation("ListingImageFlagUploader")
+  listingImageFlagReviews ListingImageFlag[] @relation("ListingImageFlagReviewer")
 
   @@index([email])
   @@index([cpf])
@@ -571,6 +573,49 @@ model Dispute {
 
   order    Order @relation(fields: [orderId], references: [id])
   openedBy User  @relation(fields: [openedById], references: [id])
+}
+
+// --- Listing Image Moderation Flags ---
+//
+// Created when Google Vision SafeSearch reports a `LIKELY` rating on
+// adult / violence / racy for an uploaded image. `VERY_LIKELY` hits
+// are refused outright at the upload boundary and never reach the DB.
+//
+// At the moment of upload we don't know what listing the image will
+// attach to (the client hasn't submitted the listing yet), so the
+// flag is keyed on the S3 key + uploader. If / when the image ends
+// up on a real listing, a later cron can connect `listingId` by URL
+// match — kept optional here so the flag is written without blocking.
+//
+// Admin review from /admin/image-flags:
+//   - DISMISS: false-positive; flag resolved, image stays
+//   - REJECT:  removes the S3 object + any listing/listingImage that
+//              references the URL; notifies the uploader
+model ListingImageFlag {
+  id         String                 @id @default(cuid())
+  uploaderId String
+  imageUrl   String                 @db.Text
+  s3Key      String
+  findings   Json // full SafeSearch findings payload
+  reason     String // human-readable one-liner for the admin queue
+  status     ListingImageFlagStatus @default(PENDING)
+  reviewedById String?
+  reviewedAt DateTime?
+  reviewNote String?
+  createdAt  DateTime               @default(now())
+
+  uploader User  @relation("ListingImageFlagUploader", fields: [uploaderId], references: [id])
+  reviewer User? @relation("ListingImageFlagReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([uploaderId])
+}
+
+enum ListingImageFlagStatus {
+  PENDING
+  DISMISSED
+  REJECTED
 }
 
 // --- Order Listing Snapshots ---

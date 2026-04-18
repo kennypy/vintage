@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
 import { UploadsService } from './uploads.service';
 import { ImageAnalysisService } from './image-analysis.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 // Mock S3 client
 const mockSend = jest.fn().mockResolvedValue({});
@@ -74,7 +75,14 @@ describe('UploadsService', () => {
     mockSend.mockResolvedValue({});
 
     const mockImageAnalysisService = {
-      analyze: jest.fn().mockResolvedValue({}),
+      // Default: clean image — no moderation findings, no suggestions.
+      analyze: jest.fn().mockResolvedValue({ suggestions: {}, moderation: null }),
+    };
+
+    const mockPrisma = {
+      listingImageFlag: {
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -82,10 +90,14 @@ describe('UploadsService', () => {
         UploadsService,
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ImageAnalysisService, useValue: mockImageAnalysisService },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
     service = module.get<UploadsService>(UploadsService);
+    // Expose the mocks on the describe scope so per-test setups work.
+    (service as any)._mockAnalysis = mockImageAnalysisService;
+    (service as any)._mockPrisma = mockPrisma;
   });
 
   describe('validateMimeType', () => {
@@ -177,6 +189,7 @@ describe('UploadsService', () => {
         validJpegBuffer,
         'test-photo.jpg',
         'image/jpeg',
+        'user-1',
       );
 
       expect(result.url).toBeDefined();
@@ -191,6 +204,7 @@ describe('UploadsService', () => {
         validJpegBuffer,
         'photo.jpg',
         'image/jpeg',
+        'user-1',
       );
 
       const sharp = require('sharp');
@@ -209,6 +223,7 @@ describe('UploadsService', () => {
         validJpegBuffer,
         'photo.jpg',
         'image/jpeg',
+        'user-1',
       );
 
       expect(mockSend).toHaveBeenCalled();
@@ -227,6 +242,7 @@ describe('UploadsService', () => {
           validJpegBuffer,
           'photo.jpg',
           'image/jpeg',
+          'user-1',
           20,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -235,7 +251,7 @@ describe('UploadsService', () => {
     it('should reject files with invalid MIME type', async () => {
       const gifBuffer = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39]);
       await expect(
-        service.uploadListingImage(gifBuffer, 'image.gif', 'image/gif'),
+        service.uploadListingImage(gifBuffer, 'image.gif', 'image/gif', 'user-1'),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -244,10 +260,147 @@ describe('UploadsService', () => {
         validJpegBuffer,
         '../../etc/passwd.jpg',
         'image/jpeg',
+        'user-1',
       );
 
       expect(result.key).not.toContain('..');
       expect(result.key).not.toContain('/etc/');
+    });
+
+    // SafeSearch moderation contract: VERY_LIKELY rejects before S3
+    // write; LIKELY proceeds to S3 + queues a ListingImageFlag for
+    // admin review; UNLIKELY / missing findings proceed clean.
+    describe('SafeSearch moderation', () => {
+      it('rejects the upload when adult is VERY_LIKELY (no S3 write)', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: {
+            adult: 'VERY_LIKELY',
+            violence: 'VERY_UNLIKELY',
+            racy: 'UNLIKELY',
+            spoof: 'UNKNOWN',
+            medical: 'UNKNOWN',
+          },
+        });
+
+        await expect(
+          service.uploadListingImage(validJpegBuffer, 'nsfw.jpg', 'image/jpeg', 'user-1'),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockSend).not.toHaveBeenCalled();
+        expect((service as any)._mockPrisma.listingImageFlag.create).not.toHaveBeenCalled();
+      });
+
+      it('rejects when violence is VERY_LIKELY', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: {
+            adult: 'UNLIKELY',
+            violence: 'VERY_LIKELY',
+            racy: 'UNLIKELY',
+            spoof: 'UNKNOWN',
+            medical: 'UNKNOWN',
+          },
+        });
+
+        await expect(
+          service.uploadListingImage(validJpegBuffer, 'v.jpg', 'image/jpeg', 'user-1'),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('queues a ListingImageFlag when racy is LIKELY (upload still succeeds)', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: {
+            adult: 'UNLIKELY',
+            violence: 'UNLIKELY',
+            racy: 'LIKELY',
+            spoof: 'UNKNOWN',
+            medical: 'UNKNOWN',
+          },
+        });
+
+        const result = await service.uploadListingImage(
+          validJpegBuffer,
+          'borderline.jpg',
+          'image/jpeg',
+          'user-1',
+        );
+
+        expect(result.url).toBeDefined();
+        expect((service as any)._mockPrisma.listingImageFlag.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              uploaderId: 'user-1',
+              reason: expect.stringContaining('sugestivo'),
+            }),
+          }),
+        );
+      });
+
+      it('does NOT queue a flag when all findings are UNLIKELY', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: {
+            adult: 'UNLIKELY',
+            violence: 'UNLIKELY',
+            racy: 'UNLIKELY',
+            spoof: 'UNLIKELY',
+            medical: 'UNLIKELY',
+          },
+        });
+
+        await service.uploadListingImage(
+          validJpegBuffer,
+          'ok.jpg',
+          'image/jpeg',
+          'user-1',
+        );
+
+        expect((service as any)._mockPrisma.listingImageFlag.create).not.toHaveBeenCalled();
+      });
+
+      it('fails open when moderation is null (Vision API disabled / outage)', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: null,
+        });
+
+        const result = await service.uploadListingImage(
+          validJpegBuffer,
+          'ok.jpg',
+          'image/jpeg',
+          'user-1',
+        );
+
+        expect(result.url).toBeDefined();
+        expect((service as any)._mockPrisma.listingImageFlag.create).not.toHaveBeenCalled();
+      });
+
+      it('swallows flag-write failures so the upload still succeeds', async () => {
+        (service as any)._mockAnalysis.analyze.mockResolvedValueOnce({
+          suggestions: {},
+          moderation: {
+            adult: 'UNLIKELY',
+            violence: 'UNLIKELY',
+            racy: 'LIKELY',
+            spoof: 'UNKNOWN',
+            medical: 'UNKNOWN',
+          },
+        });
+        (service as any)._mockPrisma.listingImageFlag.create.mockRejectedValueOnce(
+          new Error('DB down'),
+        );
+
+        const result = await service.uploadListingImage(
+          validJpegBuffer,
+          'borderline.jpg',
+          'image/jpeg',
+          'user-1',
+        );
+
+        expect(result.url).toBeDefined();
+      });
     });
   });
 
