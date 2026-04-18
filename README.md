@@ -42,12 +42,12 @@ vintage/
 
 | Módulo | Endpoints | Funcionalidade |
 |--------|-----------|---------------|
-| **Auth** | register, login, refresh, Google OAuth, Apple Sign In, 2FA setup/enable/disable/confirm | CPF validation, bcrypt, JWT, social login, TOTP 2FA, login anomaly detection |
-| **Users** | profile, addresses, follow, vacation, storefront | CEP autocomplete, follow counts, vacation mode, public storefront |
+| **Auth** | register, login, refresh, Google OAuth, Apple Sign In, 2FA setup/enable/disable/confirm, 2FA-SMS setup/enable/resend, email-change request/confirm | CPF validation, bcrypt, JWT, social login, TOTP + SMS 2FA (Twilio), login anomaly detection, email change with token-hash storage |
+| **Users** | profile, addresses, follow, vacation, storefront, block/unblock/list-blocks, set-CPF (OAuth accounts) | CEP autocomplete, follow counts, vacation mode, public storefront, user blocking (gates messages + offers), set-once CPF linker for OAuth users |
 | **Listings** | CRUD, search, favorites, categories, feed, saved searches, price suggestion, video | Filtros, paginação, social feed, preço sugerido por IA, vídeos 30s MP4/MOV |
 | **Orders** | create, ship, confirm | Escrow, taxa de proteção (R$3,50 + 5%), crédito na carteira |
 | **Offers** | create, accept, reject | Mínimo 50% do preço, expiração em 48h |
-| **Wallet** | balance, transactions, payout | Saque via PIX, mínimo R$10 |
+| **Wallet** | balance, transactions, payout, payout-methods CRUD | Saque via chave PIX salva (race-safe, débito atômico), 5 chaves/conta, 5 tipos PIX canonicalizados (CPF/CNPJ/email/phone BR/random UUID), mascaramento obrigatório |
 | **Messages** | conversations, send, WebSocket gateway | Chat em tempo real (Socket.io), typing, read receipts, online status |
 | **Reviews** | create, list, seller reply | Avaliação binária (1 ou 5 estrelas), resposta pública do vendedor |
 | **Notifications** | list, read, read-all | Contagem de não lidas |
@@ -135,15 +135,23 @@ npm run build        # Build de produção
 npm run lint         # Lint em todos os pacotes
 npm run test         # Rodar testes
 npm run format       # Formatar código com Prettier
+
+./scripts/ci-parity.sh          # OBRIGATÓRIO antes de cada push —
+                                 # reproduz .github/workflows/ci.yml
+                                 # com caches limpos + pipefail em
+                                 # todos os passos. Ver CLAUDE.md.
+./scripts/ci-parity.sh --fast   # iteração local (mantém node_modules)
 ```
 
 ## Documentação
 
 - **[PLAN.md](./PLAN.md)** — Plano completo do projeto, análise de concorrentes (Vinted, Enjoei), fases de implementação, guia de abertura de empresa no Brasil
-- **[CLAUDE.md](./CLAUDE.md)** — Guidelines de desenvolvimento, checklist pre-push, padrões de segurança
+- **[CLAUDE.md](./CLAUDE.md)** — Guidelines de desenvolvimento, gate obrigatório `./scripts/ci-parity.sh`, anti-padrões que quebraram CI
+- **[LOCAL_TEST_PLAN.md](./LOCAL_TEST_PLAN.md)** — Smoke test 30–45min cobrindo auth, 2FA (TOTP + SMS), bloqueios, CPF linker OAuth, saques com chaves PIX salvas
+- **[DEPENDENCY_UPGRADE_PLAN.md](./DEPENDENCY_UPGRADE_PLAN.md)** — Fila priorizada para elevar `npm audit` gate de `critical` para `high` pós-lançamento
 - **[DEPLOYMENT.md](./DEPLOYMENT.md)** — Runbook de deploy em Supabase / Upstash / Meilisearch / Fly.io / R2 / Vercel / Resend
 - **[STORE_SUBMISSION.md](./STORE_SUBMISSION.md)** — Passo a passo completo de submissão na App Store e Play Store
-- **[THIRD_PARTY_ONBOARDING.md](./THIRD_PARTY_ONBOARDING.md)** — Checklist de cadastros de Mercado Pago, Correios, Google/Apple OAuth, Resend, Sentry, etc.
+- **[THIRD_PARTY_ONBOARDING.md](./THIRD_PARTY_ONBOARDING.md)** — Cadastros Mercado Pago, Correios, Google/Apple OAuth, Twilio (SMS 2FA), Resend, Sentry
 - **[apps/mobile/STORE_TEXT.pt-BR.md](./apps/mobile/STORE_TEXT.pt-BR.md)** — Textos pt-BR prontos para App Store e Play Store
 - **[apps/mobile/assets/store/README.md](./apps/mobile/assets/store/README.md)** — Especificação dos assets visuais das lojas
 

@@ -13,6 +13,9 @@ const mockPrisma = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  user: {
+    findUnique: jest.fn(),
+  },
   walletTransaction: {
     findMany: jest.fn(),
     count: jest.fn(),
@@ -30,6 +33,9 @@ describe('WalletService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default caller: has a CPF linked. Individual tests override to
+    // exercise the no-CPF gate.
+    mockPrisma.user.findUnique.mockResolvedValue({ cpf: '52998224725' });
     // Default: caller owns the method. Individual tests override.
     mockPayoutMethods.getOwnedOrThrow.mockResolvedValue({
       id: 'method-1',
@@ -166,6 +172,19 @@ describe('WalletService', () => {
           referenceId: 'method-1',
         }),
       });
+    });
+
+    it('refuses payout for an OAuth user without a linked CPF (pre-wallet-read)', async () => {
+      // No CPF on the caller yet — Wave 2D users must link CPF before payout.
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: null });
+
+      await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
+        /Adicione um CPF/,
+      );
+      // Critical: we must not even read the wallet, much less debit it.
+      expect(mockPrisma.wallet.findUnique).not.toHaveBeenCalled();
+      expect(mockPayoutMethods.getOwnedOrThrow).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('throws BadRequest when the race-safe debit finds count=0 (concurrent withdraw drained the balance)', async () => {
