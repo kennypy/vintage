@@ -1154,6 +1154,30 @@ enum TwoFaMethod {
   SMS
 }
 
+/// Dedup cache for inbound webhook deliveries. A given provider may
+/// retry the same event several times (e.g. Mercado Pago redelivers
+/// every 5 minutes until we return 2xx, and again on any 5xx). Without
+/// a dedup guard that means double-credits on the wallet ledger.
+///
+/// We INSERT a row keyed on (provider, externalEventId) as the FIRST
+/// step of the handler. The UNIQUE constraint on that pair rejects any
+/// subsequent delivery with a P2002 that the handler treats as "already
+/// processed, return 200 silently".
+///
+/// receivedAt is indexed so a daily sweep can drop rows older than 60
+/// days; the dedup window only needs to cover the longest retry window
+/// a provider uses.
+model ProcessedWebhook {
+  id              String   @id @default(cuid())
+  provider        String   // 'mercadopago' | 'nfe' | future providers
+  externalEventId String   // The provider's own id for the delivery
+  action          String?  // Captured for audit (e.g. "payment.updated")
+  receivedAt      DateTime @default(now())
+
+  @@unique([provider, externalEventId])
+  @@index([receivedAt])
+}
+
 // PIX key type, mirrors the Brazilian Banco Central classification.
 enum PayoutMethodType {
   PIX_CPF

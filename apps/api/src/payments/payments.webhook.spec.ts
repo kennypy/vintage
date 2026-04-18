@@ -28,6 +28,9 @@ const mockPrisma: Record<string, any> = {
   walletTransaction: {
     create: jest.fn(),
   },
+  processedWebhook: {
+    create: jest.fn().mockResolvedValue({}),
+  },
   $transaction: jest.fn(),
 };
 mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
@@ -185,6 +188,68 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       const result = await service.handleWebhook(validPayload, 'valid-sig');
 
       expect(result).toEqual({ received: true });
+    });
+  });
+
+  // Dedup guard: a given webhook delivery is identified by payload.id
+  // (MP assigns one per retry). The first delivery inserts a row into
+  // ProcessedWebhook; a redelivery trips the UNIQUE constraint on
+  // (provider, externalEventId) and must return 200 WITHOUT re-running
+  // any side effects.
+  describe('dedup (#6)', () => {
+    let service: PaymentsService;
+
+    beforeEach(async () => {
+      jest.clearAllMocks();
+      mockPrisma.processedWebhook.create.mockResolvedValue({});
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+      service = await createService('production');
+    });
+
+    it('records the delivery id on first receipt', async () => {
+      mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
+      mockMercadoPago.getPaymentStatus.mockResolvedValue({ status: 'approved' });
+
+      await service.handleWebhook(
+        { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } },
+        'valid-sig',
+      );
+
+      expect(mockPrisma.processedWebhook.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          provider: 'mercadopago',
+          externalEventId: 'delivery-abc',
+          action: 'payment.updated',
+        }),
+      });
+    });
+
+    it('returns { duplicate: true } on a redelivery (P2002) WITHOUT re-processing', async () => {
+      mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
+      const p2002 = Object.assign(new Error('unique violation'), { code: 'P2002' });
+      mockPrisma.processedWebhook.create.mockRejectedValueOnce(p2002);
+
+      const result = await service.handleWebhook(
+        { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } },
+        'valid-sig',
+      );
+
+      expect(result).toEqual({ received: true, duplicate: true });
+      // Critical: the payment status fetch + processApprovedPayment
+      // must NOT run on a duplicate. Otherwise we double-credit escrow.
+      expect(mockMercadoPago.getPaymentStatus).not.toHaveBeenCalled();
+    });
+
+    it('rejects a payload without any id (cannot dedup → refuse to process)', async () => {
+      mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
+
+      await expect(
+        service.handleWebhook(
+          { action: 'payment.updated', data: {} },
+          'valid-sig',
+        ),
+      ).rejects.toThrow(/id ausente/);
+      expect(mockPrisma.processedWebhook.create).not.toHaveBeenCalled();
     });
   });
 });

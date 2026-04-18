@@ -149,13 +149,51 @@ export class PaymentsService {
       );
     }
 
-    this.logger.log('Webhook received and verified');
-
-    // Process payment notification
     const action = payload['action'] as string;
     const data = payload['data'] as Record<string, unknown>;
     const dataId = data['id'] as string | undefined;
 
+    // Dedup. MP redelivers every 5 minutes until it gets a 2xx, and
+    // retries 5xx for up to 3 days. Without this guard a redelivery of
+    // an already-processed `payment.updated` event would re-run
+    // processApprovedPayment → re-credit the seller's escrow. We
+    // insert a row keyed on the MP-assigned `id` field; the UNIQUE on
+    // (provider, externalEventId) rejects duplicates.
+    //
+    // Prefer `payload.id` (MP's per-delivery id) if present; fall back
+    // to `data.id` for older webhook shapes that don't include the
+    // delivery-level id. Both are stable under retry.
+    const deliveryId =
+      (payload['id'] as string | undefined) ?? dataId ?? null;
+    if (!deliveryId) {
+      this.logger.warn('Webhook rejected: no id in payload — cannot dedup');
+      throw new BadRequestException('Payload inválido: id ausente.');
+    }
+    try {
+      await this.prisma.processedWebhook.create({
+        data: {
+          provider: 'mercadopago',
+          externalEventId: String(deliveryId),
+          action,
+        },
+      });
+    } catch (err) {
+      // P2002 = the (provider, externalEventId) pair already exists,
+      // meaning we processed this delivery before. Acknowledge with
+      // 200 so MP stops retrying, but do NOT re-run side effects.
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        this.logger.log(
+          `Webhook duplicate — already processed mercadopago:${deliveryId}`,
+        );
+        return { received: true, duplicate: true };
+      }
+      throw err;
+    }
+
+    this.logger.log('Webhook received and verified');
+
+    // Process payment notification
     if (action === 'payment.updated' && dataId) {
       const status = await this.mercadoPago.getPaymentStatus(dataId);
       this.logger.log(

@@ -35,6 +35,9 @@ const mockPrisma: Record<string, any> = {
   walletTransaction: {
     create: jest.fn(),
   },
+  processedWebhook: {
+    create: jest.fn().mockResolvedValue({}),
+  },
   $transaction: jest.fn(),
 };
 mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
