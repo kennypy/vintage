@@ -58,7 +58,7 @@ The script runs, in order, a faithful reproduction of `.github/workflows/ci.yml`
 6. `npx turbo test --force` with CI env (`DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=test`)
 7. `npx turbo build --filter=@vintage/api --force`
 8. `npx turbo build --filter=@vintage/web --force`
-9. `npm audit --audit-level=critical`
+9. `npm audit --audit-level=high`
 
 **If you add a new step to `.github/workflows/ci.yml`, add the equivalent to `scripts/ci-parity.sh` in the same position.** The two files are meant to stay byte-for-byte equivalent in what they check.
 

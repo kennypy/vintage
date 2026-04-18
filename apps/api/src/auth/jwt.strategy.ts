@@ -10,10 +10,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     config: ConfigService,
     private prisma: PrismaService,
   ) {
+    // passport-jwt@4.x stricter typing: secretOrKey must be string | Buffer,
+    // never `string | undefined`. main.ts guarantees JWT_SECRET in prod;
+    // fall back to an obviously-wrong value for dev so a forgotten env
+    // var is loud instead of silent.
+    const secret = config.get<string>('JWT_SECRET');
+    if (!secret) {
+      throw new Error('JWT_SECRET is required');
+    }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get<string>('JWT_SECRET'),
+      secretOrKey: secret,
     });
   }
 

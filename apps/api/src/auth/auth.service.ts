@@ -1103,8 +1103,17 @@ export class AuthService {
   private generateTokens(userId: string) {
     const accessToken = this.jwtService.sign({ sub: userId });
 
-    const refreshExpiry = this.config.get<string>('JWT_REFRESH_EXPIRY', '7d');
-    const refreshToken = this.jwtService.sign({ sub: userId, type: 'refresh' }, { expiresIn: refreshExpiry });
+    // jsonwebtoken@9 (pulled by @nestjs/jwt v11) requires expiresIn to be
+    // a number of seconds or a `ms`-compatible template literal like
+    // `"7d"` / `"15m"`. The env value is one of those by convention.
+    const refreshExpiry = this.config.get<string>(
+      'JWT_REFRESH_EXPIRY',
+      '7d',
+    ) as `${number}${'s' | 'm' | 'h' | 'd'}`;
+    const refreshToken = this.jwtService.sign(
+      { sub: userId, type: 'refresh' },
+      { expiresIn: refreshExpiry },
+    );
 
     return { accessToken, refreshToken };
   }
