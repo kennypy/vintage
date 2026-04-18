@@ -31,7 +31,12 @@ const mockPrisma = {
     create: jest.fn(),
     delete: jest.fn(),
   },
-  order: { aggregate: jest.fn() },
+  // Default: no non-terminal orders for any listing — the option-B
+  // snapshot freeze in remove() passes unless a test overrides this.
+  order: {
+    count: jest.fn().mockResolvedValue(0),
+    aggregate: jest.fn(),
+  },
   savedSearch: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -494,6 +499,53 @@ describe('ListingsService', () => {
       searchMock.indexListing.mockRejectedValueOnce(new Error('meili down'));
 
       await expect(service.syncSearchIndex('listing-1')).resolves.not.toThrow();
+    });
+  });
+
+  // Option-B snapshot freeze: while any order against this listing is
+  // still non-terminal, the snapshot points at the seller's S3 keys via
+  // ListingImage, so the listing+image rows MUST stay alive. remove()
+  // refuses in that case.
+  describe('remove — option-B snapshot freeze', () => {
+    const ownListing = { id: 'listing-1', sellerId: 'seller-1', status: 'ACTIVE' };
+
+    it('soft-deletes the listing when no non-terminal orders reference it', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(ownListing);
+      mockPrisma.order.count.mockResolvedValue(0);
+      mockPrisma.listing.update.mockResolvedValue({});
+
+      const result = await service.remove('listing-1', 'seller-1');
+
+      expect(result).toEqual({ deleted: true });
+      expect(mockPrisma.listing.update).toHaveBeenCalledWith({
+        where: { id: 'listing-1' },
+        data: { status: 'DELETED' },
+      });
+    });
+
+    it('refuses to soft-delete while a non-terminal order references the listing', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(ownListing);
+      mockPrisma.order.count.mockResolvedValue(1);
+
+      await expect(service.remove('listing-1', 'seller-1')).rejects.toThrow(
+        /pedidos em andamento/,
+      );
+      expect(mockPrisma.listing.update).not.toHaveBeenCalled();
+    });
+
+    it('queries only non-terminal order statuses for the freeze check', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(ownListing);
+      mockPrisma.order.count.mockResolvedValue(0);
+      mockPrisma.listing.update.mockResolvedValue({});
+
+      await service.remove('listing-1', 'seller-1');
+
+      expect(mockPrisma.order.count).toHaveBeenCalledWith({
+        where: {
+          listingId: 'listing-1',
+          status: { notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED'] },
+        },
+      });
     });
   });
 });

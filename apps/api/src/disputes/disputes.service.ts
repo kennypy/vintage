@@ -67,6 +67,11 @@ export class DisputesService {
         include: {
           order: {
             include: {
+              // listingSnapshot is the buyer's evidence of what they
+              // bought — UI MUST prefer it when present. The live
+              // listing is kept for link-back, but its current state
+              // may have drifted (seller edits, soft-deletes).
+              listingSnapshot: true,
               listing: {
                 include: {
                   images: { orderBy: { position: 'asc' }, take: 1 },
@@ -107,6 +112,7 @@ export class DisputesService {
         include: {
           order: {
             include: {
+              listingSnapshot: true,
               listing: {
                 include: {
                   images: { orderBy: { position: 'asc' }, take: 1 },
@@ -144,6 +150,7 @@ export class DisputesService {
         include: {
           order: {
             include: {
+              listingSnapshot: true,
               listing: {
                 include: {
                   images: { orderBy: { position: 'asc' }, take: 1 },
@@ -202,6 +209,11 @@ export class DisputesService {
         include: {
           order: {
             include: {
+              // listingSnapshot is the buyer's evidence of what they
+              // bought — UI MUST prefer it when present. The live
+              // listing is kept for link-back, but its current state
+              // may have drifted (seller edits, soft-deletes).
+              listingSnapshot: true,
               listing: {
                 include: {
                   images: { orderBy: { position: 'asc' }, take: 1 },
@@ -315,6 +327,13 @@ export class DisputesService {
           },
         });
       }
+
+      // Dispute is RESOLVED — evidence is no longer needed on either
+      // branch (refund=true → REFUNDED, refund=false → COMPLETED).
+      // Purge the frozen snapshot.
+      await tx.orderListingSnapshot.deleteMany({
+        where: { orderId: dispute.orderId },
+      });
 
       return resolved;
     });

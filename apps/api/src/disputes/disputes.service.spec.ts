@@ -200,6 +200,7 @@ describe('DisputesService', () => {
           update: jest.fn().mockResolvedValue({}),
         },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
       };
       mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
 
@@ -229,6 +230,7 @@ describe('DisputesService', () => {
           update: jest.fn().mockResolvedValue({}),
         },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
       };
       mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
 

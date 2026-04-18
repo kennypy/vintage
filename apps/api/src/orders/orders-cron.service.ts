@@ -143,6 +143,12 @@ export class OrdersCronService {
             where: { id: order.listingId },
             data: { status: 'ACTIVE' },
           });
+
+          // Seller never shipped → order CANCELLED → no dispute
+          // window ever opened. Purge the snapshot.
+          await tx.orderListingSnapshot.deleteMany({
+            where: { orderId: order.id },
+          });
         });
 
         // Listing is ACTIVE again — re-add it to search.
