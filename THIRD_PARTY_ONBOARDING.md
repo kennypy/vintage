@@ -41,6 +41,28 @@ concluído (`[x]`) antes de liberar o deploy.
   - Estatuto social / Contrato social
   - Volume projetado (R$/mês)
 
+### 1.5. Payout — chaves PIX salvas
+
+A Wave 2B mudou o fluxo: o vendedor **cadastra previamente uma ou mais
+chaves PIX** (`/conta/payout-methods`) e escolhe uma na hora do saque
+em `/wallet`. O backend (`apps/api/src/wallet/payout-methods.service.ts`)
+nunca aceita uma chave PIX anônima no body do saque.
+
+- Limite: 5 chaves por conta (`MAX_METHODS_PER_USER`).
+- Canonicalização estrita: CPF/CNPJ → só dígitos; email → lowercase;
+  telefone → `+55DDDNNNNNNNN` (rejeita +1…, +44…, qualquer foreign);
+  random → UUID v4.
+- Mascaramento obrigatório em todas as respostas — nenhum endpoint
+  retorna a chave raw. A chave só sai do DB para chamar o Mercado Pago
+  na hora de efetivar o saque.
+- Débito da carteira é race-safe via `UPDATE ... WHERE balance >= amount`
+  — dois saques concorrentes contra o mesmo saldo não deixam a carteira
+  negativa.
+
+Quando o Mercado Pago Marketplace estiver ativo para split, integre o
+`/wallet/payout` real trocando o "débito apenas" atual pela chamada da
+API de saque do MP (não coberto nesta PR — é o próximo marco).
+
 ### 1.5. Homologação
 
 Antes de ir para produção, execute o fluxo E2E em sandbox:
@@ -171,6 +193,77 @@ reset de senha usa o template `sendPasswordResetEmail`.
 - Plano free: 100 emails/dia, domínio único.
 - Plano Pro (US$ 20/mês): 50 000/mês, múltiplos domínios, dedicado IP
   opcional.
+
+---
+
+## 6b. SMS / 2FA — Twilio
+
+Necessário porque a Wave 2A introduziu **2FA por SMS** além do TOTP
+tradicional. O app recusa subir em `NODE_ENV=production` sem estas
+credenciais (ver `apps/api/src/main.ts` — `requiredSecrets`).
+
+### 6b.1. Conta
+
+1. https://www.twilio.com/ → criar conta empresarial.
+2. Verificar domínio do email corporativo para tirar o selo "trial"
+   (Upgrade → Add Funds).
+3. Em **Phone Numbers → Manage → Buy a number**:
+   - País: Brasil
+   - Capacidades: **SMS** (obrigatório), Voice opcional
+   - Formato E.164 (ex: `+5511999998888`) — esse é o `TWILIO_FROM_NUMBER`.
+4. Toll-free / shortcode no BR não é possível para contas novas; o
+   número local funciona para 2FA.
+
+### 6b.2. Credenciais
+
+- Dashboard → **Account Info**:
+  - **Account SID** → `TWILIO_ACCOUNT_SID`
+  - **Auth Token** → `TWILIO_AUTH_TOKEN` (clique em "View" + Copy)
+- Número comprado → `TWILIO_FROM_NUMBER` (E.164).
+
+Armazenar no Fly secrets:
+```bash
+fly secrets set \
+  TWILIO_ACCOUNT_SID=AC... \
+  TWILIO_AUTH_TOKEN=... \
+  TWILIO_FROM_NUMBER=+5511999998888
+```
+
+### 6b.3. Compliance BR
+
+- **LGPD**: Twilio não retém o conteúdo do SMS por default (apenas
+  metadados de entrega). Confirmar em **Console → Settings → Messaging
+  Service → Content retention** que está OFF.
+- **Opt-out**: o nosso SMS de 2FA é transacional (pedido pelo usuário
+  ao tentar login), então STOP/CANCEL são suportados pelo Twilio
+  automaticamente; o código de recebimento nunca sai disso.
+
+### 6b.4. Rate limit
+
+O backend limita 5 envios/hora/usuário e cooldown de 30s entre tentativas
+(`apps/api/src/auth/auth.service.ts` — `SMS_MAX_SENDS_PER_HOUR`,
+`SMS_RESEND_COOLDOWN_SECONDS`). **Não aumente sem revisar o custo de
+Twilio** — cada SMS BR custa ~R$0,30.
+
+### 6b.5. Homologação
+
+- [ ] Registrar conta com TOTP, deslogar, logar → digitar TOTP → sessão ok.
+- [ ] Migrar para SMS 2FA via `/conta/seguranca` → **Configurar por SMS**.
+- [ ] Logout → login → recebe SMS real (Twilio console → Logs → Messaging).
+- [ ] Testar reenvio (cooldown 30s).
+- [ ] Desativar SMS 2FA pelo mesmo fluxo.
+
+### 6b.6. Dev mode
+
+Com `TWILIO_*` em branco e `NODE_ENV != production`, o `SmsService` loga
+o corpo do SMS no stdout do API:
+
+```
+[SmsService] SMS (dev) for +5511999998888: seu código de verificação é 123456
+```
+
+Nunca deixe essa configuração em staging público — qualquer pessoa com
+acesso a logs vê o código.
 
 ---
 

@@ -553,8 +553,22 @@ export class UsersService {
           socialProviderId: null,
           twoFaSecret: null,
           twoFaEnabled: false,
+          twoFaMethod: 'TOTP',
+          twoFaPhone: null,
+          twoFaPhoneVerifiedAt: null,
         },
       });
+
+      // Saved PIX keys carry PII by definition (CPF / email / phone). The
+      // anonymization above scrubs the User row, but leaving PayoutMethod
+      // rows intact would still expose the raw values. Delete outright —
+      // the user already kept the rows out of the anonymized response via
+      // the maskPixKey view, but the DB must not retain them.
+      //
+      // Also clears the ON DELETE RESTRICT FK that would otherwise block
+      // the 30-day hard-delete sweep if it ever graduates to a true
+      // User row delete.
+      await tx.payoutMethod.deleteMany({ where: { userId } });
 
       // Cancel active listings
       await tx.listing.updateMany({
@@ -616,6 +630,9 @@ export class UsersService {
           await tx.deviceToken.deleteMany({ where: { userId: u.id } });
           await tx.notification.deleteMany({ where: { userId: u.id } });
           await tx.loginEvent.deleteMany({ where: { userId: u.id } });
+          // Defense-in-depth — soft-delete already cleared these, but if a
+          // user was soft-deleted before the cleanup landed, sweep them now.
+          await tx.payoutMethod.deleteMany({ where: { userId: u.id } });
           await tx.userBlock.deleteMany({
             where: { OR: [{ blockerId: u.id }, { blockedId: u.id }] },
           });

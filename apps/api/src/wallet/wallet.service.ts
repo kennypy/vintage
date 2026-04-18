@@ -53,6 +53,24 @@ export class WalletService {
    * negative. Pure Prisma `decrement` on `update` would not catch this.
    */
   async requestPayout(userId: string, amountBrl: number, payoutMethodId: string) {
+    // Mercado Pago (and Brazilian PIX in general) needs a CPF on the payee
+    // to issue the transfer. OAuth accounts that haven't linked a CPF yet
+    // (Wave 2D flow) must go through /users/me/cpf before they can withdraw.
+    // We gate on cpf presence — NOT cpfVerified — because Receita Federal
+    // verification is an async admin review; requiring it here would block
+    // every launch-day seller indefinitely. Re-evaluate once the volume
+    // justifies admin throughput (see DEPENDENCY_UPGRADE_PLAN for the
+    // verification-at-payout upgrade path).
+    const caller = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { cpf: true },
+    });
+    if (!caller?.cpf) {
+      throw new BadRequestException(
+        'Adicione um CPF antes de solicitar saques. Vá em Conta → CPF.',
+      );
+    }
+
     const wallet = await this.prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) throw new NotFoundException('Carteira não encontrada');
 

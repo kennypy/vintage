@@ -6,6 +6,9 @@ import {
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import * as bcrypt from 'bcrypt';
+
+jest.mock('bcrypt');
 
 const mockPrisma = {
   user: {
@@ -19,6 +22,19 @@ const mockPrisma = {
     count: jest.fn(),
     updateMany: jest.fn(),
   },
+  order: {
+    updateMany: jest.fn(),
+  },
+  offer: {
+    updateMany: jest.fn(),
+  },
+  deletionAuditLog: {
+    create: jest.fn(),
+  },
+  payoutMethod: {
+    deleteMany: jest.fn(),
+  },
+  $transaction: jest.fn(),
   address: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -305,6 +321,39 @@ describe('UsersService', () => {
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
         where: { id: 'user-1', cpf: null },
         data: { cpf: VALID_CPF_PLAIN, cpfVerified: false },
+      });
+    });
+  });
+
+  describe('deleteAccount — PII cleanup', () => {
+    // The soft-delete path must wipe PayoutMethod rows: the pixKey column
+    // stores the raw CPF / email / phone the user linked for withdrawals,
+    // which would otherwise outlive the anonymized User row and re-bind
+    // PII to the deleted account. This test pins the cleanup against
+    // regression (there was zero coverage before the final review caught it).
+    it('deletes PayoutMethod rows inside the soft-delete transaction', async () => {
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'jane@example.com',
+        passwordHash: 'hashed',
+        deletedAt: null,
+        socialProvider: null,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      mockPrisma.listing.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.offer.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.deletionAuditLog.create.mockResolvedValue({});
+      mockPrisma.payoutMethod.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrisma.$transaction.mockImplementation(async (cb: unknown) =>
+        typeof cb === 'function' ? (cb as (t: typeof mockPrisma) => unknown)(mockPrisma) : undefined,
+      );
+
+      await service.deleteAccount('user-1', { password: 'pw123' });
+
+      expect(mockPrisma.payoutMethod.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
       });
     });
   });
