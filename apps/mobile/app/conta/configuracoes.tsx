@@ -184,6 +184,14 @@ export default function ConfiguracoesScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/conta/blocked-users')}
+        >
+          <Ionicons name="ban-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Usuários bloqueados</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
           onPress={() => router.push('/conta/payout-methods')}
         >
           <Ionicons name="card-outline" size={22} color={theme.textSecondary} />

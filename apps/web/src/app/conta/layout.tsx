@@ -7,6 +7,7 @@ const NAV = [
   { href: '/conta/configuracoes', label: 'Configurações', icon: '⚙️' },
   { href: '/conta/verificacao', label: 'Verificação', icon: '🛡️' },
   { href: '/conta/payout-methods', label: 'Chaves PIX', icon: '💳' },
+  { href: '/conta/blocked-users', label: 'Usuários bloqueados', icon: '🚫' },
   { href: '/addresses', label: 'Endereços', icon: '📍' },
   { href: '/notifications', label: 'Notificações', icon: '🔔' },
   { href: '/conta/ajuda', label: 'Ajuda', icon: '❓' },
