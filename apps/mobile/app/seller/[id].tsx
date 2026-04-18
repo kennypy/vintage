@@ -1,10 +1,11 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { getPublicProfile, followUser, unfollowUser } from '../../src/services/users';
+import { blockUser, unblockUser, listBlockedUsers } from '../../src/services/moderation';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getListings } from '../../src/services/listings';
 import { ListingCard } from '../../src/components/ListingCard';
@@ -27,21 +28,31 @@ function mapListingToCard(listing: Listing) {
 export default function SellerProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
-  const { isDemoMode: demoMode } = useAuth();
+  const { isDemoMode: demoMode, user: currentUser } = useAuth();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockActionLoading, setBlockActionLoading] = useState(false);
+
+  // Viewing one's own profile should hide block/follow actions — the backend
+  // rejects self-block with 400 anyway, but we don't want to show the option.
+  const isSelf = !!currentUser && !!id && currentUser.id === id;
 
   const fetchData = useCallback(async () => {
     try {
-      const [profileData, listingsData] = await Promise.all([
+      const [profileData, listingsData, blocksData] = await Promise.all([
         getPublicProfile(id ?? ''),
         getListings({ search: undefined, category: undefined }),
+        // Unauthenticated / demo callers will 401 here — swallow so the
+        // profile still renders (just without the blocked indicator).
+        listBlockedUsers().catch(() => ({ blockedIds: [] as string[], items: [] })),
       ]);
       setProfile(profileData);
       setListings(listingsData.items.map(mapListingToCard));
+      setIsBlocked(!!id && blocksData.blockedIds.includes(id));
     } catch (_error) {
       // API unavailable — build a demo profile from the seller in demo listings
       const demoListings = getDemoListings();
@@ -112,6 +123,48 @@ export default function SellerProfileScreen() {
     <ListingCard {...item} />
   ), []);
 
+  const handleBlockAction = async () => {
+    if (!profile || isSelf) return;
+    if (demoMode) {
+      // No real API in demo mode — just flip local state.
+      setIsBlocked(!isBlocked);
+      return;
+    }
+    setBlockActionLoading(true);
+    try {
+      if (isBlocked) {
+        await unblockUser(profile.id);
+        setIsBlocked(false);
+      } else {
+        await blockUser(profile.id);
+        setIsBlocked(true);
+        // When the user blocks someone they were following, the follow
+        // relationship stays intact server-side but should read as "not
+        // following" locally — the backend prevents interactions anyway.
+        if (profile.isFollowing) {
+          setProfile({ ...profile, isFollowing: false, followerCount: Math.max(0, profile.followerCount - 1) });
+        }
+      }
+    } catch (_err) {
+      Alert.alert('Erro', 'Não foi possível atualizar o bloqueio. Tente novamente.');
+    } finally {
+      setBlockActionLoading(false);
+    }
+  };
+
+  const openActionSheet = () => {
+    if (!profile || isSelf) return;
+    const blockLabel = isBlocked ? 'Desbloquear usuário' : 'Bloquear usuário';
+    Alert.alert(profile.name, undefined, [
+      {
+        text: blockLabel,
+        style: isBlocked ? 'default' : 'destructive',
+        onPress: handleBlockAction,
+      },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  };
+
   if (loading || !profile) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
@@ -122,6 +175,35 @@ export default function SellerProfileScreen() {
 
   const headerComponent = (
     <View>
+      {/* Stack header overflow-menu button (only when viewing someone else) */}
+      <Stack.Screen
+        options={{
+          headerRight: () =>
+            !isSelf ? (
+              <TouchableOpacity
+                onPress={openActionSheet}
+                disabled={blockActionLoading}
+                accessibilityRole="button"
+                accessibilityLabel="Mais opções"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={{ paddingHorizontal: 8 }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={22} color={theme.text} />
+              </TouchableOpacity>
+            ) : null,
+        }}
+      />
+
+      {/* Blocked banner — tells the user why interactions are unavailable */}
+      {isBlocked && (
+        <View style={[styles.blockedBanner, { backgroundColor: colors.error[50], borderColor: colors.error[200] }]}>
+          <Ionicons name="ban-outline" size={18} color={colors.error[600]} />
+          <Text style={[styles.blockedBannerText, { color: colors.error[700] }]}>
+            Você bloqueou este usuário. Mensagens e ofertas estão desativadas.
+          </Text>
+        </View>
+      )}
+
       {/* Profile Header */}
       <View style={[styles.profileHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
         <View style={[styles.avatarPlaceholder, { backgroundColor: theme.cardSecondary }]}>
@@ -170,16 +252,17 @@ export default function SellerProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Follow Button */}
+      {/* Follow Button — disabled while blocked so the UI matches the
+          backend's interaction gate (it would just reject the follow). */}
       <View style={[styles.followContainer, { backgroundColor: theme.card }]}>
         <TouchableOpacity
           style={[
             styles.followButton,
             profile.isFollowing && [styles.followingButton, { borderColor: colors.primary[600] }],
-            followLoading && styles.followDisabled,
+            (followLoading || isBlocked) && styles.followDisabled,
           ]}
           onPress={handleFollowToggle}
-          disabled={followLoading}
+          disabled={followLoading || isBlocked}
         >
           <Ionicons
             name={profile.isFollowing ? 'checkmark' : 'add'}
@@ -236,6 +319,12 @@ export default function SellerProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { justifyContent: 'center', alignItems: 'center' },
+  blockedBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  blockedBannerText: { fontSize: 13, flex: 1, lineHeight: 18 },
   profileHeader: {
     flexDirection: 'row', alignItems: 'center', padding: 16,
     backgroundColor: colors.neutral[0],
