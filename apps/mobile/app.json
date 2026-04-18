@@ -21,6 +21,10 @@
       "bundleIdentifier": "br.vintage.app",
       "buildNumber": "1",
       "requireFullScreen": false,
+      "associatedDomains": [
+        "applinks:vintage.br",
+        "applinks:www.vintage.br"
+      ],
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -65,6 +69,17 @@
         "android.permission.READ_SMS",
         "android.permission.QUERY_ALL_PACKAGES",
         "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "vintage.br" },
+            { "scheme": "https", "host": "www.vintage.br" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ],
       "allowBackup": false
     },
