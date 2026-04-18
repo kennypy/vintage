@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
+import { FraudService } from '../fraud/fraud.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -26,6 +27,7 @@ export class OrdersService {
     private coupons: CouponsService,
     private notifications: NotificationsService,
     private listings: ListingsService,
+    private fraud: FraudService,
   ) {}
 
   async create(buyerId: string, dto: CreateOrderDto) {
@@ -65,6 +67,16 @@ export class OrdersService {
 
     if (listing.sellerId === buyerId) {
       throw new BadRequestException('Você não pode comprar seu próprio anúncio');
+    }
+
+    // Fraud velocity check — runs before any payment setup so a
+    // flagged buyer doesn't tie up MP's idempotency space. FLAG
+    // allows the purchase through with a queued flag; BLOCK refuses.
+    const fraudDecision = await this.fraud.evaluatePurchase(buyerId);
+    if (fraudDecision.action === 'BLOCK') {
+      throw new ForbiddenException(
+        'Seu pedido foi bloqueado por nossa proteção contra fraude. Entre em contato com o suporte.',
+      );
     }
 
     // Validate address belongs to buyer

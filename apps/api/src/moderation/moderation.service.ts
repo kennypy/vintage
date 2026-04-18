@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
+import { FraudService } from '../fraud/fraud.service';
 
 export type ReviewAction = 'SUSPEND_LISTING' | 'BAN_USER' | 'DISMISS';
 
@@ -18,6 +19,7 @@ export class ModerationService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly listings: ListingsService,
+    private readonly fraud: FraudService,
   ) {}
 
   async listPendingReports(page = 1, pageSize = 20, targetType?: string) {
@@ -302,5 +304,25 @@ export class ModerationService {
     );
 
     return { resolved: true, status: nextStatus };
+  }
+
+  // --- Fraud flag triage (thin passthrough to FraudService) ---
+  //
+  // The admin UI for fraud sits alongside image-flag and report
+  // triage under /moderation, so the controller endpoints live here
+  // and forward to FraudService. Keeps admin triage surface
+  // unified — ops doesn't need to learn a new sub-tree.
+
+  listPendingFraudFlags(page?: number, pageSize?: number) {
+    return this.fraud.listPendingFlags(page, pageSize);
+  }
+
+  resolveFraudFlag(
+    flagId: string,
+    action: 'DISMISS' | 'REVIEWED',
+    adminId: string,
+    note?: string,
+  ) {
+    return this.fraud.resolveFlag(flagId, action, adminId, note);
   }
 }

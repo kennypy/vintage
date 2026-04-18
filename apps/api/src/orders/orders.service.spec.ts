@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
+import { FraudService } from '../fraud/fraud.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -81,6 +82,12 @@ describe('OrdersService', () => {
         {
           provide: ListingsService,
           useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: FraudService,
+          useValue: {
+            evaluatePurchase: jest.fn().mockResolvedValue({ action: 'ALLOW' }),
+          },
         },
       ],
     }).compile();

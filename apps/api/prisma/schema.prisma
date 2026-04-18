@@ -92,6 +92,8 @@ model User {
   blocksReceived         UserBlock[]         @relation("UserBlocked")
   listingImageFlags      ListingImageFlag[]  @relation("ListingImageFlagUploader")
   listingImageFlagReviews ListingImageFlag[] @relation("ListingImageFlagReviewer")
+  fraudFlags             FraudFlag[]         @relation("FraudFlagSubject")
+  fraudFlagReviews       FraudFlag[]         @relation("FraudFlagReviewer")
 
   @@index([email])
   @@index([cpf])
@@ -616,6 +618,68 @@ enum ListingImageFlagStatus {
   PENDING
   DISMISSED
   REJECTED
+}
+
+// --- Fraud signals ---
+//
+// Rule-based first pass. A FraudRule describes a single heuristic
+// (e.g. "new accounts making >N orders in W minutes"). A FraudFlag
+// records that a user tripped a rule with the evidence snapshotted
+// in JSON for later admin review. `action=BLOCK` rules short-circuit
+// the originating call (e.g. throw from OrdersService.create);
+// `action=FLAG` rules always allow the call through and just queue
+// the flag.
+//
+// Thresholds live in the DB (not code) so ops can tune without a
+// deploy: raise the velocity bar if fraud is noisy, drop it if a
+// spike lands. Rule rows are also disable-able (`enabled=false`)
+// which is the emergency kill-switch when a rule false-positives
+// on real users.
+//
+// Intentionally a very small surface for launch — two rules seeded
+// in the migration (NEW_ACCOUNT_VELOCITY and PAYOUT_DRAIN). Add
+// more over time as patterns emerge; the code dispatches by the
+// stable `code` column so seeding a new rule only requires editing
+// FraudService to evaluate it.
+model FraudRule {
+  id            String      @id @default(cuid())
+  code          String      @unique
+  description   String
+  threshold     Int
+  windowMinutes Int
+  action        FraudAction @default(FLAG)
+  enabled       Boolean     @default(true)
+  updatedAt     DateTime    @updatedAt
+}
+
+model FraudFlag {
+  id           String          @id @default(cuid())
+  userId       String
+  ruleCode     String
+  evidence     Json
+  status       FraudFlagStatus @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime        @default(now())
+
+  user     User  @relation("FraudFlagSubject", fields: [userId], references: [id])
+  reviewer User? @relation("FraudFlagReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum FraudAction {
+  FLAG
+  BLOCK
+}
+
+enum FraudFlagStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
 }
 
 // --- Order Listing Snapshots ---

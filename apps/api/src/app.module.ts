@@ -42,6 +42,7 @@ import { ImpactModule } from './impact/impact.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
+import { FraudModule } from './fraud/fraud.module';
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
     CouponsModule,
     FeatureFlagsModule,
     AdminAnalyticsModule,
+    FraudModule,
   ],
   providers: [
     {

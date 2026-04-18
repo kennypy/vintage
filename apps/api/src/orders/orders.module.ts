@@ -4,6 +4,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ListingsModule } from '../listings/listings.module';
 import { ShippingModule } from '../shipping/shipping.module';
+import { FraudModule } from '../fraud/fraud.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrdersCronService } from './orders-cron.service';
@@ -16,6 +17,7 @@ import { TrackingPollerService } from './tracking-poller.service';
     NotificationsModule,
     ListingsModule,
     ShippingModule,
+    FraudModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersCronService, TrackingPollerService],
