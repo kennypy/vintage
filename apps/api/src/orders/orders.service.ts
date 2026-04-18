@@ -109,9 +109,18 @@ export class OrdersService {
     try {
       order = await this.prisma.$transaction(
         async (tx) => {
-          // Double-check listing is still active inside transaction
+          // Double-check listing is still active inside transaction.
+          // Pull the fields needed to freeze an OrderListingSnapshot
+          // in the same read so we never snapshot a listing whose
+          // state drifted between this fetch and the snapshot write.
           const freshListing = await tx.listing.findUnique({
             where: { id: dto.listingId },
+            include: {
+              images: { orderBy: { position: 'asc' } },
+              category: { select: { namePt: true } },
+              brand: { select: { name: true } },
+              seller: { select: { name: true } },
+            },
           });
 
           if (!freshListing || freshListing.status !== 'ACTIVE') {
@@ -164,6 +173,33 @@ export class OrdersService {
           await tx.listing.update({
             where: { id: dto.listingId },
             data: { status: 'SOLD' },
+          });
+
+          // Freeze listing state onto the order. The snapshot is the
+          // buyer's evidence for a potential dispute and must NOT
+          // depend on the live Listing row (which the seller may
+          // edit or soft-delete later). Row survives until the
+          // order hits a terminal state (see releaseEscrow,
+          // cancelByBuyer, autoCancelUnshippedOrders, resolve).
+          await tx.orderListingSnapshot.create({
+            data: {
+              orderId: createdOrder.id,
+              listingId: freshListing.id,
+              sellerId: freshListing.sellerId,
+              sellerName: freshListing.seller.name,
+              title: freshListing.title,
+              description: freshListing.description,
+              categoryId: freshListing.categoryId,
+              categoryName: freshListing.category.namePt,
+              brandId: freshListing.brandId,
+              brandName: freshListing.brand?.name ?? null,
+              condition: freshListing.condition,
+              size: freshListing.size,
+              color: freshListing.color,
+              priceBrl: freshListing.priceBrl,
+              shippingWeightG: freshListing.shippingWeightG,
+              imageUrls: freshListing.images.map((img) => img.url),
+            },
           });
 
           // Increment coupon usage counter (inside tx, Serializable ensures
@@ -352,6 +388,10 @@ export class OrdersService {
           data: { status: 'ACTIVE' },
         });
       }
+
+      // PENDING order → no dispute possible; snapshot can go.
+      await tx.orderListingSnapshot.deleteMany({ where: { orderId } });
+
       return next;
     });
 
@@ -548,6 +588,11 @@ export class OrdersService {
           description: `Fundos liberados: ${order.listing.title}`,
         },
       });
+
+      // Terminal state — no further dispute possible. Purge the
+      // frozen snapshot to reclaim storage. deleteMany (not delete)
+      // because pre-migration orders won't have a snapshot row.
+      await tx.orderListingSnapshot.deleteMany({ where: { orderId } });
 
       return order;
     });

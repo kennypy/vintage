@@ -284,14 +284,33 @@ describe('BundlesService', () => {
 
   describe('checkoutBundle', () => {
     it('should create orders, mark listings SOLD, and mark bundle CHECKED_OUT', async () => {
+      const snapshottedListing = (id: string, price: number, weight: number) => ({
+        id,
+        sellerId: 'seller-1',
+        status: 'ACTIVE',
+        priceBrl: new Decimal(price),
+        shippingWeightG: weight,
+        title: `Item ${id}`,
+        description: `Descrição ${id}`,
+        categoryId: 'cat-1',
+        brandId: null,
+        condition: 'GOOD',
+        size: 'M',
+        color: 'preto',
+        images: [{ url: `https://img.example.com/${id}.jpg`, position: 0 }],
+        category: { namePt: 'Vestidos' },
+        brand: null,
+        seller: { name: 'Vendedor' },
+      });
+
       const bundle = {
         id: 'bundle-1',
         buyerId: 'buyer-1',
         sellerId: 'seller-1',
         status: 'OPEN',
         items: [
-          { listingId: 'listing-1', listing: { id: 'listing-1', status: 'ACTIVE', priceBrl: new Decimal(100), shippingWeightG: 500 } },
-          { listingId: 'listing-2', listing: { id: 'listing-2', status: 'ACTIVE', priceBrl: new Decimal(200), shippingWeightG: 300 } },
+          { listingId: 'listing-1', listing: snapshottedListing('listing-1', 100, 500) },
+          { listingId: 'listing-2', listing: snapshottedListing('listing-2', 200, 300) },
         ],
       };
       mockPrisma.bundle.findUnique.mockResolvedValue(bundle);
@@ -301,6 +320,7 @@ describe('BundlesService', () => {
         listing: { findMany: jest.fn(), update: jest.fn() },
         order: { create: jest.fn() },
         bundle: { update: jest.fn() },
+        orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
       };
       mockTx.listing.findMany.mockResolvedValue([
         { id: 'listing-1', status: 'ACTIVE' },

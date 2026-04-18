@@ -36,6 +36,10 @@ const mockTx = {
   coupon: {
     update: jest.fn(),
   },
+  orderListingSnapshot: {
+    create: jest.fn().mockResolvedValue({}),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
 };
 
 const mockCoupons = {
@@ -97,7 +101,18 @@ describe('OrdersService', () => {
       status: 'ACTIVE',
       priceBrl: new Decimal(100),
       shippingWeightG: 500,
-      seller: { id: 'seller-1' },
+      title: 'Vestido vintage',
+      description: 'Descrição do anúncio',
+      categoryId: 'cat-1',
+      brandId: 'brand-1',
+      condition: 'GOOD',
+      size: 'M',
+      color: 'azul',
+      // Extras the snapshot writer reads (tx-side `freshListing`)
+      images: [{ url: 'https://img.example.com/1.jpg', position: 0 }],
+      category: { namePt: 'Vestidos' },
+      brand: { name: 'Zara' },
+      seller: { id: 'seller-1', name: 'João' },
     };
 
     it('should create order with correct totals', async () => {
@@ -132,6 +147,21 @@ describe('OrdersService', () => {
             sellerId: 'seller-1',
             status: 'PENDING',
             paymentMethod: 'PIX',
+          }),
+        }),
+      );
+      // Snapshot must capture the listing state (incl. imageUrls) so
+      // the dispute UI has evidence even if the seller edits or
+      // deletes the listing afterwards.
+      expect(mockTx.orderListingSnapshot.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orderId: 'order-1',
+            listingId: 'listing-1',
+            title: 'Vestido vintage',
+            categoryName: 'Vestidos',
+            brandName: 'Zara',
+            imageUrls: ['https://img.example.com/1.jpg'],
           }),
         }),
       );

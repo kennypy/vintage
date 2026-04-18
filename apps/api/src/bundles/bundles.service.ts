@@ -165,7 +165,17 @@ export class BundlesService {
       include: {
         items: {
           include: {
-            listing: true,
+            // Pull everything we need to freeze an OrderListingSnapshot
+            // per item inside the tx — including image ordering, the
+            // Portuguese category name, and the brand name.
+            listing: {
+              include: {
+                images: { orderBy: { position: 'asc' } },
+                category: { select: { namePt: true } },
+                brand: { select: { name: true } },
+                seller: { select: { name: true } },
+              },
+            },
           },
         },
       },
@@ -248,6 +258,30 @@ export class BundlesService {
         await tx.listing.update({
           where: { id: item.listingId },
           data: { status: 'SOLD' },
+        });
+
+        // Freeze the listing state onto the order (see OrderListingSnapshot
+        // in schema.prisma for the full rationale). `item.listing` was
+        // fetched above with images+category+brand+seller.name.
+        await tx.orderListingSnapshot.create({
+          data: {
+            orderId: order.id,
+            listingId: item.listing.id,
+            sellerId: item.listing.sellerId,
+            sellerName: item.listing.seller.name,
+            title: item.listing.title,
+            description: item.listing.description,
+            categoryId: item.listing.categoryId,
+            categoryName: item.listing.category.namePt,
+            brandId: item.listing.brandId,
+            brandName: item.listing.brand?.name ?? null,
+            condition: item.listing.condition,
+            size: item.listing.size,
+            color: item.listing.color,
+            priceBrl: item.listing.priceBrl,
+            shippingWeightG: item.listing.shippingWeightG,
+            imageUrls: item.listing.images.map((img) => img.url),
+          },
         });
 
         orders.push(order);

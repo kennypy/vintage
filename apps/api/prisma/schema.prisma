@@ -253,6 +253,7 @@ model Order {
   dispute         Dispute?
   notaFiscal      NotaFiscal?
   paymentFlags    PaymentFlag[]
+  listingSnapshot OrderListingSnapshot?
 
   @@unique([buyerId, idempotencyKey])
   @@index([buyerId])
@@ -570,6 +571,59 @@ model Dispute {
 
   order    Order @relation(fields: [orderId], references: [id])
   openedBy User  @relation(fields: [openedById], references: [id])
+}
+
+// --- Order Listing Snapshots ---
+//
+// At purchase time we freeze the listing's visible state onto the order
+// so dispute resolution doesn't depend on the live Listing row. The
+// seller can subsequently edit or delete their listing without the
+// buyer losing the evidence of what they actually bought.
+//
+// CURRENT SHAPE (option B): we freeze the listing's metadata and the
+// IMAGE URLs. We do NOT copy the image bytes — the URLs point at the
+// same S3 keys the seller uploaded to. We rely on `ListingsService.
+// remove()` refusing to soft-delete a listing while any non-terminal
+// order references it, so the Listing + ListingImage rows stay alive
+// and the S3 keys behind them don't get garbage-collected. Cheap, good
+// enough for launch.
+//
+// PLANNED MIGRATION (option A) — when revenue supports ~2× image
+// storage: introduce a background job that reads each snapshot row,
+// fetches the bytes from the seller's S3 keys, re-uploads them under
+// `orders/{orderId}/snapshots/<idx>.jpg` with AES256 SSE, and rewrites
+// `imageUrls` to the new URLs. Once the rewrite is acked, the option-B
+// listing-freeze in ListingsService.remove() can be relaxed so sellers
+// can delete SOLD listings freely.
+//
+// Snapshot rows are purged when their order reaches a terminal state
+// (COMPLETED / CANCELLED / REFUNDED) with no open dispute — see
+// OrdersService.releaseEscrow, OrdersService.cancelByBuyer,
+// OrdersCronService.autoCancelUnshippedOrders, and
+// DisputesService.resolve.
+model OrderListingSnapshot {
+  id              String   @id @default(cuid())
+  orderId         String   @unique
+  listingId       String
+  sellerId        String
+  sellerName      String
+  title           String
+  description     String   @db.Text
+  categoryId      String
+  categoryName    String
+  brandId         String?
+  brandName       String?
+  condition       ItemCondition
+  size            String?
+  color           String?
+  priceBrl        Decimal  @db.Decimal(10, 2)
+  shippingWeightG Int
+  imageUrls       Json     @default("[]")
+  capturedAt      DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
 }
 
 // --- Notifications ---

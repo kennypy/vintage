@@ -19,9 +19,13 @@ export const LISTING_IMAGE_ASPECT_RATIO = 4 / 5; // Portrait mode
 export const MAX_VACATION_DAYS = 90;
 
 // Order lifecycle
-export const SHIPPING_DEADLINE_DAYS = 5; // Seller must ship within 5 business days
-export const DISPUTE_WINDOW_DAYS = 2; // Buyer has 2 days after delivery to dispute
-export const AUTO_CONFIRM_DAYS = 2; // Auto-confirm if no dispute after 2 days
+// Seller has SHIPPING_DEADLINE_DAYS business days after payment to
+// dispatch. Transit itself doesn't consume any deadline — the dispute
+// window opens only after delivery is confirmed (either by the buyer
+// or by the TrackingPollerCron seeing a "delivered" carrier event).
+export const SHIPPING_DEADLINE_DAYS = 5;
+export const DISPUTE_WINDOW_DAYS = 5; // Buyer has 5 days after delivery to dispute
+export const AUTO_CONFIRM_DAYS = 5; // Auto-confirm if no dispute after 5 days
 
 // Wallet
 export const MIN_PAYOUT_BRL = 10.0;

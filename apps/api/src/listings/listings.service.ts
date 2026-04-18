@@ -386,6 +386,30 @@ export class ListingsService {
       throw new ForbiddenException('Você só pode remover seus próprios anúncios');
     }
 
+    // Option-B snapshot freeze. While any order against this listing
+    // is still non-terminal, the buyer may still open a dispute and
+    // the dispute UI needs the original images. Since snapshots
+    // currently point at the seller's S3 keys (not a copy), we must
+    // keep the live Listing + ListingImage rows — and therefore the
+    // S3 keys behind them — alive until every outstanding order
+    // reaches COMPLETED / CANCELLED / REFUNDED. The restriction
+    // lifts automatically once the last non-terminal order closes.
+    //
+    // When option A (copying image bytes to orders/{id}/snapshots/)
+    // is shipped, drop this block — snapshots will no longer depend
+    // on the live listing.
+    const openOrderCount = await this.prisma.order.count({
+      where: {
+        listingId: id,
+        status: { notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED'] },
+      },
+    });
+    if (openOrderCount > 0) {
+      throw new BadRequestException(
+        'Não é possível remover este anúncio enquanto houver pedidos em andamento. Aguarde a conclusão das vendas e tente novamente.',
+      );
+    }
+
     await this.prisma.listing.update({ where: { id }, data: { status: 'DELETED' } });
     this.syncSearchIndex(id).catch(() => {});
     return { deleted: true };
