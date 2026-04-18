@@ -385,6 +385,48 @@ describe('PayoutsService', () => {
     });
   });
 
+  describe('adminList', () => {
+    it('defaults to PENDING+PROCESSING filter and never exposes snapshotPixKey', async () => {
+      mockPrisma.payoutRequest.findMany.mockResolvedValue([
+        {
+          id: 'pr-1',
+          userId: 'user-1',
+          amountBrl: 150,
+          status: 'PROCESSING',
+          snapshotType: 'PIX_EMAIL',
+          externalId: 'mp-x',
+          failureReason: null,
+          requestedAt: new Date(),
+          processingAt: new Date(),
+          completedAt: null,
+          user: { id: 'user-1', name: 'Jane', email: 'jane@example.com' },
+        },
+      ]);
+      mockPrisma.payoutRequest.count.mockResolvedValue(1);
+
+      const out = await service.adminList(1, 20);
+
+      expect(mockPrisma.payoutRequest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: { in: ['PENDING', 'PROCESSING'] } },
+        }),
+      );
+      expect(out.items[0]).not.toHaveProperty('snapshotPixKey');
+      expect(out.items[0].amountBrl).toBe(150);
+    });
+
+    it('narrows by status when the caller passes one', async () => {
+      mockPrisma.payoutRequest.findMany.mockResolvedValue([]);
+      mockPrisma.payoutRequest.count.mockResolvedValue(0);
+
+      await service.adminList(1, 20, 'FAILED');
+
+      expect(mockPrisma.payoutRequest.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: 'FAILED' } }),
+      );
+    });
+  });
+
   describe('listMine', () => {
     it('never exposes the raw pixKey in the response', async () => {
       mockPrisma.payoutRequest.findMany.mockResolvedValue([

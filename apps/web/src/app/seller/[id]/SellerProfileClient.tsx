@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
 import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import ListingCard from '@/components/ListingCard';
 
@@ -41,6 +42,7 @@ function getImageUrl(img: { url: string } | string): string {
 }
 
 export default function SellerProfileClient({ id }: { id: string }) {
+  const router = useRouter();
   const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
@@ -268,6 +270,19 @@ export default function SellerProfileClient({ id }: { id: string }) {
                       }`}
                     >
                       {isBlocked ? 'Desbloquear usuário' : 'Bloquear usuário'}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        router.push(
+                          `/report/new?targetType=user&targetId=${encodeURIComponent(seller.id)}`,
+                        );
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                    >
+                      Denunciar usuário
                     </button>
                   </div>
                 )}

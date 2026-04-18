@@ -272,4 +272,35 @@ describe('DisputesService', () => {
       );
     });
   });
+
+  // Wave 3E: admin triage queue for the /admin/disputes page. FIFO so ops
+  // picks up the oldest first; the where clause must narrow to status=OPEN.
+  describe('findOpenDisputes', () => {
+    it('queries only OPEN disputes, ordered oldest-first', async () => {
+      mockPrisma.dispute.findMany.mockResolvedValue([]);
+      mockPrisma.dispute.count.mockResolvedValue(0);
+
+      await service.findOpenDisputes(1, 20);
+
+      expect(mockPrisma.dispute.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: 'OPEN' },
+          orderBy: { createdAt: 'asc' },
+        }),
+      );
+      expect(mockPrisma.dispute.count).toHaveBeenCalledWith({
+        where: { status: 'OPEN' },
+      });
+    });
+
+    it('returns items with pagination metadata', async () => {
+      mockPrisma.dispute.findMany.mockResolvedValue([{ id: 'd1' }, { id: 'd2' }]);
+      mockPrisma.dispute.count.mockResolvedValue(2);
+
+      const out = await service.findOpenDisputes(1, 20);
+      expect(out.items.length).toBe(2);
+      expect(out.total).toBe(2);
+      expect(out.hasMore).toBe(false);
+    });
+  });
 });

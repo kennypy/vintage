@@ -49,6 +49,18 @@ export class DisputesController {
     return this.disputesService.findUserDisputes(user.id, page, pageSize);
   }
 
+  @Get('admin/open')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Admin: listar disputas em aberto para triagem' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  findAdminOpen(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('pageSize', new DefaultValuePipe(20), ParseIntPipe) pageSize: number,
+  ) {
+    return this.disputesService.findOpenDisputes(page, pageSize);
+  }
+
   @Post(':id/resolve')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Resolver disputa (administrador)' })

@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -28,6 +28,7 @@ function mapListingToCard(listing: Listing) {
 export default function SellerProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
+  const router = useRouter();
   const { isDemoMode: demoMode, user: currentUser } = useAuth();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [listings, setListings] = useState<any[]>([]);
@@ -160,6 +161,11 @@ export default function SellerProfileScreen() {
         text: blockLabel,
         style: isBlocked ? 'default' : 'destructive',
         onPress: handleBlockAction,
+      },
+      {
+        text: 'Denunciar usuário',
+        style: 'destructive',
+        onPress: () => router.push(`/report/user/${encodeURIComponent(profile.id)}`),
       },
       { text: 'Cancelar', style: 'cancel' },
     ]);

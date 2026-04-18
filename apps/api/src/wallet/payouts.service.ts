@@ -211,6 +211,58 @@ export class PayoutsService {
     return { ok: true, status: 'COMPLETED' as const };
   }
 
+  /**
+   * Admin: list PayoutRequests that need attention. Default filter is
+   * PENDING | PROCESSING (everything ops can still act on). Callers
+   * may narrow by status. Never exposes snapshotPixKey — same rule as
+   * the user-facing list.
+   */
+  async adminList(
+    page: number = 1,
+    pageSize: number = 20,
+    status?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED',
+  ) {
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    const skip = (p - 1) * ps;
+
+    const where = status
+      ? { status }
+      // Prisma's Enum`In` filter wants a mutable array — can't `as const`.
+      : { status: { in: ['PENDING', 'PROCESSING'] as PayoutRequestStatus[] } };
+
+    const [items, total] = await Promise.all([
+      this.prisma.payoutRequest.findMany({
+        where,
+        orderBy: { requestedAt: 'asc' }, // oldest first — FIFO triage
+        skip,
+        take: ps,
+        select: {
+          id: true,
+          userId: true,
+          amountBrl: true,
+          status: true,
+          snapshotType: true,
+          externalId: true,
+          failureReason: true,
+          requestedAt: true,
+          processingAt: true,
+          completedAt: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+      }),
+      this.prisma.payoutRequest.count({ where }),
+    ]);
+
+    return {
+      items: items.map((it) => ({ ...it, amountBrl: Number(it.amountBrl) })),
+      total,
+      page: p,
+      pageSize: ps,
+      hasMore: skip + items.length < total,
+    };
+  }
+
   async listMine(userId: string, page: number = 1, pageSize: number = 20) {
     const p = Math.max(1, Number(page) || 1);
     const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
