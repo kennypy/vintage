@@ -156,6 +156,11 @@ export class AppModule implements NestModule {
         { path: 'tracking/event', method: RequestMethod.POST },
         { path: 'ads/serve', method: RequestMethod.POST },
         { path: 'ads/click', method: RequestMethod.POST },
+        // Browser-issued CSP violation reports arrive as direct POSTs
+        // without any CSRF token — the browser is reporting telemetry
+        // about OUR OWN policy, not making a state-changing request.
+        // Requiring CSRF here would make the endpoint useless.
+        { path: 'csp-report', method: RequestMethod.POST },
       )
       .forRoutes({ path: '*path', method: RequestMethod.ALL });
   }

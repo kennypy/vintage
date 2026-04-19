@@ -1,0 +1,60 @@
+# CODEOWNERS — required reviewers on security-sensitive paths.
+#
+# Enforcement depends on the repo's branch-protection rules (enable
+# "Require review from Code Owners" on main). Without that, this file
+# is advisory only.
+#
+# See CLAUDE.md §Security Standards for the policy these paths implement
+# and PENTEST_FINDINGS.md for why each area is sensitive.
+
+# Repo owner is the default reviewer for everything not matched below.
+* @kennypy
+
+# --- Authentication + session ---------------------------------------
+# JWT, refresh rotation (P-07), CSRF middleware, password flows,
+# 2FA, OAuth (Google + Apple), identity verification.
+/apps/api/src/auth/                          @kennypy
+/apps/api/src/common/middleware/csrf.middleware.ts  @kennypy
+/apps/api/src/common/services/cpf-vault.service.ts  @kennypy
+/apps/api/src/identity/                      @kennypy
+
+# --- Money flow ------------------------------------------------------
+# Payments, Mercado Pago client + webhook, wallet + payouts, disputes,
+# order creation, coupons, NF-e. Every PR against these files moves
+# real money or touches fiscal records.
+/apps/api/src/payments/                      @kennypy
+/apps/api/src/wallet/                        @kennypy
+/apps/api/src/disputes/                      @kennypy
+/apps/api/src/orders/                        @kennypy
+/apps/api/src/coupons/                       @kennypy
+/apps/api/src/notafiscal/                    @kennypy
+
+# --- Observability + audit -------------------------------------------
+# Security metrics exposition + audit trail; changes here affect
+# incident response visibility.
+/apps/api/src/metrics/                       @kennypy
+/apps/api/src/audit-log/                     @kennypy
+
+# --- Data layer ------------------------------------------------------
+# Any schema / migration change has permanent effects. Prisma client
+# is regenerated from schema.prisma; migrations are append-only.
+/apps/api/prisma/schema.prisma               @kennypy
+/apps/api/prisma/migrations/                 @kennypy
+
+# --- Infrastructure + CI --------------------------------------------
+# CI pipeline, dependency policy, security scan config. A silent
+# loosening of lint / audit / test gates removes the safety net the
+# rest of this file leans on.
+/.github/workflows/                          @kennypy
+/.github/dependabot.yml                      @kennypy
+/.gitleaks.toml                              @kennypy
+/scripts/ci-parity.sh                        @kennypy
+
+# --- Platform policy + docs -----------------------------------------
+# CLAUDE.md is the source of truth for our security standards —
+# changes should go through the same review rigor as code.
+/CLAUDE.md                                   @kennypy
+/SECURITY.md                                 @kennypy
+/SECURITY_AUDIT_REPORT.md                    @kennypy
+/PENTEST_FINDINGS.md                         @kennypy
+/PENTEST_FOLLOWUPS.md                        @kennypy
