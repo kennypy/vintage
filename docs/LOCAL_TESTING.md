@@ -215,16 +215,58 @@ Run through these after the smoke test. Each is a one-line check.
 
 ### Meilisearch
 
-```bash
-curl -sH "Authorization: Bearer vintage_dev_key" \
-  "http://localhost:7700/indexes/listings/documents?limit=5" | head
-```
+End-to-end indexing smoke test. Run this after creating the seller's
+listing in the smoke scenario (step 7-8 of §6).
 
-Should return the listing you just created. If empty, run:
+1. **Is the daemon reachable?**
+   ```bash
+   curl -s http://localhost:7700/health
+   # → {"status":"available"}
+   ```
 
-```bash
-cd apps/api && npm run search:reindex
-```
+2. **Does the `listings` index exist and respond to auth?**
+   ```bash
+   curl -sH "Authorization: Bearer vintage_dev_key" \
+     "http://localhost:7700/indexes/listings/settings" | head -30
+   ```
+   Expected: a JSON blob showing `searchableAttributes`
+   (title, description, category, brand, color, size),
+   `filterableAttributes`, `sortableAttributes`. If 401/403,
+   the Meilisearch key in `apps/api/.env` doesn't match the
+   one the container was started with.
+
+3. **Is the listing you created indexed?**
+   ```bash
+   curl -sH "Authorization: Bearer vintage_dev_key" \
+     "http://localhost:7700/indexes/listings/documents?limit=5" | head
+   ```
+   Should return the listing as a JSON array. If empty, the
+   server-side sync in `listings.service.ts::syncSearchIndex`
+   logged a warning — check the API terminal.
+
+4. **Does search actually return it?**
+   ```bash
+   curl -sH "Authorization: Bearer vintage_dev_key" \
+     -X POST http://localhost:7700/indexes/listings/search \
+     -H 'Content-Type: application/json' \
+     -d '{"q":"<first word of listing title>"}'
+   ```
+   Expected: `hits` contains the listing.
+
+5. **Lifecycle check (most fragile part of the sync).**
+   - Edit the listing's title in the web UI. Step 4 should now
+     return it under the new title within a few seconds.
+   - Mark the listing as SOLD (place an order against it). Step 3
+     should stop returning it — only ACTIVE listings live in the
+     index (see `listings.service.ts::syncSearchIndex` contract).
+
+6. **Recovery from drift.** If the index doesn't match Postgres —
+   e.g. Meilisearch was down when a sync fired — full rebuild:
+   ```bash
+   cd apps/api && npm run search:reindex
+   ```
+   The script keyset-paginates every ACTIVE listing and batches
+   writes to Meilisearch. Idempotent; safe to re-run.
 
 ### Google Vision (image moderation)
 
