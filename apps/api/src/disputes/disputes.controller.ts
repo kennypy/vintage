@@ -69,7 +69,8 @@ export class DisputesController {
   resolve(
     @Param('id') id: string,
     @Body() body: ResolveDisputeDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.disputesService.resolve(id, body.resolution, body.refund);
+    return this.disputesService.resolve(id, body.resolution, body.refund, user.id);
   }
 }

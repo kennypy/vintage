@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListingsService } from '../listings/listings.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateReportDto, ReportTargetType } from './dto/create-report.dto';
 import { ResolveReportDto, ResolveAction } from './dto/resolve-report.dto';
 
@@ -17,6 +18,7 @@ export class ReportsService {
   constructor(
     private prisma: PrismaService,
     private listings: ListingsService,
+    private auditLog: AuditLogService,
   ) {}
 
   async createReport(reporterId: string, dto: CreateReportDto) {
@@ -207,7 +209,7 @@ export class ReportsService {
       }
     }
 
-    return this.prisma.report.update({
+    const resolved = await this.prisma.report.update({
       where: { id: reportId },
       data: {
         status: newStatus,
@@ -215,5 +217,17 @@ export class ReportsService {
         resolvedAt: new Date(),
       },
     });
+    await this.auditLog.record({
+      actorId: adminId,
+      action: `report.${dto.action === ResolveAction.DISMISS ? 'dismiss' : 'resolve'}`,
+      targetType: 'report',
+      targetId: reportId,
+      metadata: {
+        targetType: report.targetType,
+        targetId: report.targetId,
+        hidTarget: Boolean(dto.action === ResolveAction.RESOLVE && dto.hideTarget),
+      },
+    });
+    return resolved;
   }
 }

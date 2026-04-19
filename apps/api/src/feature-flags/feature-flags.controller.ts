@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { FeatureFlagsService } from './feature-flags.service';
 import { CreateFeatureFlagDto } from './dto/create-feature-flag.dto';
 import { UpdateFeatureFlagDto } from './dto/update-feature-flag.dto';
@@ -38,21 +39,25 @@ export class FeatureFlagsController {
   @Post('admin/feature-flags')
   @UseGuards(AdminGuard)
   @ApiBearerAuth()
-  create(@Body() dto: CreateFeatureFlagDto) {
-    return this.featureFlagsService.create(dto);
+  create(@Body() dto: CreateFeatureFlagDto, @CurrentUser() user: AuthUser) {
+    return this.featureFlagsService.create(dto, user.id);
   }
 
   @Patch('admin/feature-flags/:id')
   @UseGuards(AdminGuard)
   @ApiBearerAuth()
-  update(@Param('id') id: string, @Body() dto: UpdateFeatureFlagDto) {
-    return this.featureFlagsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateFeatureFlagDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.featureFlagsService.update(id, dto, user.id);
   }
 
   @Delete('admin/feature-flags/:id')
   @UseGuards(AdminGuard)
   @ApiBearerAuth()
-  remove(@Param('id') id: string) {
-    return this.featureFlagsService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.featureFlagsService.remove(id, user.id);
   }
 }

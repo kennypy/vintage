@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 export type ReviewAction = 'SUSPEND_LISTING' | 'BAN_USER' | 'DISMISS';
 
@@ -20,6 +21,7 @@ export class ModerationService {
     private readonly notifications: NotificationsService,
     private readonly listings: ListingsService,
     private readonly fraud: FraudService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   async listPendingReports(page = 1, pageSize = 20, targetType?: string) {
@@ -168,10 +170,21 @@ export class ModerationService {
       this.listings.syncSearchIndex(id).catch(() => {});
     }
 
+    await this.auditLog.record({
+      actorId: adminId,
+      action: 'user.ban',
+      targetType: 'user',
+      targetId: userId,
+      metadata: {
+        reason: String(reason).slice(0, 200),
+        listingsSuspended: suspendedIds.length,
+      },
+    });
+
     return { banned: true, userId };
   }
 
-  async unbanUser(userId: string) {
+  async unbanUser(userId: string, adminId: string | null = null) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, isBanned: true },
@@ -182,6 +195,13 @@ export class ModerationService {
     await this.prisma.user.update({
       where: { id: userId },
       data: { isBanned: false, bannedAt: null, bannedReason: null },
+    });
+
+    await this.auditLog.record({
+      actorId: adminId,
+      action: 'user.unban',
+      targetType: 'user',
+      targetId: userId,
     });
 
     return { unbanned: true, userId };

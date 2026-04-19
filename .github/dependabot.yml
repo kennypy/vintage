@@ -1,0 +1,64 @@
+version: 2
+
+# Keep our dependency + CI-action versions drifting on a schedule instead
+# of accumulating into "big-bang" upgrade PRs. Weekly cadence is enough
+# to catch CVEs within a week without drowning reviewers. Patch updates
+# are grouped per-ecosystem so the PR queue stays readable — only the
+# ts / react / nest majors open dedicated PRs that reviewers can weigh
+# independently.
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    labels:
+      - dependencies
+      - security
+    groups:
+      # Roll every patch + minor dev-dep into one PR per week. The
+      # rare breakage is easy to revert when the PR is scoped to
+      # dev-only.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      # Group NestJS together — cross-package version drift is a
+      # frequent source of "works but doesn't" bugs on this stack.
+      nestjs:
+        patterns:
+          - "@nestjs/*"
+      # Prisma client + CLI must move together.
+      prisma:
+        patterns:
+          - "@prisma/*"
+          - "prisma"
+    ignore:
+      # Pinned for compatibility — React 19 breaks the Next 14 pages
+      # router (see CLAUDE.md §Pinned Versions). Dependabot is not
+      # allowed to propose major upgrades for this stack until we
+      # plan the migration.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    labels:
+      - ci
+      - security

@@ -1,5 +1,6 @@
 import { Controller, Delete, Get, Param, Patch, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -71,6 +72,15 @@ export class WalletController {
   }
 
   @Post('payout')
+  // Tight per-user cap. Payout creates a real-money wallet debit; a
+  // compromised account that bypassed the identity + fraud gates
+  // should still not be able to fire 100 requests in a burst before
+  // fraud signals can flag it. 5 / 15min is generous for a human
+  // user (who'd rarely payout more than once a day) and a ceiling
+  // for a scripted drain. The HashThrottlerGuard keys on user.id
+  // once authenticated, so this does NOT collateral-limit other
+  // users on the same NAT / office IP.
+  @Throttle({ default: { limit: 5, ttl: 15 * 60 * 1000 } })
   @ApiOperation({ summary: 'Solicitar saque via PIX (exige chave PIX salva e CPF verificado)' })
   requestPayout(
     @Body() dto: RequestPayoutDto,
@@ -119,7 +129,8 @@ export class WalletController {
   adminUpdatePayoutStatus(
     @Param('id') id: string,
     @Body() dto: AdminUpdatePayoutStatusDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.payouts.adminUpdateStatus(id, dto.status, dto.failureReason);
+    return this.payouts.adminUpdateStatus(id, dto.status, dto.failureReason, user.id);
   }
 }

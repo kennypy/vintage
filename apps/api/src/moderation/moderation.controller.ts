@@ -133,8 +133,8 @@ export class ModerationController {
   @Delete('users/:id/ban')
   @ApiOperation({ summary: 'Remover banimento de usuário (admin)' })
   @ApiResponse({ status: 200, description: 'Banimento removido' })
-  unbanUser(@Param('id') id: string) {
-    return this.moderationService.unbanUser(id);
+  unbanUser(@Param('id') id: string, @CurrentUser() admin: AuthUser) {
+    return this.moderationService.unbanUser(id, admin.id);
   }
 
   @Get('image-flags')

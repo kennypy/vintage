@@ -10,6 +10,7 @@ import { DisputesService } from './disputes.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { DisputeReason } from './dto/create-dispute.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 jest.mock('@vintage/shared', () => ({
   DISPUTE_WINDOW_DAYS: 7,
@@ -45,6 +46,7 @@ describe('DisputesService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         DisputesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },

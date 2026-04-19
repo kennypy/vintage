@@ -112,6 +112,7 @@ model User {
   loginEvents            LoginEvent[]
   authenticityRequests   AuthenticityRequest[]
   deletionAuditLogs      DeletionAuditLog[]
+  auditLogsAsActor       AuditLog[]          @relation("AuditLogActor")
   blocksMade             UserBlock[]         @relation("UserBlocker")
   blocksReceived         UserBlock[]         @relation("UserBlocked")
   listingImageFlags      ListingImageFlag[]  @relation("ListingImageFlagUploader")
@@ -584,6 +585,37 @@ model DeletionAuditLog {
 
   @@index([userId])
   @@index([hardDeletedAt])
+}
+
+/// General-purpose audit log for privileged actions. One row per
+/// admin-triggered state change (role promotion, dispute resolution,
+/// payout status flip, feature-flag edit, authenticity review, etc.)
+/// plus a few high-signal system events. Structured enough to query
+/// ("everything admin X did in the last 24h") and immutable by
+/// convention — nothing in the app mutates an existing AuditLog row.
+///
+/// actor is the User who took the action. `null` is reserved for
+/// system-triggered events (cron jobs, webhook side effects); every
+/// human-initiated action MUST fill it. actor uses SetNull on delete
+/// so an LGPD erasure doesn't wipe the audit trail itself.
+model AuditLog {
+  id         String    @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  actor      User?     @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
 
 // --- Disputes ---

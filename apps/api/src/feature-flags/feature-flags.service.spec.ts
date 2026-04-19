@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { FeatureFlagsService } from './feature-flags.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const mockPrisma = {
   featureFlag: {
@@ -21,6 +22,7 @@ describe('FeatureFlagsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         FeatureFlagsService,
         { provide: PrismaService, useValue: mockPrisma },
       ],

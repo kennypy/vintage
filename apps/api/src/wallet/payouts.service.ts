@@ -13,6 +13,7 @@ import {
   MercadoPagoPayoutUnavailableError,
 } from '../payments/mercadopago.client';
 import { FraudService } from '../fraud/fraud.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { PayoutRequestStatus } from '@prisma/client';
 
 /**
@@ -40,6 +41,7 @@ export class PayoutsService {
     private payoutMethods: PayoutMethodsService,
     private mp: MercadoPagoClient,
     private fraud: FraudService,
+    private auditLog: AuditLogService,
   ) {}
 
   async requestPayout(userId: string, amountBrl: number, payoutMethodId: string) {
@@ -207,6 +209,7 @@ export class PayoutsService {
     payoutRequestId: string,
     next: 'COMPLETED' | 'FAILED',
     failureReason?: string,
+    actorId: string | null = null,
   ) {
     const pr = await this.prisma.payoutRequest.findUnique({
       where: { id: payoutRequestId },
@@ -248,6 +251,17 @@ export class PayoutsService {
         pr,
         failureReason ?? 'Falha marcada pelo suporte.',
       );
+      await this.auditLog.record({
+        actorId,
+        action: 'payout.mark_failed',
+        targetType: 'payout_request',
+        targetId: payoutRequestId,
+        metadata: {
+          userId: pr.userId,
+          amountBrl: Number(pr.amountBrl),
+          failureReason: failureReason ?? 'Falha marcada pelo suporte.',
+        },
+      });
       return { ok: true, status: 'FAILED' as const };
     }
 
@@ -261,6 +275,16 @@ export class PayoutsService {
     if (claim.count === 0) {
       return { ok: true, status: 'COMPLETED' as const, alreadyTerminal: true };
     }
+    await this.auditLog.record({
+      actorId,
+      action: 'payout.mark_completed',
+      targetType: 'payout_request',
+      targetId: payoutRequestId,
+      metadata: {
+        userId: pr.userId,
+        amountBrl: Number(pr.amountBrl),
+      },
+    });
     return { ok: true, status: 'COMPLETED' as const };
   }
 

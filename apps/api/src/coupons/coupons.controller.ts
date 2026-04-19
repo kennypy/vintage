@@ -8,6 +8,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { CouponsService } from './coupons.service';
 import { ValidateCouponDto } from './dto/validate-coupon.dto';
 import { CreateCouponDto } from './dto/create-coupon.dto';
@@ -38,7 +39,7 @@ export class CouponsController {
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Criar novo cupom (admin)' })
   @ApiResponse({ status: 201, description: 'Cupom criado com sucesso' })
-  create(@Body() dto: CreateCouponDto) {
-    return this.couponsService.create(dto);
+  create(@Body() dto: CreateCouponDto, @CurrentUser() user: AuthUser) {
+    return this.couponsService.create(dto, user.id);
   }
 }

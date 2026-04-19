@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -30,6 +31,12 @@ export class ListingsController {
   @Post()
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  // Per-user listing-creation cap. Beyond a normal flea-market cadence
+  // (30 / hour is a heavy power-seller), this is used to slow down
+  // scraped-catalog dumps and spam-listing attacks. HashThrottlerGuard
+  // keys on user.id so a seller on a busy office network isn't
+  // collateral-limited by a coworker.
+  @Throttle({ default: { limit: 30, ttl: 60 * 60 * 1000 } })
   @ApiOperation({ summary: 'Criar anúncio' })
   create(@Body() dto: CreateListingDto, @CurrentUser() user: AuthUser) {
     return this.listingsService.create(user.id, dto);

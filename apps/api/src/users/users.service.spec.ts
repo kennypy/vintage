@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
 import * as bcrypt from 'bcrypt';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 jest.mock('bcrypt');
 
@@ -63,6 +64,7 @@ describe('UsersService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
         {

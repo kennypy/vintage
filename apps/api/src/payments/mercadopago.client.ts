@@ -453,7 +453,7 @@ export class MercadoPagoClient {
 
   // --------------- Mock implementations for dev mode ---------------
 
-  private mockPixPayout(externalReference: string) {
+  private mockPixPayout(_externalReference: string) {
     this.logger.warn(
       'Using mock PIX payout (MERCADOPAGO_ACCESS_TOKEN not set)',
     );

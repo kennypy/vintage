@@ -1,0 +1,42 @@
+# gitleaks config. Tuned for this codebase — the default rule set catches
+# real leaks but also fires on things like test fixtures and
+# documentation examples that reference key *formats* (not real keys).
+# The allowlist below is the minimal set we need so the pre-commit hook
+# and the CI step stay noise-free.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe patterns in this repo"
+
+paths = [
+  # Docs describe secret formats by example (e.g. "JWT_SECRET looks
+  # like <64 hex chars>"). Not real secrets — explicitly placeholder.
+  "CLAUDE.md",
+  "DEPLOYMENT.md",
+  "SECURITY_AUDIT_REPORT.md",
+  "PENTEST_FINDINGS.md",
+  "PENTEST_FOLLOWUPS.md",
+  "LAUNCH_CHECKLIST.md",
+  "README.md",
+  # .env.example files carry CHANGE_ME_IN_PRODUCTION placeholders.
+  ".*\\.env\\.example$",
+]
+
+regexes = [
+  # Placeholder strings we use literally in docs + .env.example.
+  "CHANGE_ME_IN_PRODUCTION",
+  "your-mercado-pago-access-token",
+  "your-webhook-secret",
+  # Swagger snippet JWT — known example, not a real token.
+  "eyJhbGciOiJIUzI1NiJ9\\.eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+]
+
+# Test-fixture CPFs are Modulo-11 valid because isValidCPF rejects
+# invalid ones, but they are NOT real people (canonical fake CPFs
+# documented across Receita Federal testing material).
+stopwords = [
+  "52998224725",
+  "11144477735",
+]
