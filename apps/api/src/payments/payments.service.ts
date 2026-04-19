@@ -11,6 +11,7 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { MercadoPagoClient } from './mercadopago.client';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
@@ -44,6 +45,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly analytics: AnalyticsService,
+    private readonly metrics: MetricsService,
   ) {
     this.nodeEnv = this.configService.get<string>(
       'NODE_ENV',
@@ -184,6 +186,7 @@ export class PaymentsService {
     const valid = this.mercadoPago.verifyWebhookSignature(rawBody, signature);
     if (!valid) {
       this.logger.warn('Webhook rejected: invalid signature');
+      this.metrics.webhookSignatureRejected.inc({ provider: 'mercadopago' });
       throw new UnauthorizedException('Assinatura do webhook inválida.');
     }
 
@@ -236,6 +239,7 @@ export class PaymentsService {
       this.logger.log(
         `Webhook duplicate — already processed mercadopago:${deliveryId}`,
       );
+      this.metrics.webhookDuplicate.inc({ provider: 'mercadopago' });
       return { received: true, duplicate: true };
     }
 
@@ -364,6 +368,7 @@ export class PaymentsService {
         );
 
         // Record the anomaly for manual review (fire-and-forget log write)
+        this.metrics.paymentFlagCreated.inc({ reason: 'amount_mismatch' });
         try {
           await this.prisma.paymentFlag.create({
             data: {

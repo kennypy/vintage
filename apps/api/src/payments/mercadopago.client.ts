@@ -184,17 +184,25 @@ export class MercadoPagoClient {
     // then convert back to BRL once at the end. This guarantees the
     // sum of installments exactly equals the total amount and never
     // under- or over-charges due to rounding.
+    // Integer-centavo math so the sum of installments EXACTLY equals
+    // the charge. The old ceiling-divide (per = ceil(total/n), total
+    // = per*n) over-reported `total` by up to (n - 1) centavos on
+    // fractional remainders — harmless in practice because MP's own
+    // response takes priority, but wrong in the fallback path a
+    // property-based test flagged. Floor + distribute the remainder
+    // across the first `remainder` installments keeps every
+    // installment >= base and sum(parts) = totalCentavos exactly.
     const totalCentavos = Math.round(amountBrl * 100);
-    // Ceiling-divide: any remainder gets folded into the per-installment
-    // amount so the buyer never under-pays. The seller absorbs at most
-    // (installments - 1) centavos extra in the worst case.
-    const perInstallmentCentavos = Math.ceil(totalCentavos / installments);
+    const baseInstallment = Math.floor(totalCentavos / installments);
+    const remainderCentavos = totalCentavos - baseInstallment * installments;
+    // "Approximate" per-installment amount used in the response. When
+    // remainder > 0 the first `remainder` installments are 1 centavo
+    // larger; we report the base as a representative value.
     const installmentAmount =
       payment.transaction_details?.installment_amount ??
-      perInstallmentCentavos / 100;
+      (baseInstallment + (remainderCentavos > 0 ? 1 : 0)) / 100;
     const total =
-      payment.transaction_details?.total_paid_amount ??
-      (perInstallmentCentavos * installments) / 100;
+      payment.transaction_details?.total_paid_amount ?? amountBrl;
 
     return {
       id: String(payment.id),

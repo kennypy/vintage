@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import * as crypto from 'crypto';
+import { MetricsService } from '../../metrics/metrics.service';
 
 // 7 days — aligned with JWT refresh token expiry so mobile apps kept in
 // the background over a weekend don't fail CSRF on their first resumed POST.
@@ -33,7 +34,10 @@ export class CsrfMiddleware implements NestMiddleware {
   private readonly logger = new Logger(CsrfMiddleware.name);
   private readonly secret: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly metrics: MetricsService,
+  ) {
     const configured = this.configService.get<string>('CSRF_SECRET') ?? '';
     const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
@@ -72,6 +76,7 @@ export class CsrfMiddleware implements NestMiddleware {
       this.logger.warn(
         `CSRF token missing on ${req.method} ${req.path}`,
       );
+      this.metrics.authCsrfRejected.inc({ reason: 'missing' });
       throw new ForbiddenException('Token CSRF ausente.');
     }
 
@@ -79,6 +84,7 @@ export class CsrfMiddleware implements NestMiddleware {
       this.logger.warn(
         `CSRF token invalid on ${req.method} ${req.path}`,
       );
+      this.metrics.authCsrfRejected.inc({ reason: 'invalid' });
       throw new ForbiddenException('Token CSRF inválido ou expirado.');
     }
 

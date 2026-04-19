@@ -20,6 +20,7 @@ import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { isValidCPF } from '@vintage/shared';
 import { RegisterDto } from './dto/register.dto';
@@ -125,6 +126,7 @@ export class AuthService {
     private redis: RedisService,
     private analytics: AnalyticsService,
     private cpfVault: CpfVaultService,
+    private metrics: MetricsService,
   ) {}
 
   // ── 2FA brute-force helpers ───────────────────────────────────────────
@@ -443,6 +445,7 @@ export class AuthService {
     );
     if (count >= LOGIN_MAX_ATTEMPTS) {
       await this.redis.setNx(this.loginLockKey(email), '1', LOGIN_LOCK_TTL_SECONDS);
+      this.metrics.authLoginLocked.inc();
     }
   }
   private async resetLoginAttempts(email: string): Promise<void> {
@@ -490,6 +493,9 @@ export class AuthService {
           })();
         }
       }
+      this.metrics.authLoginFailed.inc({
+        reason: user ? 'wrong_password' : 'unknown_email',
+      });
       throw new UnauthorizedException('Email ou senha inválidos');
     }
 
@@ -1734,6 +1740,7 @@ export class AuthService {
     this.logger.warn(
       `Refresh-token reuse detected for user ${userId} (row ${presentedRowId}) — revoking all sessions.`,
     );
+    this.metrics.authRefreshReuse.inc();
     await this.prisma.$transaction([
       this.prisma.refreshToken.updateMany({
         where: { userId, revokedAt: null },
