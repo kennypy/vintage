@@ -1,154 +1,172 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiGet, apiPost, apiPostForm } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 
-interface VerificationStatus {
-  emailVerified: boolean;
-  phoneVerified: boolean;
-  cpfVerified: boolean;
-  identityStatus?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
-  identitySubmittedAt?: string;
+interface SecurityStatus {
+  cpfChecksumValid?: boolean;
+  cpfIdentityVerified?: boolean;
+  // Back-compat alias the API still emits.
+  cpfVerified?: boolean;
+  twoFaEnabled?: boolean;
+  isContaProtegida?: boolean;
 }
 
-const STATUS_PT: Record<string, string> = {
-  NONE: 'Não enviado',
-  PENDING: 'Em análise',
-  APPROVED: 'Aprovado',
-  REJECTED: 'Recusado',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  NONE: 'bg-gray-100 text-gray-600',
-  PENDING: 'bg-yellow-100 text-yellow-800',
-  APPROVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-red-100 text-red-800',
-};
+interface VerifyResponse {
+  status:
+    | 'VERIFIED'
+    | 'NAME_MISMATCH'
+    | 'CPF_SUSPENDED'
+    | 'CPF_CANCELED'
+    | 'DECEASED'
+    | 'PROVIDER_ERROR'
+    | 'CONFIG_ERROR';
+  identityVerified: boolean;
+  message: string;
+}
 
 export default function VerificacaoPage() {
   const router = useRouter();
-  const [status, setStatus] = useState<VerificationStatus | null>(null);
+  const [status, setStatus] = useState<SecurityStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [birthDate, setBirthDate] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<{
+    kind: 'success' | 'info' | 'error';
+    text: string;
+  } | null>(null);
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
+    if (typeof window !== 'undefined' && !localStorage.getItem('vintage_token')) {
       router.push('/auth/login');
       return;
     }
-    apiGet<VerificationStatus>('/users/me/verification')
+    apiGet<SecurityStatus>('/auth/security-status')
       .then((data) => setStatus(data))
-      .catch(() => setStatus({ emailVerified: false, phoneVerified: false, cpfVerified: false, identityStatus: 'NONE' }))
+      .catch(() => setStatus({}))
       .finally(() => setLoading(false));
   }, [router]);
 
-  const handleRequestEmailVerify = async () => {
-    try {
-      await apiPost('/auth/resend-verification');
-      setNotice('E-mail de verificação enviado.');
-      setTimeout(() => setNotice(null), 2500);
-    } catch {
-      setNotice('Não foi possível reenviar o e-mail.');
-      setTimeout(() => setNotice(null), 2500);
-    }
-  };
+  const verified = status?.cpfIdentityVerified === true;
 
-  const handleIdentityUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!birthDate) return;
+    setSubmitting(true);
+    setNotice(null);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      await apiPostForm('/users/me/identity-document', formData);
-      setNotice('Documento enviado. Analisaremos em até 48h.');
-      setStatus((prev) => prev ? { ...prev, identityStatus: 'PENDING', identitySubmittedAt: new Date().toISOString() } : prev);
-      setTimeout(() => setNotice(null), 3000);
-    } catch {
-      setNotice('Falha ao enviar documento. Tente novamente.');
-      setTimeout(() => setNotice(null), 2500);
+      const result = await apiPost<VerifyResponse>(
+        '/users/me/verify-identity',
+        { birthDate },
+      );
+      if (result.status === 'VERIFIED') {
+        setStatus({ ...status, cpfIdentityVerified: true });
+        setNotice({ kind: 'success', text: result.message });
+      } else if (result.status === 'CONFIG_ERROR') {
+        // Distinguishable from user-error so ops can triage separately.
+        setNotice({ kind: 'info', text: result.message });
+      } else {
+        setNotice({ kind: 'error', text: result.message });
+      }
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Não foi possível verificar agora. Tente novamente.',
+      });
     } finally {
-      setUploading(false);
+      setSubmitting(false);
     }
   };
 
   if (loading) {
-    return <div className="animate-pulse h-64 bg-white border border-gray-200 rounded-xl" />;
+    return <div className="p-6 text-sm text-gray-500">Carregando…</div>;
   }
-  if (!status) return null;
-
-  const identity = status.identityStatus ?? 'NONE';
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-xl mx-auto px-4 py-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-2">Verificação de identidade</h1>
+      <p className="text-sm text-gray-600 mb-6">
+        Confirmamos seu CPF, nome e data de nascimento diretamente com a
+        Receita Federal. A verificação é obrigatória para solicitar saques
+        e emitir notas fiscais.
+      </p>
+
+      <section className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700">Status</span>
+          {verified ? (
+            <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full bg-green-100 text-green-800">
+              ✓ Verificado
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800">
+              Pendente
+            </span>
+          )}
+        </div>
+      </section>
+
       {notice && (
-        <div className="p-3 rounded-xl text-sm bg-blue-50 border border-blue-200 text-blue-700">
-          {notice}
+        <div
+          className={`mb-4 p-3 rounded-xl text-sm border ${
+            notice.kind === 'success'
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : notice.kind === 'info'
+                ? 'bg-blue-50 border-blue-200 text-blue-800'
+                : 'bg-red-50 border-red-200 text-red-700'
+          }`}
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+        >
+          {notice.text}
         </div>
       )}
 
-      <section className="bg-white border border-gray-200 rounded-xl p-6">
-        <h2 className="text-base font-semibold text-gray-900 mb-4">Verificações</h2>
-        <div className="space-y-3">
-          <Row
-            label="E-mail"
-            verified={status.emailVerified}
-            action={!status.emailVerified ? <button type="button" onClick={handleRequestEmailVerify} className="text-sm text-brand-600 hover:text-brand-700 font-medium">Reenviar e-mail</button> : null}
-          />
-          <Row label="Telefone" verified={status.phoneVerified} />
-          <Row label="CPF" verified={status.cpfVerified} />
-        </div>
-      </section>
-
-      <section className="bg-white border border-gray-200 rounded-xl p-6">
-        <h2 className="text-base font-semibold text-gray-900 mb-2">Documento de identidade</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Envie uma foto clara do seu RG ou CNH. Isso aumenta a confiança dos compradores e libera saques maiores.
-        </p>
-
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-gray-700">Status</p>
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[identity]}`}>
-            {STATUS_PT[identity]}
-          </span>
-        </div>
-
-        {identity !== 'APPROVED' && (
-          <label className="block w-full py-3 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition text-center cursor-pointer disabled:opacity-50">
-            {uploading ? 'Enviando…' : identity === 'REJECTED' ? 'Reenviar documento' : 'Enviar documento'}
+      {!verified && (
+        <form onSubmit={handleSubmit} className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+          <div>
+            <label htmlFor="birthDate" className="block text-sm font-medium text-gray-700 mb-1">
+              Data de nascimento
+            </label>
             <input
-              type="file"
-              accept="image/*,application/pdf"
-              hidden
-              disabled={uploading}
-              onChange={handleIdentityUpload}
+              id="birthDate"
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+              required
             />
-          </label>
-        )}
-
-        {identity === 'APPROVED' && (
-          <p className="text-sm text-green-700">Identidade verificada. Nada mais a fazer.</p>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function Row({ label, verified, action }: { label: string; verified: boolean; action?: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-1">
-      <div>
-        <p className="text-sm text-gray-800">{label}</p>
-        <p className="text-xs text-gray-400 mt-0.5">{verified ? 'Verificado' : 'Não verificado'}</p>
-      </div>
-      {verified ? (
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-800">Verificado</span>
-      ) : (
-        action ?? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Pendente</span>
+            <p className="text-xs text-gray-500 mt-1">
+              Os dados precisam conferir exatamente com o cadastro da Receita.
+            </p>
+          </div>
+          <button
+            type="submit"
+            disabled={submitting || !birthDate}
+            className="w-full py-3 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 disabled:opacity-50"
+          >
+            {submitting ? 'Verificando…' : 'Verificar identidade'}
+          </button>
+        </form>
       )}
+
+      {verified && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+          Sua identidade está verificada. Saques e emissão de notas fiscais
+          estão liberados.
+        </div>
+      )}
+
+      <div className="mt-6 text-sm text-gray-500 flex gap-4">
+        <Link href="/conta/configuracoes" className="hover:underline">← Voltar à conta</Link>
+        {!verified && (
+          <Link href="/conta/cpf" className="hover:underline">Precisa corrigir seu CPF?</Link>
+        )}
+      </div>
     </div>
   );
 }

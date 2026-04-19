@@ -150,6 +150,23 @@ export default function WalletScreen() {
       const msg = err instanceof ApiError && err.message
         ? err.message
         : 'Não foi possível processar o saque. Tente novamente.';
+      // Identity gate — route to /conta/verificacao instead of
+      // leaving the user stuck on an error toast.
+      if (/Verificação de identidade pendente/.test(msg)) {
+        setPayoutModalVisible(false);
+        Alert.alert(
+          'Verificação de identidade necessária',
+          'Conclua a verificação do seu CPF na Receita Federal para liberar saques.',
+          [
+            { text: 'Depois', style: 'cancel' },
+            {
+              text: 'Verificar agora',
+              onPress: () => router.push('/conta/verificacao'),
+            },
+          ],
+        );
+        return;
+      }
       Alert.alert('Erro', msg);
     } finally {
       setPayoutLoading(false);
