@@ -85,6 +85,7 @@ model User {
 
   // Relations
   emailVerificationTokens EmailVerificationToken[]
+  refreshTokens     RefreshToken[]
   listings          Listing[]
   ordersBuyer       Order[]             @relation("OrderBuyer")
   ordersSeller      Order[]             @relation("OrderSeller")
@@ -1394,6 +1395,39 @@ model EmailVerificationToken {
 
   @@index([userId, createdAt])
   @@index([expiresAt])
+}
+
+// Opaque, rotating refresh tokens. Every successful /auth/refresh mints
+// a new row and marks the presented row as used; replaying a used row
+// is treated as theft (every outstanding refresh token for that user
+// is revoked and tokenVersion is bumped, killing all access tokens).
+// tokenHash is SHA-256(raw); the raw value never touches the database
+// and is only held by the legitimate client in secure storage.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  usedAt       DateTime?
+  // When rotated, points at the row that replaced this one — lets us
+  // walk the chain when investigating a reuse-detected incident.
+  replacedById String?
+  // Set by the reuse-detection sweep or an explicit logout. A revoked
+  // row is treated the same as a used one — no new tokens can be
+  // minted from it.
+  revokedAt    DateTime?
+  // Coarse device hint recorded at issuance. Lets future tooling show
+  // "active sessions" and selectively revoke. Never treated as
+  // authenticating — these strings are all client-supplied.
+  userAgent    String?
+  ipAddress    String?
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 // Email-change confirmation token. Sent to the NEW email address; redeeming

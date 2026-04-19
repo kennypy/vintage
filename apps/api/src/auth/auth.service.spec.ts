@@ -47,6 +47,13 @@ const mockPrisma = {
     findUnique: jest.fn(),
     update: jest.fn(),
   },
+  refreshToken: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    deleteMany: jest.fn(),
+  },
   $transaction: jest.fn().mockImplementation((ops: unknown[]) => Promise.all(ops)),
   passwordResetToken: {
     updateMany: jest.fn(),
@@ -142,9 +149,7 @@ describe('AuthService', () => {
           cpf: '52998224725', avatarUrl: null, createdAt: new Date(),
           tokenVersion: 0,
         });
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.register(registerDto);
 
@@ -160,10 +165,12 @@ describe('AuthService', () => {
           wallet: { create: {} },
         }),
       });
-      expect(result).toMatchObject({
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-      });
+      // Access token is the JWT; refresh token is an opaque 64-char
+      // base64url string (see generateTokens — it's no longer a JWT
+      // envelope). Assert shape, not an exact mock string.
+      expect(result.accessToken).toBe('access-token');
+      expect(typeof result.refreshToken).toBe('string');
+      expect(result.refreshToken.length).toBeGreaterThanOrEqual(60);
     });
 
     it('should reject duplicate CPF', async () => {
@@ -226,9 +233,7 @@ describe('AuthService', () => {
         email: 'test@example.com',
         name: 'Maria Silva',
       });
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       await service.register(registerDto);
 
@@ -274,16 +279,18 @@ describe('AuthService', () => {
       };
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.login(loginDto);
 
-      expect(result).toMatchObject({
-        accessToken: 'access-token',
-        refreshToken: 'refresh-token',
-      });
+      // login()'s return is a union with the 2FA-pending branch; this
+      // is the tokens branch, so narrow explicitly.
+      if (!('accessToken' in result)) {
+        throw new Error('expected tokens branch, got 2FA-pending branch');
+      }
+      expect(result.accessToken).toBe('access-token');
+      expect(typeof result.refreshToken).toBe('string');
+      expect(result.refreshToken.length).toBeGreaterThanOrEqual(60);
       expect(result).toHaveProperty('user');
     });
 
@@ -314,65 +321,193 @@ describe('AuthService', () => {
     });
   });
 
-  describe('refreshToken', () => {
-    it('should return new tokens for valid refresh token with matching ver', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh', ver: 3 });
-      // First findUnique is for the ver check in refreshToken; second is
-      // generateTokens re-reading tokenVersion for the fresh JWT payload.
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 3 });
-      mockJwtService.sign
-        .mockReturnValueOnce('new-access-token')
-        .mockReturnValueOnce('new-refresh-token');
+  describe('refreshToken (rotating, opaque tokens)', () => {
+    // Helper: a "valid" opaque token is anything ≥32 chars. The service
+    // hashes it and looks up the row by hash; the mock ignores the hash
+    // and returns whatever we want for that call.
+    const validRawToken = 'a'.repeat(64);
+    const future = () => new Date(Date.now() + 60_000);
 
-      const result = await service.refreshToken('valid-refresh-token');
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
+        Promise.all(ops),
+      );
+    });
 
-      expect(mockJwtService.verify).toHaveBeenCalledWith('valid-refresh-token');
-      expect(result).toEqual({
-        accessToken: 'new-access-token',
-        refreshToken: 'new-refresh-token',
+    it('rotates: marks the presented row used, issues a new pair, and links replacedById', async () => {
+      mockPrisma.refreshToken.findUnique
+        // 1. Initial lookup of the presented row.
+        .mockResolvedValueOnce({
+          id: 'row-old',
+          userId: 'user-1',
+          tokenHash: 'hash-old',
+          expiresAt: future(),
+          usedAt: null,
+          revokedAt: null,
+        })
+        // 2. Lookup of the replacement row after generateTokens created it.
+        .mockResolvedValueOnce({ id: 'row-new' });
+      mockPrisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrisma.user.findUnique.mockResolvedValue({ tokenVersion: 5 });
+      mockJwtService.sign.mockReturnValue('new-access');
+      mockPrisma.refreshToken.create.mockResolvedValue({ id: 'row-new' });
+
+      const result = await service.refreshToken(validRawToken);
+
+      expect(result.accessToken).toBe('new-access');
+      expect(typeof result.refreshToken).toBe('string');
+      // New opaque token should be long (base64url of 48 bytes → 64 chars).
+      expect(result.refreshToken.length).toBeGreaterThanOrEqual(60);
+
+      // Old row marked used atomically.
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 'row-old', usedAt: null, revokedAt: null }),
+          data: expect.objectContaining({ usedAt: expect.any(Date) }),
+        }),
+      );
+      // Chain link persisted.
+      expect(mockPrisma.refreshToken.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'row-old' },
+          data: { replacedById: 'row-new' },
+        }),
+      );
+    });
+
+    it('rejects an unknown token hash with a generic 401 (indistinguishable from garbage-collected)', async () => {
+      mockPrisma.refreshToken.findUnique.mockResolvedValue(null);
+      await expect(service.refreshToken(validRawToken)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      // No reuse-detection triggered for unknown hashes.
+      expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('reuse detection: a replayed used token revokes all outstanding tokens + bumps tokenVersion', async () => {
+      mockPrisma.refreshToken.findUnique.mockResolvedValueOnce({
+        id: 'row-stolen',
+        userId: 'user-1',
+        tokenHash: 'hash-stolen',
+        expiresAt: future(),
+        usedAt: new Date(Date.now() - 1_000), // already rotated past
+        revokedAt: null,
       });
-      // New tokens must carry the current tokenVersion as `ver`.
-      expect(mockJwtService.sign).toHaveBeenCalledWith(
-        expect.objectContaining({ sub: 'user-1', ver: 3 }),
+
+      await expect(service.refreshToken(validRawToken)).rejects.toThrow(
+        /reutilização/,
+      );
+
+      // Revocation sweep + tokenVersion bump run inside $transaction.
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'user-1', revokedAt: null },
+          data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+        }),
+      );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: { tokenVersion: { increment: 1 } },
+        }),
       );
     });
 
-    it('rejects a refresh token whose ver is stale (email/password changed since issuance)', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh', ver: 2 });
-      // User's tokenVersion has been bumped to 3 (e.g. email change) —
-      // the old refresh token minted at ver=2 must NOT mint new access
-      // tokens.
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 3 });
+    it('reuse detection: presenting a revoked row also triggers the sweep', async () => {
+      mockPrisma.refreshToken.findUnique.mockResolvedValueOnce({
+        id: 'row-revoked',
+        userId: 'user-2',
+        tokenHash: 'hash-revoked',
+        expiresAt: future(),
+        usedAt: null,
+        revokedAt: new Date(Date.now() - 1_000),
+      });
 
-      await expect(service.refreshToken('stale-refresh-token')).rejects.toThrow(
-        /Session invalidated/,
+      await expect(service.refreshToken(validRawToken)).rejects.toThrow(
+        /reutilização/,
+      );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { tokenVersion: { increment: 1 } },
+        }),
       );
     });
 
-    it('rejects a refresh token that lacks the ver claim (legacy pre-3B token)', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'refresh' }); // no ver
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-1', tokenVersion: 0 });
+    it('expired-but-never-used tokens return a plain 401 (NOT theft)', async () => {
+      mockPrisma.refreshToken.findUnique.mockResolvedValueOnce({
+        id: 'row-old',
+        userId: 'user-3',
+        tokenHash: 'hash-old',
+        expiresAt: new Date(Date.now() - 60_000),
+        usedAt: null,
+        revokedAt: null,
+      });
 
-      await expect(service.refreshToken('legacy-token')).rejects.toThrow(
-        /Session invalidated/,
-      );
-    });
-
-    it('should reject if token type is not refresh', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'user-1' }); // access token — no type
-
-      await expect(service.refreshToken('access-token')).rejects.toThrow(
+      await expect(service.refreshToken(validRawToken)).rejects.toThrow(
         UnauthorizedException,
       );
+      // NOT a reuse — must not revoke sibling tokens.
+      expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
-    it('should reject if user not found', async () => {
-      mockJwtService.verify.mockReturnValue({ sub: 'nonexistent', type: 'refresh' });
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+    it('race-safe: loser of the updateMany CAS trips reuse detection', async () => {
+      // Two concurrent /refresh with the same token. Both pass the
+      // usedAt/revokedAt pre-check, both try to claim the row, only one
+      // succeeds. The loser treats count=0 as theft.
+      mockPrisma.refreshToken.findUnique.mockResolvedValueOnce({
+        id: 'row-race',
+        userId: 'user-4',
+        tokenHash: 'hash-race',
+        expiresAt: future(),
+        usedAt: null,
+        revokedAt: null,
+      });
+      mockPrisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 0 });
 
-      await expect(service.refreshToken('valid-refresh-token')).rejects.toThrow(
-        UnauthorizedException,
+      await expect(service.refreshToken(validRawToken)).rejects.toThrow(
+        /reutilização/,
       );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { tokenVersion: { increment: 1 } },
+        }),
+      );
+    });
+
+    it('rejects obviously malformed tokens before hitting the database', async () => {
+      await expect(service.refreshToken('')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken('short')).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.refreshToken.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('revokeRefreshToken (logout)', () => {
+    it('marks a live row revoked', async () => {
+      mockPrisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 1 });
+      await service.revokeRefreshToken('a'.repeat(64));
+      expect(mockPrisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ revokedAt: null }),
+          data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+        }),
+      );
+    });
+
+    it('is idempotent: unknown or already-revoked tokens return silently (no enumeration)', async () => {
+      mockPrisma.refreshToken.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(
+        service.revokeRefreshToken('b'.repeat(64)),
+      ).resolves.toBeUndefined();
+    });
+
+    it('ignores non-string / empty inputs without hitting the DB', async () => {
+      await service.revokeRefreshToken('');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await service.revokeRefreshToken(undefined as any);
+      expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -397,9 +532,7 @@ describe('AuthService', () => {
         twoFaSecret: null,
       });
       mockRedisService.getDel.mockResolvedValueOnce(hash);
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.confirmLoginWithTwoFa('tmp', plaintext);
 

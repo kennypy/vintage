@@ -33,6 +33,12 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
   },
+  refreshToken: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
 };
 
 const mockJwtService = {
@@ -127,18 +133,18 @@ describe('AuthService - Social Login', () => {
         // Wave 3B: generateTokens reads tokenVersion to embed in JWT ver claim
         .mockResolvedValueOnce({ tokenVersion: 0 })
         .mockResolvedValueOnce({ id: 'user-1', name: 'Maria Silva', email: 'maria@gmail.com', cpf: null, avatarUrl: null, createdAt: new Date() }); // generateTokensWithUser
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.socialLogin('google', googleProfile);
 
-      expect(result).toEqual({
+      // Refresh token is opaque random bytes — assert shape, not exact value.
+      expect(result).toMatchObject({
         accessToken: 'access-token',
-        refreshToken: 'refresh-token',
         cpfVerified: true,
         user: expect.objectContaining({ id: 'user-1' }),
       });
+      expect(typeof (result as { refreshToken: string }).refreshToken).toBe('string');
+      expect((result as { refreshToken: string }).refreshToken.length).toBeGreaterThanOrEqual(60);
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
       expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
@@ -155,18 +161,17 @@ describe('AuthService - Social Login', () => {
         email: 'maria@gmail.com',
         name: 'Maria Silva',
       });
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.socialLogin('google', googleProfile);
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         accessToken: 'access-token',
-        refreshToken: 'refresh-token',
         cpfVerified: false,
         user: { id: 'new-user-1', name: 'Maria Silva', email: 'maria@gmail.com', cpf: null, avatarUrl: null, createdAt: expect.any(Date) },
       });
+      expect(typeof (result as { refreshToken: string }).refreshToken).toBe('string');
+      expect((result as { refreshToken: string }).refreshToken.length).toBeGreaterThanOrEqual(60);
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           email: 'maria@gmail.com',
@@ -197,9 +202,7 @@ describe('AuthService - Social Login', () => {
         email: 'maria@apple.com',
         name: 'Maria Silva',
       });
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
+      mockJwtService.sign.mockReturnValue('access-token');
 
       const result = await service.socialLogin('apple', {
         email: 'maria@apple.com',
