@@ -21,6 +21,17 @@ export class FeatureFlagsController {
 
   @Get('feature-flags')
   findAll() {
+    // Public endpoint: mobile + web clients need to know which features
+    // are active on boot. Returns only { key, enabled } — internal
+    // description / metadata / updatedAt stay admin-only so we don't
+    // leak planned features or internal rollout context.
+    return this.featureFlagsService.findAllPublic();
+  }
+
+  @Get('admin/feature-flags')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  findAllAdmin() {
     return this.featureFlagsService.findAll();
   }
 

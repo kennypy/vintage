@@ -14,6 +14,19 @@ export class FeatureFlagsService {
     });
   }
 
+  /**
+   * Public-safe projection: just { key, enabled }. Mobile / web clients
+   * use this to gate UI on boot. Internal description, metadata, and
+   * updatedAt stay admin-only — exposing them would let attackers map
+   * our planned features and rollout timelines.
+   */
+  async findAllPublic(): Promise<Array<{ key: string; enabled: boolean }>> {
+    return this.prisma.featureFlag.findMany({
+      orderBy: { key: 'asc' },
+      select: { key: true, enabled: true },
+    });
+  }
+
   async create(dto: CreateFeatureFlagDto) {
     const existing = await this.prisma.featureFlag.findUnique({
       where: { key: dto.key },

@@ -254,12 +254,23 @@ describe('NotaFiscalService', () => {
       expect(result.icms).toBe(6);
     });
 
-    it('should handle zero price gracefully', () => {
-      const result = service.calculateTax(0, 'SP', 'RJ');
+    it('rejects zero price (input-validation hardening)', () => {
+      // Zero-price tax calculation is meaningless — previously we
+      // returned a synthetic all-zero response. Pre-launch audit flagged
+      // this as an unbounded input path, so calculateTax now refuses
+      // non-positive prices at the boundary rather than downstream.
+      expect(() => service.calculateTax(0, 'SP', 'RJ')).toThrow();
+    });
 
-      expect(result.icms).toBe(0);
-      expect(result.total).toBe(0);
-      expect(result.effectiveRate).toBe(0);
+    it('rejects malformed UFs', () => {
+      expect(() => service.calculateTax(100, 'NOTAUF', 'RJ')).toThrow();
+      expect(() => service.calculateTax(100, 'SP', '12')).toThrow();
+      expect(() => service.calculateTax(100, '', 'RJ')).toThrow();
+    });
+
+    it('rejects NaN / Infinity prices', () => {
+      expect(() => service.calculateTax(NaN, 'SP', 'RJ')).toThrow();
+      expect(() => service.calculateTax(Infinity, 'SP', 'RJ')).toThrow();
     });
   });
 
