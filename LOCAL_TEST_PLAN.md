@@ -146,6 +146,73 @@ faltando.
 - [ ] Conta com `role=ADMIN` → `/admin/users` mostra lista, promoção,
       banimento.
 - [ ] Autenticidade (Wave 1) → admin aprova/rejeita.
+- [ ] `/admin/image-flags` — SafeSearch LIKELY fila; DISMISS + REJECT
+      resolvem e a imagem some do Meilisearch (quando REJECT).
+- [ ] `/admin/fraud-flags` — FraudFlag pendentes; resolução DISMISS
+      vs. REVIEWED registra no audit log.
+
+## 16. Verificação de identidade (Tracks A/B/C)
+
+- [ ] `User.cpfChecksumValid` = true após `setCpf` com CPF Modulo-11
+      válido. `User.cpfIdentityVerified` continua `false`.
+- [ ] `POST /wallet/payout` com `cpfIdentityVerified=false` retorna
+      `BadRequestException` com mensagem "Verificação de identidade
+      pendente".
+- [ ] Web: tentar saque em `/wallet` → app redireciona para
+      `/conta/verificacao`. Mobile: Alert com CTA "Verificar agora".
+- [ ] `/conta/verificacao` com `IDENTITY_VERIFICATION_ENABLED=false`
+      mostra mensagem `CONFIG_ERROR` (azul, não vermelho — distingue
+      config de erro do usuário).
+- [ ] Com `IDENTITY_VERIFICATION_ENABLED=true` + Serpro sandbox:
+      CPF + name + DOB válidos → `VERIFIED`, flag flipa, audit row
+      escrita em `CpfVerificationLog`.
+- [ ] Mismatch deliberado (nome errado) → `NAME_MISMATCH`, flag NÃO
+      flipa, botão "Verificar por documento" aparece.
+- [ ] `IDENTITY_DOCUMENT_ENABLED=true` + Caf sandbox: botão abre
+      redirect URL (nova aba no web, WebView no mobile). Completar o
+      fluxo → webhook em `/webhooks/caf` flipa
+      `cpfIdentityVerified=true` + marca `CafVerificationSession` como
+      `APPROVED`. Assinatura HMAC inválida retorna 401.
+
+## 17. LGPD + retenção
+
+- [ ] `POST /users/me/export` retorna ZIP com user.json + orders +
+      listings + messages + payout-methods (PIX mascarado) +
+      receipt.json com SHA256. PayoutMethod.pixKey NUNCA aparece cru.
+- [ ] `DELETE /users/me` via `/conta/deletar-conta`: confirmação
+      "EXCLUIR" + senha → soft-delete, token atual invalidado,
+      `User.deletedAt` setado.
+- [ ] Crons de retenção (02:00 / 05:00 UTC, ou forçar em dev):
+      `LoginEvent`, `ProcessedWebhook`, `ListingImageFlag`
+      (non-PENDING only), `FraudFlag` (non-PENDING only),
+      `CpfVerificationLog`, `CafVerificationSession` (non-PENDING) —
+      todos respeitando suas envs de retenção.
+- [ ] S3 orphan sweep: listing com `status=DELETED` há > 30d e SEM
+      `OrderListingSnapshot` ativo → cron deleta as S3 keys +
+      hard-deletes o Listing. Listing com snapshot ativo → sweep pula.
+
+## 18. Captcha + moderação de imagens
+
+- [ ] `NEXT_PUBLIC_TURNSTILE_SITE_KEY` unset (dev) → `/auth/register`
+      mostra hint "Turnstile desativado"; backend no-op.
+- [ ] Site key + `CAPTCHA_ENFORCE=true` → register sem resolver o
+      widget retorna 403.
+- [ ] Upload de foto "normal" → passa; `GOOGLE_VISION_API_KEY`
+      configurado + foto obviamente explícita → 400 "rejeitada pela
+      moderação automática", nada gravado em S3.
+- [ ] Foto borderline (LIKELY) → upload sucede, `ListingImageFlag`
+      row criada, aparece em `/admin/image-flags`.
+
+## 19. Deep links + analytics
+
+- [ ] `GET https://<web>/.well-known/apple-app-site-association`
+      retorna JSON com `appIDs` = `<APPLE_TEAM_ID>.br.vintage.app`;
+      503 com mensagem clara quando `APPLE_TEAM_ID` não setado.
+- [ ] `GET /.well-known/assetlinks.json` análogo para
+      `ANDROID_CERT_SHA256`.
+- [ ] `POSTHOG_API_KEY` configurado + criar usuário → evento
+      `user_registered` aparece no dashboard PostHog dentro de ~10s
+      (flush interval).
 
 ---
 

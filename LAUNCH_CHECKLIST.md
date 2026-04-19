@@ -60,6 +60,44 @@ your Fly secrets store (not just in `.env.local`):
       association file served from `/.well-known/apple-app-site-association`.
 - [ ] **Sentry** (or Rollbar) — project created, DSN in secrets, test
       event sent from staging.
+- [ ] **Google Vision** — API key in `GOOGLE_VISION_API_KEY`. Consumed
+      by listing autofill AND SafeSearch image moderation
+      (`uploads.service.ts`): VERY_LIKELY adulto/violência/sugestivo
+      rejects the upload; LIKELY queues a `ListingImageFlag` row for
+      the admin queue at `/admin/image-flags`.
+- [ ] **Cloudflare Turnstile** 🟡 — site created, `TURNSTILE_SECRET_KEY`
+      server-side, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` on web,
+      `EXPO_PUBLIC_TURNSTILE_SITE_KEY` on mobile. `CAPTCHA_ENFORCE=false`
+      at launch; flip to `true` after the mobile release with the
+      WebView-hosted widget hits ≥95% adoption (otherwise mobile
+      register / forgot-password / SMS-resend break).
+- [ ] **PostHog** (EU region) — `POSTHOG_API_KEY` server-side (emits
+      user_registered / listing_created / order_created / order_paid /
+      order_delivered / dispute_opened); `NEXT_PUBLIC_POSTHOG_KEY` on
+      web (pageviews + autocapture); `EXPO_PUBLIC_POSTHOG_KEY` on
+      mobile (screen focus). `POSTHOG_HOST` defaults to
+      `https://eu.i.posthog.com` for LGPD residency.
+- [ ] **Serpro Datavalid** 🔴 (Track B — CPF + name + DOB at Receita
+      Federal) — 6–12 week contract lead time; start procurement
+      **immediately** alongside CNPJ registration. Credentials in
+      `SERPRO_CLIENT_ID` / `SERPRO_CLIENT_SECRET` / `SERPRO_BASE_URL`.
+      `IDENTITY_VERIFICATION_ENABLED=false` until the contract is
+      live — which also means **no user can withdraw** until you
+      flip it. Plan the flip alongside go-live.
+- [ ] **Caf** (Track C — document + liveness escalation) — 2–4 week
+      contract. `CAF_API_KEY` + `CAF_WEBHOOK_SECRET` + `CAF_BASE_URL`
+      + `WEBHOOK_BASE_URL` on API. Only fires when a user clicks
+      "Verificar por documento" after Track-B NAME_MISMATCH /
+      CPF_SUSPENDED. `IDENTITY_DOCUMENT_ENABLED=false` until Caf is
+      live.
+- [ ] **Deep linking** — for `/.well-known/apple-app-site-association`
+      + `/.well-known/assetlinks.json` on the web host:
+      `APPLE_TEAM_ID` (10-char, from App Store Connect) +
+      `ANDROID_CERT_SHA256` (colon-separated 95-char SHA-256 from
+      Play Console → Release → Setup → App Integrity → App Signing
+      Certificate; comma-separate multiple fingerprints during
+      rollout). `IOS_BUNDLE_ID` / `ANDROID_PACKAGE` default to
+      `br.vintage.app`.
 
 ### 1.4 Database + Redis + Search 🔴
 - [ ] **Postgres** — Supabase (or equivalent) production project, daily
@@ -89,8 +127,19 @@ your Fly secrets store (not just in `.env.local`):
   - [ ] Block user on seller page + unblock via `/conta/blocked-users` (§8)
   - [ ] Add CPF via `/conta/cpf`; verify uniform error on duplicate (§9)
   - [ ] Checkout PIX + wallet credit (§10)
-  - [ ] Register a PIX key + request payout (§11)
+  - [ ] Register a PIX key + request payout (§11) — today, every new
+        account fails the `cpfIdentityVerified` gate and gets routed
+        to `/conta/verificacao`. Smoke the routing (not the payout).
   - [ ] Email change request + confirm + notify old email (§12)
+  - [ ] CPF identity verification on `/conta/verificacao` — either
+        confirms against Serpro (when `IDENTITY_VERIFICATION_ENABLED=true`)
+        or surfaces the "configure first" message when off. After
+        success, verify the payout gate unblocks.
+  - [ ] LGPD data export: `POST /users/me/export` returns a ZIP;
+        open it, confirm the `receipt.json` hash is stable and
+        `payout-methods.json` has only masked PIX keys.
+  - [ ] Delete account flow at `/conta/deletar-conta` — confirmation
+        gate works, account soft-deletes, old tokens invalidated.
 
 ### 2.2 Load test 🟡
 - [ ] Run `wrk` / `k6` against staging at 10× expected launch-day peak:
@@ -201,13 +250,22 @@ Run in order. Do not skip ahead.
 
 ### 5.1 Monitoring cadence
 - [ ] Sentry reviewed every 4 hours for the first 24h, then daily.
-- [ ] Admin `/admin/disputes` reviewed twice daily; SLA is 2 days.
+- [ ] Admin `/admin/disputes` reviewed twice daily; SLA is 5 days
+      after delivery (`DISPUTE_WINDOW_DAYS`).
 - [ ] Admin `/admin/authenticity` reviewed daily.
 - [ ] Admin `/admin/payouts` reviewed daily while
       `MERCADOPAGO_PAYOUT_ENABLED=false`.
-- [ ] Admin `/admin/verification` (CPF/identity uploads) reviewed at
-      least twice daily for week 1 — launch-day sellers can't withdraw
-      until they're approved.
+- [ ] Admin `/admin/image-flags` reviewed daily — Google Vision
+      SafeSearch LIKELY queue.
+- [ ] Admin `/admin/fraud-flags` reviewed daily — velocity + payout
+      drain rules.
+- [ ] `CpfVerificationLog` tail reviewed daily during week 1 — track
+      NAME_MISMATCH / CPF_SUSPENDED rate to spot integration bugs vs.
+      real user-side data issues.
+- [ ] PostHog funnel reviewed daily: register → first listing →
+      first order → order_paid → order_delivered conversion.
+- [ ] Rate-limit bucket pressure in Redis — SMS-send throttle
+      exhaustion on any single user could hide a Twilio outage.
 
 ### 5.2 Operational watch items
 - [ ] Watch NFe poll-cron logs (`notafiscal.service.ts pollPendingNFeStatus`)

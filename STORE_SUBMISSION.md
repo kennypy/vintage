@@ -104,12 +104,23 @@ Edite `eas.json` (já presente) com:
     functionality.
   - Identifiers: user ID — linked to user.
   - Purchases: histórico de pedidos — linked to user.
-  - Usage Data: interactions — linked to user, used for analytics.
+  - Usage Data: interactions — linked to user, used for analytics
+    (PostHog, EU region).
   - Diagnostics: crash data — *not* linked to user.
-  - **Sensitive Info**: CPF — linked to user, required by lei brasileira para
-    pagamentos (justificativa: “Brazilian tax ID — required by payment
-    processor for PIX transactions”).
-- Nenhum dado é vendido; marque *“I do not use this data to track”*.
+  - **Sensitive Info**:
+    - CPF — linked to user, required by lei brasileira para
+      pagamentos (justificativa: "Brazilian tax ID — required by
+      payment processor for PIX transactions").
+    - Data de nascimento — usado uma vez para validação de identidade
+      junto à Receita Federal via Serpro (Track B do KYC).
+    - Foto de documento (RG/CNH) + selfie — coletados apenas quando
+      o usuário escolhe a verificação por documento (Track C via
+      Caf). NÃO são armazenados pela Vintage; o provedor (Caf)
+      processa e nos devolve apenas o resultado APPROVED/REJECTED.
+    - Foto de anúncio — processada pelo Google Vision (labels + OCR
+      + SafeSearch moderation). Labels como "pessoa", "rosto", etc.
+      podem ser retornados.
+- Nenhum dado é vendido; marque *"I do not use this data to track"*.
 
 ### 3.4. Version 1.0
 
@@ -187,10 +198,20 @@ npx eas-cli@latest submit --platform ios --latest
 
 Declare os mesmos itens do App Store (ver §3.3). Específico:
 - Location: **No collection** (não usamos GPS).
-- Financial info: PIX keys handled only via Mercado Pago SDK; não são
-  armazenados em texto plano no nosso banco.
-- **Data encrypted in transit**: Yes.
-- **Users can request data deletion**: Yes — via app + suporte.
+- Financial info: PIX keys armazenadas com mascaramento obrigatório
+  (`payout-methods.service.ts`); nunca aparecem em respostas de API
+  nem no ZIP de exportação LGPD. Payouts processados via Mercado Pago.
+- **Personal info → Government ID**: CPF (encrypted at rest) + data
+  de nascimento (usada para validação Receita via Serpro).
+- **Photos and videos**: usuário-gerado (anúncios) + documento de
+  identidade opcional (Track C, processado pelo Caf e NÃO
+  persistido localmente).
+- **Data encrypted in transit**: Yes (TLS 1.2+, HSTS).
+- **Data encrypted at rest**: Yes (S3 AES256, Postgres provider-side).
+- **Users can request data deletion**: Yes — via app
+  (`/conta/deletar-conta`, soft-delete com anonimização +
+  hard-delete em 30d) + exportação prévia opcional via
+  `POST /users/me/export` (LGPD Art. 18).
 
 ### 4.4. Classificação (Content rating)
 

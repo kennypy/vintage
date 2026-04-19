@@ -152,35 +152,127 @@ simultâneas).
    fly launch --name vintage-api --region gru --no-deploy
    ```
 3. **Segredos** — nunca coloque em `fly.toml`:
+   Below is the launch-day set. Source of truth is
+   `apps/api/.env.example` — any var you see there that's not below is
+   optional (feature degrades gracefully).
+
+   **Core runtime + auth**
    ```bash
    fly secrets set \
      NODE_ENV=production \
      JWT_SECRET=$(openssl rand -base64 64) \
      JWT_REFRESH_EXPIRY=7d \
      JWT_EXPIRY=15m \
+     CSRF_SECRET=$(openssl rand -hex 32) \
      DATABASE_URL="postgresql://..." \
      DIRECT_URL="postgresql://..." \
      REDIS_URL="rediss://..." \
-     MEILISEARCH_HOST="https://..." \
-     MEILISEARCH_API_KEY="..." \
-     S3_ENDPOINT="https://..." \
-     S3_BUCKET="vintage-listings" \
-     S3_ACCESS_KEY_ID="..." \
-     S3_SECRET_ACCESS_KEY="..." \
-     S3_PUBLIC_URL="https://cdn.vintage.br" \
-     RESEND_API_KEY="re_..." \
-     EMAIL_FROM="Vintage.br <noreply@vintage.br>" \
-     MERCADOPAGO_ACCESS_TOKEN="APP_USR-..." \
-     MERCADOPAGO_WEBHOOK_SECRET=$(openssl rand -hex 32) \
      CORS_ORIGIN="https://vintage.br,https://www.vintage.br" \
      TOS_VERSION="2026-01-01" \
      ADMIN_SETUP_KEY=$(openssl rand -hex 32) \
+     WEBHOOK_BASE_URL="https://api.vintage.br"
+   ```
+
+   **Search + storage**
+   ```bash
+   fly secrets set \
+     MEILISEARCH_HOST="https://..." \
+     MEILISEARCH_API_KEY="..." \
+     S3_ENDPOINT="https://<account>.r2.cloudflarestorage.com" \
+     S3_REGION="auto" \
+     S3_BUCKET="vintage-listings" \
+     S3_ACCESS_KEY="..." \
+     S3_SECRET_KEY="..."
+   # UploadsService auto-detects R2 from the endpoint hostname and
+   # defaults S3_REGION='auto'. AWS S3 users can omit S3_REGION
+   # (defaults us-east-1) or set their real region explicitly.
+   ```
+
+   **Payments + shipping + NF-e + email**
+   ```bash
+   fly secrets set \
+     MERCADOPAGO_ACCESS_TOKEN="APP_USR-..." \
+     MERCADOPAGO_WEBHOOK_SECRET=$(openssl rand -hex 32) \
+     MERCADOPAGO_PAYOUT_ENABLED="false" \
+     CORREIOS_TOKEN="..." \
+     NFE_API_KEY="..." \
+     RESEND_API_KEY="re_..." \
+     EMAIL_FROM="Vintage.br <noreply@vintage.br>" \
+     SMTP_HOST="smtp.resend.com" SMTP_PORT=465 \
+     SMTP_USER="resend" SMTP_PASS="re_..."
+   ```
+
+   **OAuth + image moderation + SMS 2FA**
+   ```bash
+   fly secrets set \
      GOOGLE_CLIENT_ID="..." \
+     GOOGLE_CLIENT_SECRET="..." \
      APPLE_CLIENT_ID="br.vintage.app" \
      APPLE_TEAM_ID="..." \
      APPLE_KEY_ID="..." \
-     APPLE_PRIVATE_KEY="$(cat AuthKey_XXX.p8)"
+     APPLE_PRIVATE_KEY="$(cat AuthKey_XXX.p8)" \
+     GOOGLE_VISION_API_KEY="..." \
+     TWILIO_ACCOUNT_SID="..." \
+     TWILIO_AUTH_TOKEN="..." \
+     TWILIO_FROM_NUMBER="+55..."
+   # APPLE_TEAM_ID is also consumed by the web host's
+   # /.well-known/apple-app-site-association route — set it there too.
    ```
+
+   **Captcha (Turnstile) — flip CAPTCHA_ENFORCE=true only after the
+   mobile release with captchaToken support hits ≥95% adoption.**
+   ```bash
+   fly secrets set \
+     TURNSTILE_SECRET_KEY="..." \
+     CAPTCHA_ENFORCE="false"
+   ```
+
+   **Analytics (PostHog, EU region)**
+   ```bash
+   fly secrets set \
+     POSTHOG_API_KEY="phc_..." \
+     POSTHOG_HOST="https://eu.i.posthog.com"
+   ```
+
+   **Identity verification — Track B (Serpro) + Track C (Caf).** Both
+   flags default off. Flip only after the respective contract is
+   active and the credentials are provisioned.
+   ```bash
+   fly secrets set \
+     IDENTITY_VERIFICATION_ENABLED="false" \
+     SERPRO_BASE_URL="" \
+     SERPRO_TOKEN_PATH="/token" \
+     SERPRO_VALIDATE_PATH="/datavalid/v3/validate" \
+     SERPRO_CLIENT_ID="" \
+     SERPRO_CLIENT_SECRET="" \
+     IDENTITY_DOCUMENT_ENABLED="false" \
+     CAF_BASE_URL="" \
+     CAF_CREATE_SESSION_PATH="/v1/verifications" \
+     CAF_API_KEY="" \
+     CAF_WEBHOOK_SECRET=""
+   ```
+
+   **Retention + cron tuning (defaults are production-sane)**
+   ```bash
+   # Override only if the DPO's RIPD signoff lands on different values.
+   fly secrets set \
+     RETENTION_LOGIN_EVENT_DAYS="90" \
+     RETENTION_PROCESSED_WEBHOOK_DAYS="30" \
+     RETENTION_LISTING_IMAGE_FLAG_DAYS="365" \
+     RETENTION_FRAUD_FLAG_DAYS="365" \
+     RETENTION_CPF_VERIFICATION_LOG_DAYS="365" \
+     RETENTION_CAF_SESSION_DAYS="365" \
+     ORPHAN_IMAGE_SWEEP_DAYS="30" \
+     STALE_LISTING_DAYS="90" \
+     PAUSED_CLEANUP_DAYS="180" \
+     TRACKING_POLL_LOOKBACK_DAYS="30" \
+     TRACKING_POLL_BATCH_SIZE="200"
+   ```
+
+   For the **web host** (Vercel): see §7 below — the web consumes
+   `APPLE_TEAM_ID`, `IOS_BUNDLE_ID`, `ANDROID_PACKAGE`,
+   `ANDROID_CERT_SHA256` at `/.well-known/*` request time, plus the
+   `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `NEXT_PUBLIC_POSTHOG_*` vars.
 4. Configure *scaling*:
    ```bash
    fly scale count 2 --region gru
@@ -250,29 +342,53 @@ A parte de submissão está detalhada em `STORE_SUBMISSION.md`. Resumo:
 
 ---
 
-## 8c. Breaking change — Wave 3C payout gate
+## 8c. Breaking change — CPF identity verification (Tracks A/B/C)
 
-Starting in Wave 3C, `POST /wallet/payout` requires the caller's CPF to
-be **verified** (not merely linked). Verification is manual: the seller
-uploads a document in `Conta → Verificação`, admin reviews, and flips
-`cpfVerified = true`. Mercado Pago's own KYC would refuse payouts to
-unverified CPFs anyway, so failing earlier is a clearer UX.
+The old `User.cpfVerified` column was renamed to `cpfChecksumValid` and
+a NEW column `cpfIdentityVerified` was added. Payout and NF-e gates now
+check `cpfIdentityVerified` — which only flips true after a Tier-2 KYC
+provider (Serpro Datavalid on `/users/me/verify-identity`, or Caf
+document + liveness via `/users/me/verify-identity-document` + the
+`/webhooks/caf` callback) confirms the CPF at Receita Federal AND the
+name matches.
 
-**Effect at deploy:** any seller with `cpfVerified = false` (including
-every OAuth user who used the launch window to link a CPF but hasn't
-had their doc reviewed) **cannot withdraw** until admin approves.
+**Effect at deploy:** **nobody can withdraw** until they complete
+`/conta/verificacao` and the server flips `cpfIdentityVerified = true`.
+This is deliberate — launching without real KYC was already unsafe.
 
 **Mitigations:**
-- Staff the admin verification queue for 5× the usual throughput for
-  the first week after deploy.
-- The seller-facing error message points them to `Conta → Verificação`.
-- The wallet UI already shows a "CPF não verificado" banner for these
-  accounts (Wave 2D) — no code change needed on the client.
+- Ship the verification screens (web + mobile) in the same release
+  (shipped — `/conta/verificacao` on both platforms).
+- The wallet error path routes the user directly to the verification
+  screen instead of dead-ending on a toast.
+- Track B (Serpro) is cheap (~R$0.06-0.25/check) and handles the
+  straightforward case. Track C (Caf, ~R$5-10/session) only fires when
+  the user clicks "Verificar por documento" after a Track-B
+  NAME_MISMATCH / CPF_SUSPENDED.
+- `IDENTITY_VERIFICATION_ENABLED=false` AND `IDENTITY_DOCUMENT_ENABLED
+  =false` are the defaults — **nobody** can verify until you flip
+  them. Plan the flip alongside the vendor contract go-live date.
+
+**Flip checklist when Serpro is live:**
+1. Set `SERPRO_BASE_URL` / `SERPRO_CLIENT_ID` / `SERPRO_CLIENT_SECRET`.
+2. Confirm `SERPRO_TOKEN_PATH` + `SERPRO_VALIDATE_PATH` against the
+   contract PDF; override the env if divergent.
+3. Flip `IDENTITY_VERIFICATION_ENABLED=true`.
+4. Smoke via staging with a known-good CPF + name + DOB.
+
+**Flip checklist when Caf is live:**
+1. Set `CAF_BASE_URL` / `CAF_API_KEY` / `CAF_WEBHOOK_SECRET`.
+2. Set `WEBHOOK_BASE_URL` to the api's public origin
+   (`https://api.vintage.br`).
+3. Flip `IDENTITY_DOCUMENT_ENABLED=true`.
+4. Smoke: force a Serpro NAME_MISMATCH → click escalation button →
+   confirm Caf session → complete the flow → verify the webhook lands
+   and `cpfIdentityVerified` flips.
 
 **MP Marketplace contract not yet active:** also set
 `MERCADOPAGO_PAYOUT_ENABLED=false` in Fly secrets until the B2B contract
 is live. Wallet debits still succeed, but `PayoutRequest` rows stay
-`PENDING` and finance/ops processes PIX out-of-band via the new admin
+`PENDING` and finance/ops processes PIX out-of-band via the admin
 endpoint `PATCH /wallet/admin/payouts/:id/status`. Once the contract is
 active, flip the flag and the same code path calls MP directly.
 
