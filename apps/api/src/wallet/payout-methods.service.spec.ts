@@ -39,6 +39,10 @@ describe('PayoutMethodsService', () => {
       providers: [
         PayoutMethodsService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: (await import('../audit-log/audit-log.service')).AuditLogService,
+          useValue: { record: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

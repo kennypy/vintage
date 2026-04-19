@@ -21,6 +21,7 @@ const mockJwtService = {
 const mockPrisma = {
   conversation: {
     findUnique: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
   user: {
     findUnique: jest.fn().mockResolvedValue({
@@ -84,12 +85,24 @@ describe('MessagesGateway', () => {
         disconnect: jest.fn(),
       } as unknown as Socket;
 
+      // Simulate one conversation partner so the presence-emit has
+      // someone to notify.
+      mockPrisma.conversation.findMany = jest.fn().mockResolvedValue([
+        { participant1Id: 'user-1', participant2Id: 'partner-A' },
+      ]);
+
       await gateway.handleConnection(client);
 
       expect(mockJwtService.verify).toHaveBeenCalledWith('valid-jwt');
       expect(client.join).toHaveBeenCalledWith('user:user-1');
       expect(client.disconnect).not.toHaveBeenCalled();
-      expect(gateway.server.emit).toHaveBeenCalledWith('userOnline', { userId: 'user-1' });
+      // Presence no longer fans out globally — it's emitted ONLY to
+      // rooms of conversation partners.
+      expect(gateway.server.to).toHaveBeenCalledWith('user:partner-A');
+      expect((gateway.server.to as jest.Mock).mock.results[0].value.emit).toHaveBeenCalledWith(
+        'userOnline',
+        { userId: 'user-1' },
+      );
     });
 
     it('should disconnect client without JWT', async () => {
@@ -140,6 +153,10 @@ describe('MessagesGateway', () => {
         disconnect: jest.fn(),
       } as unknown as Socket;
 
+      mockPrisma.conversation.findMany = jest.fn().mockResolvedValue([
+        { participant1Id: 'user-1', participant2Id: 'partner-B' },
+      ]);
+
       await gateway.handleConnection(client);
       jest.clearAllMocks();
 
@@ -149,9 +166,21 @@ describe('MessagesGateway', () => {
         emit: jest.fn(),
       } as unknown as Server;
 
-      gateway.handleDisconnect(client);
+      // Need to re-seed conversation.findMany too — clearAllMocks
+      // wiped it.
+      mockPrisma.conversation.findMany = jest.fn().mockResolvedValue([
+        { participant1Id: 'user-1', participant2Id: 'partner-B' },
+      ]);
 
-      expect(gateway.server.emit).toHaveBeenCalledWith('userOffline', { userId: 'user-1' });
+      await gateway.handleDisconnect(client);
+
+      // Presence fans out to partners only — `user:partner-B`, not
+      // the whole server.
+      expect(gateway.server.to).toHaveBeenCalledWith('user:partner-B');
+      expect((gateway.server.to as jest.Mock).mock.results[0].value.emit).toHaveBeenCalledWith(
+        'userOffline',
+        { userId: 'user-1' },
+      );
     });
   });
 
@@ -303,7 +332,7 @@ describe('MessagesGateway', () => {
       expect(mockMessagesService.sendMessage).not.toHaveBeenCalled();
     });
 
-    it('should sanitize HTML from message body', async () => {
+    it('should HTML-escape the message body (defence in depth vs future innerHTML renders)', async () => {
       mockJwtService.verify.mockReturnValue({ sub: 'user-1', ver: 0 });
       mockMessagesService.sendMessage.mockResolvedValue({ id: 'msg-1' });
 
@@ -319,13 +348,16 @@ describe('MessagesGateway', () => {
 
       await gateway.handleSendMessage(client, {
         conversationId: 'conv-1',
-        body: '<script>alert("xss")</script>Hello',
+        body: '<script>alert("xss")</script>Hello & goodbye',
       });
 
+      // Every HTML-significant character escaped. Old naive strip
+      // (which just removed `<…>` spans) missed malformed tags and
+      // `javascript:` URLs; full escape removes the class entirely.
       expect(mockMessagesService.sendMessage).toHaveBeenCalledWith(
         'conv-1',
         'user-1',
-        'alert("xss")Hello',
+        '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;Hello &amp; goodbye',
       );
     });
 

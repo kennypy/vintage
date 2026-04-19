@@ -16,6 +16,7 @@ import {
   ApiQuery,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -64,6 +65,12 @@ export class DisputesController {
 
   @Post(':id/resolve')
   @UseGuards(AdminGuard)
+  // Per-admin throttle on a money-moving action. HashThrottlerGuard
+  // keys on user.id once authenticated, so this is a per-ADMIN cap
+  // and doesn't throttle across the admin team. 30 / hour is far
+  // above legitimate triage velocity; a compromised admin session
+  // scripting refunds gets stopped well before serious damage.
+  @Throttle({ default: { limit: 30, ttl: 60 * 60 * 1000 } })
   @ApiOperation({ summary: 'Resolver disputa (administrador)' })
   @ApiResponse({ status: 200, description: 'Disputa resolvida' })
   resolve(

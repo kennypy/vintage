@@ -119,6 +119,11 @@ export class WalletController {
 
   @Patch('admin/payouts/:id/status')
   @UseGuards(AdminGuard)
+  // Per-admin cap for the same reason as /disputes/:id/resolve —
+  // this endpoint moves money and an admin legitimately processes
+  // tens of payouts a day, not hundreds an hour. 60 / hour is the
+  // cap for a scripted abuse path.
+  @Throttle({ default: { limit: 60, ttl: 60 * 60 * 1000 } })
   @ApiOperation({
     summary: 'Admin: marcar saque como COMPLETED ou FAILED após processamento manual',
     description:

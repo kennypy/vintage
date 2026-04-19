@@ -32,6 +32,7 @@ export class RetentionCronService {
   private readonly fraudFlagDays: number;
   private readonly cpfVerificationLogDays: number;
   private readonly cafSessionDays: number;
+  private readonly refreshTokenGraceDays: number;
   private readonly orphanImageDays: number;
 
   private readonly s3: S3Client | null;
@@ -52,6 +53,10 @@ export class RetentionCronService {
       365,
     );
     this.cafSessionDays = this.readDays('RETENTION_CAF_SESSION_DAYS', 365);
+    this.refreshTokenGraceDays = this.readDays(
+      'RETENTION_REFRESH_TOKEN_GRACE_DAYS',
+      7,
+    );
     this.orphanImageDays = this.readDays('ORPHAN_IMAGE_SWEEP_DAYS', 30);
 
     // S3 client mirrors the one in UploadsService — duplicated
@@ -157,6 +162,36 @@ export class RetentionCronService {
           where: { createdAt: { lt: cutoff }, status: { not: 'PENDING' } },
         }),
     );
+
+    // RefreshToken — purge rows past expiresAt + grace (can't be
+    // redeemed anyway since refreshToken() checks expiresAt). Also
+    // purge revoked rows past the same grace — the forensic value
+    // of a revoked row drops off fast once tokenVersion has
+    // advanced. The grace exists so a bug-triage window survives
+    // the sweep.
+    const grace = this.refreshTokenGraceDays;
+    const now = new Date();
+    const graceCutoff = new Date(Date.now() - grace * 24 * 60 * 60 * 1000);
+    try {
+      const result = await this.prisma.refreshToken.deleteMany({
+        where: {
+          OR: [
+            { expiresAt: { lt: graceCutoff } },
+            { revokedAt: { lt: graceCutoff, not: null } },
+          ],
+        },
+      });
+      if (result.count > 0) {
+        this.logger.log(
+          `retention: purged ${result.count} RefreshToken rows past expiry/revocation (grace ${grace}d)`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `retention: RefreshToken purge failed: ${String(err).slice(0, 200)}`,
+      );
+    }
+    void now; // reserved for future per-window accounting
   }
 
   /**
