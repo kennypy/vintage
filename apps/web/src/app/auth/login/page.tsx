@@ -4,11 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiPost, setAuthToken } from '@/lib/api';
+import { TurnstileWidget } from '@/components/TurnstileWidget';
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -21,7 +23,14 @@ export default function LoginPage() {
       const response = await apiPost<
         | { accessToken: string; refreshToken: string }
         | { requiresTwoFa: true; tempToken: string; method: 'TOTP' | 'SMS'; phoneHint?: string }
-      >('/auth/login', { email, password });
+      >('/auth/login', {
+        email,
+        password,
+        // captchaToken is ignored by the backend CaptchaGuard while
+        // CAPTCHA_ENFORCE=false. We ship the widget now so flipping the
+        // flag post-launch doesn't require a coordinated web release.
+        captchaToken,
+      });
 
       if ('requiresTwoFa' in response) {
         // 2FA challenge: route to the verification page with the tempToken.
@@ -80,6 +89,11 @@ export default function LoginPage() {
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
           </div>
+
+          <TurnstileWidget
+            onToken={setCaptchaToken}
+            onExpired={() => setCaptchaToken(null)}
+          />
 
           <button
             type="submit"

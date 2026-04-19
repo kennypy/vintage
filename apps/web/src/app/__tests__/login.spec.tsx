@@ -77,7 +77,14 @@ describe('LoginPage', () => {
         ([url]: [string]) => url.includes('/auth/login') && !url.includes('csrf'),
       );
       expect(loginCall).toBeDefined();
-      expect(JSON.parse(loginCall[1].body)).toEqual({ email: 'user@test.com', password: 'password123' });
+      // captchaToken is null until the Turnstile widget solves (it never
+      // does under jsdom). The backend CaptchaGuard no-ops when
+      // CAPTCHA_ENFORCE=false, so null is the correct wire value here.
+      expect(JSON.parse(loginCall[1].body)).toEqual({
+        email: 'user@test.com',
+        password: 'password123',
+        captchaToken: null,
+      });
     });
   });
 

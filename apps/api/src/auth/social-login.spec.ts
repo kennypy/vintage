@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -103,7 +104,11 @@ describe('AuthService - Social Login', () => {
       providerId: 'google-123',
     };
 
-    it('should return tokens when user with email already exists', async () => {
+    it('returns tokens when the user already has THIS provider linked (returning user)', async () => {
+      // Post-hardening contract: socialLogin only accepts tokens when the
+      // existing user has already linked this provider AND this providerId.
+      // That rules out silent OAuth account takeover on accounts that were
+      // originally registered with a password.
       const existingUser = {
         id: 'user-1',
         email: 'maria@gmail.com',
@@ -135,6 +140,7 @@ describe('AuthService - Social Login', () => {
         user: expect.objectContaining({ id: 'user-1' }),
       });
       expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
 
     it('should create new user when email does not exist', async () => {
@@ -211,7 +217,12 @@ describe('AuthService - Social Login', () => {
       });
     });
 
-    it('should update social provider info for existing user without social provider', async () => {
+    it('refuses to silently link a social provider onto an existing password account', async () => {
+      // This is the headline security fix: if someone registered
+      // maria@gmail.com with a password, a later "Sign in with Google"
+      // using the same email must NOT be accepted as if it were the same
+      // user. The link flow is now explicit and password-gated via
+      // /auth/link-social — socialLogin refuses the merge with 409.
       const existingUser = {
         id: 'user-1',
         email: 'maria@gmail.com',
@@ -226,20 +237,120 @@ describe('AuthService - Social Login', () => {
         acceptedTosVersion: '1.0.0',
       };
       mockPrisma.user.findUnique.mockResolvedValue(existingUser);
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
 
-      await service.socialLogin('google', googleProfile);
+      await expect(
+        service.socialLogin('google', googleProfile),
+      ).rejects.toThrow(ConflictException);
 
+      // Critical: no update should happen, no tokens should be minted.
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the existing user has a DIFFERENT provider already linked', async () => {
+      // Pin that an Apple user can't be walked into by someone presenting
+      // a Google token for the same email. Same error class, same
+      // defensive posture.
+      const existingUser = {
+        id: 'user-1',
+        email: 'maria@gmail.com',
+        socialProvider: 'apple',
+        socialProviderId: 'apple-xyz',
+        cpfChecksumValid: true,
+        cpfIdentityVerified: false,
+        avatarUrl: null,
+        isBanned: false,
+        deletedAt: null,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(existingUser);
+
+      await expect(
+        service.socialLogin('google', googleProfile),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(mockJwtService.sign).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('linkSocialProvider (authenticated link flow)', () => {
+    const googleProfile: SocialProfile = {
+      email: 'maria@gmail.com',
+      name: 'Maria Silva',
+      avatarUrl: 'https://example.com/a.jpg',
+      providerId: 'google-123',
+    };
+
+    it('links when password matches and no provider yet', async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'maria@gmail.com',
+        passwordHash: 'hashed',
+        socialProvider: null,
+        socialProviderId: null,
+        avatarUrl: null,
+        deletedAt: null,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+      mockPrisma.user.update.mockResolvedValueOnce({});
+
+      const result = await service.linkSocialProvider(
+        'user-1',
+        'correct-password',
+        'google',
+        googleProfile,
+      );
+
+      expect(result).toEqual({ success: true, provider: 'google' });
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
         data: {
           socialProvider: 'google',
           socialProviderId: 'google-123',
-          avatarUrl: 'https://lh3.googleusercontent.com/photo.jpg',
+          avatarUrl: 'https://example.com/a.jpg',
         },
       });
+    });
+
+    it('refuses when password is wrong', async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'maria@gmail.com',
+        passwordHash: 'hashed',
+        socialProvider: null,
+        socialProviderId: null,
+        avatarUrl: null,
+        deletedAt: null,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
+
+      await expect(
+        service.linkSocialProvider('user-1', 'wrong', 'google', googleProfile),
+      ).rejects.toThrow();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the social email does not match the account email', async () => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'maria@gmail.com',
+        passwordHash: 'hashed',
+        socialProvider: null,
+        socialProviderId: null,
+        avatarUrl: null,
+        deletedAt: null,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+
+      await expect(
+        service.linkSocialProvider('user-1', 'correct', 'google', {
+          ...googleProfile,
+          email: 'attacker@gmail.com',
+        }),
+      ).rejects.toThrow();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 });

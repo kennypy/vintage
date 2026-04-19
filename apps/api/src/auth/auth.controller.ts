@@ -12,6 +12,7 @@ import {
   ConfirmLoginTwoFaDto,
   ResendLoginSmsDto,
   SetupSmsDto,
+  LinkSocialDto,
 } from './dto/two-fa.dto';
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
@@ -27,6 +28,14 @@ const TWOFA_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
 
 /** Password reset endpoints: 5 requests per 15 minutes to prevent enumeration spam. */
 const PASSWORD_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
+
+/**
+ * Login endpoint: tight per-tracker (per-IP or per-API-key) throttle to cap
+ * credential-stuffing from a single origin. Complements the per-email
+ * progressive lockout inside AuthService.login, which survives attackers
+ * rotating IPs.
+ */
+const LOGIN_THROTTLE = { default: { limit: 10, ttl: 15 * 60 * 1000 } };
 
 @ApiTags('auth')
 @Controller('auth')
@@ -67,14 +76,24 @@ export class AuthController {
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)' })
+  @Throttle(LOGIN_THROTTLE)
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)',
+    description:
+      'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. Global 60/min throttle plus 10/15min on this endpoint plus the per-email progressive lockout in the service layer close the credential-stuffing window.',
+  })
   login(
     @Body() dto: LoginDto,
-    @Req() req: { ip?: string; headers: Record<string, string | undefined> },
+    @Req() req: { ip?: string },
     @Headers('x-device-id') rawDeviceId?: string,
     @Headers('x-platform') platform?: string,
   ) {
-    const ip = (req.headers['x-forwarded-for'] as string | undefined) ?? req.ip ?? '';
+    // main.ts sets Express `trust proxy` to the configured hop count, so
+    // req.ip is the real client IP. Never read X-Forwarded-For directly —
+    // attackers forge it, which used to poison the login audit trail and
+    // let attackers hide the origin of a new-device alert.
+    const ip = req.ip ?? '';
     const ipHash = crypto.createHash('sha256').update(ip).digest('hex');
     const deviceIdHash = rawDeviceId
       ? crypto.createHash('sha256').update(rawDeviceId).digest('hex')
@@ -220,6 +239,34 @@ export class AuthController {
     }
     const profile = await this.authService.verifyGoogleIdToken(body.idToken);
     return this.authService.socialLogin('google', profile);
+  }
+
+  @Post('link-social')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Vincular login social (Google/Apple) à conta atual',
+    description:
+      'Required second step for users who registered with password and want to add a social login. Replaces the previous silent-merge behaviour of /auth/google/token and /auth/apple/callback, which let anyone controlling the email at Google/Apple take over an existing password account.',
+  })
+  async linkSocial(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: LinkSocialDto,
+  ) {
+    // Verify the social identity token inside the controller so the service
+    // only receives an already-vouched profile — same pattern as
+    // googleTokenAuth + appleCallback above.
+    const profile =
+      dto.provider === 'google'
+        ? await this.authService.verifyGoogleIdToken(dto.idToken)
+        : await this.appleStrategy.verifyIdentityToken(dto.idToken);
+    return this.authService.linkSocialProvider(
+      user.id,
+      dto.password,
+      dto.provider,
+      profile,
+    );
   }
 
   @Post('forgot-password')

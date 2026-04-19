@@ -1,10 +1,16 @@
-import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MinLength, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
   @ApiProperty({ example: 'maria@example.com' })
   @IsEmail({}, { message: 'Email inválido' })
   email!: string;
+
+  // Cloudflare Turnstile token — see LoginDto for the ValidationPipe note.
+  @ApiProperty({ description: 'Cloudflare Turnstile token', required: false })
+  @IsOptional()
+  @IsString()
+  captchaToken?: string;
 }
 
 export class ResetPasswordDto {

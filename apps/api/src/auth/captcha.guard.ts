@@ -32,9 +32,12 @@ export class CaptchaGuard implements CanActivate {
     >();
     const token = req.body?.captchaToken as string | undefined;
 
-    const remoteIp =
-      (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ??
-      req.ip;
+    // Rely on Express' resolved req.ip — main.ts sets `trust proxy` to a
+    // configurable hop count so this is the real client IP and not the
+    // last proxy. Reading X-Forwarded-For directly would let an attacker
+    // forge the remoteip field sent to Turnstile and poison its risk
+    // model for other users.
+    const remoteIp = req.ip;
 
     const ok = await this.captcha.verify(token, remoteIp);
     if (!ok) {

@@ -42,11 +42,16 @@ export interface RegisterResponse {
 export async function login(
   email: string,
   password: string,
+  captchaToken?: string | null,
 ): Promise<LoginResponse | TwoFaChallenge> {
   const data = await apiFetch<LoginResponse | TwoFaChallenge>('/auth/login', {
     method: 'POST',
     authenticated: false,
-    body: JSON.stringify({ email, password }),
+    // captchaToken is ignored by the backend CaptchaGuard until
+    // CAPTCHA_ENFORCE=true. Passing null keeps the wire shape stable
+    // across the rollout so we don't have to cut a mobile release the
+    // moment the flag flips.
+    body: JSON.stringify({ email, password, captchaToken: captchaToken ?? null }),
   });
 
   if ('requiresTwoFa' in data) {
@@ -285,4 +290,28 @@ export async function signInWithApple(identityToken: string, name?: string): Pro
   });
   await setTokens(data.accessToken, data.refreshToken);
   return data;
+}
+
+/**
+ * Attach a Google/Apple identity to an already-signed-in Vintage account.
+ * Required when /auth/google/token or /auth/apple/callback returned 409
+ * `SOCIAL_PROVIDER_LINK_REQUIRED` — i.e. the email already has an account
+ * the user must first unlock with their password.
+ *
+ * Flow: user signs in with password → opens Settings → taps "Link Google"
+ * → OAuth returns idToken → call this → server verifies the idToken AND
+ * the password before persisting the link.
+ */
+export async function linkSocialProvider(
+  provider: 'google' | 'apple',
+  idToken: string,
+  password: string,
+): Promise<{ success: boolean; provider?: string; alreadyLinked?: boolean }> {
+  return apiFetch<{ success: boolean; provider?: string; alreadyLinked?: boolean }>(
+    '/auth/link-social',
+    {
+      method: 'POST',
+      body: JSON.stringify({ provider, idToken, password }),
+    },
+  );
 }

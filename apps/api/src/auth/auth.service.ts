@@ -35,6 +35,33 @@ const SMS_CODE_TTL_SECONDS = 5 * 60; // 5 min
 const SMS_RESEND_COOLDOWN_SECONDS = 30; // 30 s between sends to same user
 const SMS_MAX_SENDS_PER_HOUR = 5; // hard ceiling to control cost + abuse
 
+/**
+ * Per-email login brute-force lockout. Kicks in AFTER the global per-IP rate
+ * limit and captcha, so an attacker rotating IPs (credential stuffing at
+ * scale) still gets stopped cold once they've guessed wrong N times on one
+ * account. Counter TTL is rolling: each failure refreshes the window.
+ *
+ * Self-DoS risk: a troll who knows a victim's email can lock them out for
+ * 30 min. Acceptable because the user can bypass the lock via password
+ * reset (which clears the counter) — documented in the UX copy.
+ */
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_LOCK_TTL_SECONDS = 30 * 60;
+const LOGIN_ATTEMPTS_TTL_SECONDS = 60 * 60;
+
+/**
+ * Pre-computed bcrypt hash used to run a comparison even on unknown-email
+ * logins. Without this, response time leaks whether the email exists
+ * (unknown email → no bcrypt, fast; known email → bcrypt, slow). The cost
+ * factor MUST match the register path (12) so both paths take the same
+ * wall time.
+ */
+const DUMMY_BCRYPT_HASH =
+  '$2b$12$CwTycUXWue0Thq9StjUM0u4vB8nPDC2b2M6iPOFSZa.KJSfIZbyha';
+
+/** Hard ceiling on external OAuth verification calls (Google tokeninfo). */
+const GOOGLE_TOKENINFO_TIMEOUT_MS = 3000;
+
 export interface SocialProfile {
   email: string;
   name: string;
@@ -180,28 +207,84 @@ export class AuthService {
     return { success: true, tosVersion: version };
   }
 
+  // ── Per-email login brute-force helpers ──────────────────────────────
+  private loginEmailHash(email: string): string {
+    // Trim + lowercase first so casing quirks don't bifurcate the counter.
+    // Hash-truncate to 16 hex chars — collision risk is negligible at our
+    // scale and keeps the Redis key short.
+    return crypto
+      .createHash('sha256')
+      .update(email.trim().toLowerCase())
+      .digest('hex')
+      .slice(0, 16);
+  }
+  private loginAttemptsKey(email: string): string {
+    return `auth:login:attempts:${this.loginEmailHash(email)}`;
+  }
+  private loginLockKey(email: string): string {
+    return `auth:login:lock:${this.loginEmailHash(email)}`;
+  }
+  private async assertLoginNotLocked(email: string): Promise<void> {
+    const locked = await this.redis.get(this.loginLockKey(email));
+    if (locked) {
+      throw new ForbiddenException(
+        'Conta bloqueada temporariamente por tentativas excessivas. Aguarde 30 minutos ou use "Esqueci minha senha" para redefini-la.',
+      );
+    }
+  }
+  private async recordLoginFailure(email: string): Promise<void> {
+    const count = await this.redis.incrWithTtl(
+      this.loginAttemptsKey(email),
+      LOGIN_ATTEMPTS_TTL_SECONDS,
+    );
+    if (count >= LOGIN_MAX_ATTEMPTS) {
+      await this.redis.setNx(this.loginLockKey(email), '1', LOGIN_LOCK_TTL_SECONDS);
+    }
+  }
+  private async resetLoginAttempts(email: string): Promise<void> {
+    await this.redis.del(this.loginAttemptsKey(email));
+    await this.redis.del(this.loginLockKey(email));
+  }
+
   async login(dto: LoginDto, ipHash?: string, deviceIdHash?: string, platform?: string) {
+    // Lock check runs BEFORE we look up the user so an attacker can't use
+    // the lookup existence side-channel (see the dummy-hash comparison below).
+    await this.assertLoginNotLocked(dto.email);
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 
-    if (!user) {
-      throw new UnauthorizedException('Email ou senha inválidos');
-    }
+    // ALWAYS run bcrypt — even on unknown emails — so response time doesn't
+    // leak whether the email is registered. The dummy hash has the same
+    // cost factor as real hashes (12) to keep the timing constant.
+    const hashToCheck = user ? user.passwordHash : DUMMY_BCRYPT_HASH;
+    const valid = await bcrypt.compare(dto.password, hashToCheck);
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) {
-      // Log failed attempt for anomaly detection (fire-and-forget).
-      // Use async IIFE + try/catch to guard against both synchronous errors
-      // (e.g. loginEvent undefined when Prisma client is stale) and async ones.
-      if (ipHash) {
-        (async () => {
-          try {
-            await this.prisma.loginEvent.create({
-              data: { userId: user.id, ipHash, deviceIdHash: deviceIdHash ?? null, platform: platform ?? null, success: false },
-            });
-          } catch { /* never let anomaly logging break the auth response */ }
-        })();
+    if (!user || !valid) {
+      // Only count failures against a real account — otherwise an attacker
+      // could DOS arbitrary strangers by hammering invalid emails.
+      if (user) {
+        await this.recordLoginFailure(dto.email);
+
+        // Log failed attempt for anomaly detection (fire-and-forget).
+        if (ipHash) {
+          (async () => {
+            try {
+              await this.prisma.loginEvent.create({
+                data: {
+                  userId: user.id,
+                  ipHash,
+                  deviceIdHash: deviceIdHash ?? null,
+                  platform: platform ?? null,
+                  success: false,
+                },
+              });
+            } catch {
+              /* never let anomaly logging break the auth response */
+            }
+          })();
+        }
       }
       throw new UnauthorizedException('Email ou senha inválidos');
     }
@@ -213,6 +296,10 @@ export class AuthService {
     if (user.deletedAt) {
       throw new UnauthorizedException('Esta conta foi excluída.');
     }
+
+    // Successful password match — clear the per-email failure counter so
+    // the next legitimate login isn't still riding a stale count.
+    await this.resetLoginAttempts(dto.email);
 
     // Check ToS / Privacy current version acceptance
     const currentTosVersion = this.getCurrentTosVersion();
@@ -770,15 +857,25 @@ export class AuthService {
         throw new UnauthorizedException('Esta conta foi excluída.');
       }
 
-      // Update social provider info if not already set
-      if (!existingUser.socialProvider) {
-        await this.prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            socialProvider: provider,
-            socialProviderId: profile.providerId,
-            avatarUrl: existingUser.avatarUrl ?? profile.avatarUrl ?? null,
-          },
+      // OAuth account-takeover protection: only accept the token when the
+      // existing user has ALREADY linked this provider with this specific
+      // provider ID. Before, we silently wrote the provider fields on
+      // first OAuth hit — meaning anyone who later controlled the email
+      // address at Google/Apple could walk into an existing password
+      // account just by clicking "Sign in with <provider>". The link flow
+      // is now an authenticated, password-gated action (linkSocialProvider
+      // below + POST /auth/link-social).
+      const providerMatches =
+        existingUser.socialProvider === provider &&
+        existingUser.socialProviderId === profile.providerId;
+      if (!providerMatches) {
+        throw new ConflictException({
+          code: 'SOCIAL_PROVIDER_LINK_REQUIRED',
+          message:
+            'Este email já possui uma conta. Entre com sua senha e vincule seu login social em Configurações antes de usar este método.',
+          // Hint which sign-in path the user should follow. The client
+          // gets `password` or whichever provider was already linked.
+          registeredWith: existingUser.socialProvider ?? 'password',
         });
       }
 
@@ -837,16 +934,99 @@ export class AuthService {
     return { ...tokens, cpfVerified: false };
   }
 
+  /**
+   * Authenticated flow that lets a signed-in user link a social provider
+   * to their existing account. Replaces the previous silent-merge behaviour
+   * of socialLogin. Requires the account password so a stolen session can't
+   * attach an attacker's Google/Apple account to the victim's login.
+   *
+   * The social profile is verified by the caller (controller calls
+   * verifyGoogleIdToken / appleStrategy.verifyIdentityToken first) — we
+   * trust it here, same as socialLogin does.
+   */
+  async linkSocialProvider(
+    userId: string,
+    password: string,
+    provider: 'google' | 'apple',
+    profile: SocialProfile,
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Senha incorreta');
+    }
+
+    // The linking flow only makes sense when the social identity the user
+    // just verified at the OAuth provider matches the email on their
+    // Vintage account. Otherwise we'd be linking "bob's Google" to
+    // "alice@vintage.br" — an obvious identity mismatch.
+    if (user.email.toLowerCase() !== profile.email.toLowerCase()) {
+      throw new BadRequestException(
+        'O email da sua conta não corresponde à conta social escolhida.',
+      );
+    }
+
+    // Idempotent: if the same provider+providerId is already linked, this
+    // is a no-op so the UI can retry without tripping.
+    if (
+      user.socialProvider === provider &&
+      user.socialProviderId === profile.providerId
+    ) {
+      return { success: true, alreadyLinked: true };
+    }
+
+    // Different provider already linked — refuse rather than silently
+    // overwrite. User must explicitly unlink the current one first (not
+    // exposed yet; add when the feature ships).
+    if (user.socialProvider && user.socialProvider !== provider) {
+      throw new ConflictException(
+        'Sua conta já tem outro login social vinculado. Desvincule-o antes de vincular um novo.',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        socialProvider: provider,
+        socialProviderId: profile.providerId,
+        avatarUrl: user.avatarUrl ?? profile.avatarUrl ?? null,
+      },
+    });
+    return { success: true, provider };
+  }
+
   async verifyGoogleIdToken(idToken: string): Promise<SocialProfile> {
     const clientId = this.config.get<string>('GOOGLE_CLIENT_ID', '');
+
+    // Refuse to verify if no client ID is configured. Previously a deployment
+    // that forgot GOOGLE_CLIENT_ID would silently SKIP the `aud` check and
+    // accept tokens for any app on any project — same class of bug the Apple
+    // strategy had before it grew JWKS verification.
+    if (!clientId) {
+      this.logger.error(
+        'GOOGLE_CLIENT_ID is not set — refusing to verify Google ID tokens.',
+      );
+      throw new UnauthorizedException('Google Sign In não está configurado.');
+    }
+
+    // Bound the outbound call — without a timeout, a slow Google POP can
+    // tie up the login handler indefinitely and drain our event-loop slots.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GOOGLE_TOKENINFO_TIMEOUT_MS);
 
     let res: Response;
     try {
       res = await fetch(
         `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+        { signal: controller.signal },
       );
     } catch {
       throw new UnauthorizedException('Falha ao verificar token do Google');
+    } finally {
+      clearTimeout(timer);
     }
 
     if (!res.ok) {
@@ -856,13 +1036,26 @@ export class AuthService {
     const data = await res.json() as {
       aud?: string;
       email?: string;
+      email_verified?: string | boolean;
       name?: string;
       picture?: string;
       sub?: string;
     };
 
-    if (clientId && data.aud !== clientId) {
+    if (data.aud !== clientId) {
       throw new UnauthorizedException('Token do Google inválido para este app');
+    }
+
+    // Google's tokeninfo returns email_verified="true" (string) when the
+    // Google account owner has verified the email. Refuse unverified
+    // emails — an attacker can create a Google account with any unverified
+    // address and use it to claim a Vintage account.
+    const emailVerified =
+      data.email_verified === true || data.email_verified === 'true';
+    if (!emailVerified) {
+      throw new UnauthorizedException(
+        'O email da conta Google não está verificado.',
+      );
     }
 
     if (!data.email || !data.sub) {
