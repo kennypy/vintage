@@ -44,6 +44,7 @@ import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { FraudModule } from './fraud/fraud.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { IdentityModule } from './identity/identity.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     AdminAnalyticsModule,
     FraudModule,
     AnalyticsModule,
+    IdentityModule,
   ],
   providers: [
     {

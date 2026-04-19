@@ -30,6 +30,7 @@ export class RetentionCronService {
   private readonly processedWebhookDays: number;
   private readonly listingImageFlagDays: number;
   private readonly fraudFlagDays: number;
+  private readonly cpfVerificationLogDays: number;
   private readonly orphanImageDays: number;
 
   private readonly s3: S3Client | null;
@@ -45,6 +46,10 @@ export class RetentionCronService {
     this.processedWebhookDays = this.readDays('RETENTION_PROCESSED_WEBHOOK_DAYS', 30);
     this.listingImageFlagDays = this.readDays('RETENTION_LISTING_IMAGE_FLAG_DAYS', 365);
     this.fraudFlagDays = this.readDays('RETENTION_FRAUD_FLAG_DAYS', 365);
+    this.cpfVerificationLogDays = this.readDays(
+      'RETENTION_CPF_VERIFICATION_LOG_DAYS',
+      365,
+    );
     this.orphanImageDays = this.readDays('ORPHAN_IMAGE_SWEEP_DAYS', 30);
 
     // S3 client mirrors the one in UploadsService — duplicated
@@ -125,6 +130,17 @@ export class RetentionCronService {
       (cutoff) =>
         this.prisma.fraudFlag.deleteMany({
           where: { createdAt: { lt: cutoff }, status: { not: 'PENDING' } },
+        }),
+    );
+
+    // CpfVerificationLog — full purge (no PENDING concept here; every
+    // row is a completed attempt with a terminal result code).
+    await this.purgeTable(
+      'CpfVerificationLog',
+      this.cpfVerificationLogDays,
+      (cutoff) =>
+        this.prisma.cpfVerificationLog.deleteMany({
+          where: { attemptedAt: { lt: cutoff } },
         }),
     );
   }
