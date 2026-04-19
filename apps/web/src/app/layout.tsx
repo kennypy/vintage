@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { PostHogProvider } from '@/components/PostHogProvider';
 import './globals.css';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://vintage.br';
@@ -38,9 +40,16 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="pt-BR">
       <body className="flex flex-col min-h-screen">
-        <Header />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        {/* Suspense boundary: PostHogProvider uses useSearchParams which
+            Next 14 App Router wants wrapped to avoid a full-tree client
+            render on pages that don't use it. */}
+        <Suspense fallback={null}>
+          <PostHogProvider>
+            <Header />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </PostHogProvider>
+        </Suspense>
       </body>
     </html>
   );

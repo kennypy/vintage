@@ -13,6 +13,7 @@ import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { PostHogBootstrap } from '../src/components/PostHogBootstrap';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
@@ -93,6 +94,7 @@ function AppShell() {
 
   return (
     <NavThemeProvider value={navTheme}>
+      <PostHogBootstrap />
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
