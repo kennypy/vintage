@@ -133,7 +133,13 @@ describe('signUp', () => {
       await result.current.signUp('Pedro', 'pedro@test.com', '456', 'pass');
     });
 
-    expect(mockRegister).toHaveBeenCalledWith('Pedro', 'pedro@test.com', '456', 'pass');
+    expect(mockRegister).toHaveBeenCalledWith(
+      'Pedro',
+      'pedro@test.com',
+      '456',
+      'pass',
+      expect.objectContaining({ acceptedTos: true, captchaToken: null }),
+    );
     expect(result.current.user).toEqual(registerResponse.user);
   });
 });

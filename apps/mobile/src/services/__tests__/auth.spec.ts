@@ -57,6 +57,7 @@ describe('register', () => {
         password: 'pass456',
         acceptedTos: true,
         tosVersion: '1.0.0',
+        captchaToken: null,
       }),
     });
     expect(mockSetTokens).toHaveBeenCalledWith('at-789', 'rt-012');

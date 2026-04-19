@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { forgotPassword } from '../../src/services/auth';
+import { TurnstileWebView } from '../../src/components/TurnstileWebView';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     const trimmed = email.trim().toLowerCase();
@@ -23,7 +25,7 @@ export default function ForgotPasswordScreen() {
     }
     setLoading(true);
     try {
-      await forgotPassword(trimmed);
+      await forgotPassword(trimmed, captchaToken);
       setSent(true);
     } catch (_err) {
       // Server always returns neutral response; show success UI anyway
@@ -64,6 +66,10 @@ export default function ForgotPasswordScreen() {
                 accessibilityLabel="Email"
               />
             </View>
+            <TurnstileWebView
+              onToken={setCaptchaToken}
+              onExpired={() => setCaptchaToken(null)}
+            />
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleSubmit}
