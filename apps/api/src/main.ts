@@ -28,6 +28,24 @@ async function bootstrap() {
 
   const nodeEnv = config.get<string>('NODE_ENV', 'development');
 
+  // Behind a load balancer / CDN / reverse proxy (Fly.io, Cloudflare, nginx),
+  // req.ip resolves to the last proxy in the chain unless Express is told how
+  // many hops to trust. Without this, every request looks like it came from
+  // the proxy's IP → the per-IP rate-limit bucket collides across users and
+  // a single attacker exhausts the limit for everyone behind the proxy (DoS).
+  // Setting the hop count too high is equally bad: it lets an attacker spoof
+  // any IP via X-Forwarded-For. The env var makes the trusted depth explicit
+  // per deployment (Fly.io = 1, Fly behind Cloudflare = 2, local dev = 0).
+  const trustedProxyHops = Number(
+    config.get<string>('TRUSTED_PROXY_HOPS', nodeEnv === 'production' ? '1' : '0'),
+  );
+  if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0) {
+    throw new Error(
+      `TRUSTED_PROXY_HOPS must be a non-negative integer (got ${trustedProxyHops}).`,
+    );
+  }
+  app.getHttpAdapter().getInstance().set('trust proxy', trustedProxyHops);
+
   // Auto-apply pending migrations in development so devs don't need to run
   // `prisma migrate deploy` manually after pulling new code.
   if (nodeEnv !== 'production') {

@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -19,8 +25,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private client: Redis | null = null;
   private available = false;
+  private readonly isProduction: boolean;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    this.isProduction =
+      this.config.get<string>('NODE_ENV', 'development') === 'production';
+  }
 
   onModuleInit() {
     const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
@@ -103,17 +113,35 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Atomic SET IF NOT EXISTS with TTL — returns true when the key was
    * set for the first time (i.e. the caller "owns" this token).
-   * Returns false when the key already existed OR when Redis is unavailable
-   * in non-production environments (graceful degrade).
+   *
+   * Production fail-closed: when Redis is unreachable, THROW 503 instead of
+   * pretending the lock was acquired. Callers rely on setNx for idempotency
+   * keys, payment dedup, single-use OTP / reset tokens, and new-device
+   * alert debouncing — silently returning `true` lets duplicate payments
+   * through, re-plays consumed OTPs, and turns a single webhook retry into
+   * N ledger entries. Development still degrades gracefully so you can
+   * iterate without a local Redis.
    */
   async setNx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
     const client = this.getClient();
-    if (!client) return true; // Dev degrade: act as if the lock was acquired
+    if (!client) {
+      if (this.isProduction) {
+        throw new ServiceUnavailableException(
+          'Coordination backend unavailable. Please retry.',
+        );
+      }
+      return true;
+    }
     try {
       const res = await client.set(key, value, 'EX', ttlSeconds, 'NX');
       return res === 'OK';
     } catch (err) {
       this.logger.warn(`Redis setNx error: ${String(err).slice(0, 200)}`);
+      if (this.isProduction) {
+        throw new ServiceUnavailableException(
+          'Coordination backend unavailable. Please retry.',
+        );
+      }
       return true;
     }
   }
