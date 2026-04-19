@@ -201,8 +201,25 @@ export class NotaFiscalService {
     originState: string,
     destinationState: string,
   ): TaxBreakdown {
-    const origin = originState.toUpperCase();
-    const destination = destinationState.toUpperCase();
+    // Hard-validate inputs. The public tax-preview endpoint accepts
+    // these straight from the query string; without a guard an
+    // attacker could send pathological strings (1 MB payload,
+    // catastrophic-backtracking regex input) and push the tax
+    // calculation into an unbounded path. Two-letter UF is the only
+    // shape Receita Federal accepts, so anything else is a refusal.
+    const UF_REGEX = /^[A-Z]{2}$/;
+    const origin = String(originState ?? '').trim().toUpperCase();
+    const destination = String(destinationState ?? '').trim().toUpperCase();
+    if (!UF_REGEX.test(origin) || !UF_REGEX.test(destination)) {
+      throw new BadRequestException(
+        'UF inválida — use siglas de estado de duas letras (ex: SP, RJ).',
+      );
+    }
+    if (!Number.isFinite(itemPriceBrl) || itemPriceBrl <= 0 || itemPriceBrl > 1_000_000) {
+      throw new BadRequestException(
+        'Preço inválido — deve ser um número positivo até R$ 1.000.000.',
+      );
+    }
     const isIntrastate = origin === destination;
 
     // ICMS: state-aware rates for goods

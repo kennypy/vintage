@@ -25,11 +25,13 @@ interface JwtPayload {
 }
 
 function extractIp(req: Request): string {
-  return (
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-    req.socket.remoteAddress ??
-    '0.0.0.0'
-  );
+  // main.ts sets Express `trust proxy` to the configured hop count so
+  // req.ip is the real client IP. Reading X-Forwarded-For directly
+  // would let an attacker forge the IP used by the ads bot-detection
+  // heuristics (velocity checks, datacenter-IP lookups) by appending
+  // values of their own — flagging honest users and skewing fraud
+  // scoring in their favour.
+  return req.ip ?? req.socket.remoteAddress ?? '0.0.0.0';
 }
 
 @Controller('api/v1/ads')

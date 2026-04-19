@@ -134,7 +134,9 @@ describe('RegisterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }));
 
     await waitFor(() => {
-      expect(localStorage.getItem('vintage_token')).toBe('new-token-xyz');
+      // Cookie migration: localStorage stores a presence marker ("1");
+      // the JWT lives in an HttpOnly cookie set by the API.
+      expect(localStorage.getItem('vintage_token')).toBe('1');
       expect(mockPush).toHaveBeenCalledWith('/');
     });
   });

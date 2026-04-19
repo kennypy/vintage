@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { IsString, IsIn, IsOptional, MaxLength } from 'class-validator';
 import { AdminGuard } from '../common/guards/admin.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ModerationService, ReviewAction } from './moderation.service';
 
 class ReviewReportDto {
@@ -91,9 +92,13 @@ export class ModerationController {
   reviewReport(
     @Param('id') id: string,
     @Body() body: ReviewReportDto,
+    @CurrentUser() admin: AuthUser,
   ) {
-    // adminId not needed in response but passed for audit in service
-    return this.moderationService.reviewReport(id, body.action, 'admin', body.note);
+    // Persist the real admin ID on the audit row so every moderation
+    // action is attributable. The previous 'admin' literal collapsed
+    // every admin into one ghost reviewer and made incident forensics
+    // impossible.
+    return this.moderationService.reviewReport(id, body.action, admin.id, body.note);
   }
 
   @Post('listings/:id/suspend')
@@ -102,8 +107,9 @@ export class ModerationController {
   suspendListing(
     @Param('id') id: string,
     @Body() body: SuspendListingDto,
+    @CurrentUser() admin: AuthUser,
   ) {
-    return this.moderationService.suspendListing(id, 'admin', body.reason);
+    return this.moderationService.suspendListing(id, admin.id, body.reason);
   }
 
   @Delete('listings/:id/suspend')
@@ -119,8 +125,9 @@ export class ModerationController {
   banUser(
     @Param('id') id: string,
     @Body() body: BanUserDto,
+    @CurrentUser() admin: AuthUser,
   ) {
-    return this.moderationService.banUser(id, 'admin', body.reason);
+    return this.moderationService.banUser(id, admin.id, body.reason);
   }
 
   @Delete('users/:id/ban')
@@ -152,8 +159,9 @@ export class ModerationController {
   resolveImageFlag(
     @Param('id') id: string,
     @Body() body: ResolveImageFlagDto,
+    @CurrentUser() admin: AuthUser,
   ) {
-    return this.moderationService.resolveImageFlag(id, body.action, 'admin', body.note);
+    return this.moderationService.resolveImageFlag(id, body.action, admin.id, body.note);
   }
 
   @Get('fraud-flags')
@@ -178,8 +186,9 @@ export class ModerationController {
   resolveFraudFlag(
     @Param('id') id: string,
     @Body() body: ResolveFraudFlagDto,
+    @CurrentUser() admin: AuthUser,
   ) {
-    return this.moderationService.resolveFraudFlag(id, body.action, 'admin', body.note);
+    return this.moderationService.resolveFraudFlag(id, body.action, admin.id, body.note);
   }
 
   @Post('users/:id/force-logout')

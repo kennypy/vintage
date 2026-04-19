@@ -179,12 +179,22 @@ export class MercadoPagoClient {
       idempotencyKey,
     );
 
+    // Float arithmetic on currency drifts unpredictably across many
+    // installments. We compute everything in centavos (integer cents),
+    // then convert back to BRL once at the end. This guarantees the
+    // sum of installments exactly equals the total amount and never
+    // under- or over-charges due to rounding.
+    const totalCentavos = Math.round(amountBrl * 100);
+    // Ceiling-divide: any remainder gets folded into the per-installment
+    // amount so the buyer never under-pays. The seller absorbs at most
+    // (installments - 1) centavos extra in the worst case.
+    const perInstallmentCentavos = Math.ceil(totalCentavos / installments);
     const installmentAmount =
       payment.transaction_details?.installment_amount ??
-      Math.ceil((amountBrl / installments) * 100) / 100;
+      perInstallmentCentavos / 100;
     const total =
       payment.transaction_details?.total_paid_amount ??
-      installmentAmount * installments;
+      (perInstallmentCentavos * installments) / 100;
 
     return {
       id: String(payment.id),
@@ -242,18 +252,18 @@ export class MercadoPagoClient {
   }
 
   /**
-   * Verify webhook signature using HMAC-SHA256.
+   * Verify a Mercado Pago webhook HMAC-SHA256 signature against the
+   * EXACT bytes received on the wire. The previous implementation
+   * accepted a string and silently returned `true` in development when
+   * the secret was missing — that fail-open path leaked into staging /
+   * preview deployments where NODE_ENV !== 'production' and let unsigned
+   * webhooks pass. This version fails closed in every environment: no
+   * secret means every webhook is rejected, period.
    */
-  verifyWebhookSignature(payload: string, signature: string): boolean {
+  verifyWebhookSignature(payload: Buffer | string, signature: string): boolean {
     if (!this.webhookSecret) {
-      if (this.nodeEnv === 'development') {
-        this.logger.warn(
-          'Webhook secret not configured — skipping verification (development only)',
-        );
-        return true;
-      }
       this.logger.error(
-        'MERCADOPAGO_WEBHOOK_SECRET not configured — rejecting webhook',
+        'MERCADOPAGO_WEBHOOK_SECRET not configured — rejecting webhook (set the secret to enable verification, even in dev)',
       );
       return false;
     }

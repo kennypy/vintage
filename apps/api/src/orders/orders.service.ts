@@ -501,13 +501,33 @@ export class OrdersService {
    * Marks a shipped order as delivered and sets the dispute deadline.
    * Called by tracking webhook or manually by the buyer/admin.
    */
-  async markDelivered(orderId: string) {
+  async markDelivered(orderId: string, userId: string) {
+    // Only buyer or seller can flip DELIVERED. The previous version
+    // accepted any authenticated user — a bystander could mark someone
+    // else's order delivered to start the dispute-window clock against
+    // them (collapsing the buyer's window to claim item-not-received).
+    return this.markDeliveredInternal(orderId, userId);
+  }
+
+  /**
+   * Shared implementation. System callers (tracking-poller cron) pass
+   * null for userId to skip the buyer/seller gate — the cron is already
+   * an authoritative actor and has no user context. HTTP callers pass
+   * the authenticated user id so the gate runs.
+   */
+  async markDeliveredInternal(orderId: string, userId: string | null) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
     });
 
     if (!order) {
       throw new NotFoundException('Pedido não encontrado');
+    }
+
+    if (userId !== null && order.buyerId !== userId && order.sellerId !== userId) {
+      throw new ForbiddenException(
+        'Apenas comprador ou vendedor podem marcar este pedido como entregue.',
+      );
     }
 
     if (order.status !== 'SHIPPED') {

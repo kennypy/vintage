@@ -42,11 +42,16 @@ export interface RegisterResponse {
 export async function login(
   email: string,
   password: string,
+  captchaToken?: string | null,
 ): Promise<LoginResponse | TwoFaChallenge> {
   const data = await apiFetch<LoginResponse | TwoFaChallenge>('/auth/login', {
     method: 'POST',
     authenticated: false,
-    body: JSON.stringify({ email, password }),
+    // captchaToken is ignored by the backend CaptchaGuard until
+    // CAPTCHA_ENFORCE=true. Passing null keeps the wire shape stable
+    // across the rollout so we don't have to cut a mobile release the
+    // moment the flag flips.
+    body: JSON.stringify({ email, password, captchaToken: captchaToken ?? null }),
   });
 
   if ('requiresTwoFa' in data) {
@@ -228,6 +233,38 @@ export async function disableTwoFa(token: string): Promise<{ success: boolean; m
   });
 }
 
+/**
+ * Ask the API to resend the email-verification link for an address that
+ * has registered but not yet verified. Always returns success (the API
+ * masks whether the email is registered) — caller should show a generic
+ * "check your inbox" message.
+ */
+export async function requestEmailVerification(
+  email: string,
+  captchaToken?: string | null,
+): Promise<{ success: true }> {
+  return apiFetch<{ success: true }>('/auth/request-email-verification', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ email, captchaToken: captchaToken ?? null }),
+  });
+}
+
+/**
+ * Redeem a verification token. Primarily used by the deep-linked web
+ * page; exposed here for completeness + potential in-app deep-link
+ * handling post-launch.
+ */
+export async function verifyEmail(
+  token: string,
+): Promise<{ success: true; email: string }> {
+  return apiFetch<{ success: true; email: string }>('/auth/verify-email', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ token }),
+  });
+}
+
 export async function forgotPassword(
   email: string,
   captchaToken?: string | null,
@@ -285,4 +322,28 @@ export async function signInWithApple(identityToken: string, name?: string): Pro
   });
   await setTokens(data.accessToken, data.refreshToken);
   return data;
+}
+
+/**
+ * Attach a Google/Apple identity to an already-signed-in Vintage account.
+ * Required when /auth/google/token or /auth/apple/callback returned 409
+ * `SOCIAL_PROVIDER_LINK_REQUIRED` — i.e. the email already has an account
+ * the user must first unlock with their password.
+ *
+ * Flow: user signs in with password → opens Settings → taps "Link Google"
+ * → OAuth returns idToken → call this → server verifies the idToken AND
+ * the password before persisting the link.
+ */
+export async function linkSocialProvider(
+  provider: 'google' | 'apple',
+  idToken: string,
+  password: string,
+): Promise<{ success: boolean; provider?: string; alreadyLinked?: boolean }> {
+  return apiFetch<{ success: boolean; provider?: string; alreadyLinked?: boolean }>(
+    '/auth/link-social',
+    {
+      method: 'POST',
+      body: JSON.stringify({ provider, idToken, password }),
+    },
+  );
 }

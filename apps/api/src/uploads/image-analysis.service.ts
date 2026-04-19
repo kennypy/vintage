@@ -303,9 +303,17 @@ export class ImageAnalysisService {
     try {
       const base64Image = imageBuffer.toString('base64');
 
-      const response = await fetch(`${VISION_API_URL}?key=${this.apiKey}`, {
+      // Credential transport: header, not query string. Query-string keys
+      // bleed into access logs, proxy buffers, and `new Error(url)` stack
+      // traces. The X-goog-api-key header is what Google's own client
+      // libraries use — keeps the key out of observability pipelines we
+      // don't fully control.
+      const response = await fetch(VISION_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-goog-api-key': this.apiKey,
+        },
         body: JSON.stringify({
           requests: [
             {

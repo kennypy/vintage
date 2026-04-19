@@ -34,13 +34,30 @@ export class CsrfMiddleware implements NestMiddleware {
   private readonly secret: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.secret = this.configService.get<string>('CSRF_SECRET') ?? '';
+    const configured = this.configService.get<string>('CSRF_SECRET') ?? '';
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
-    if (!this.secret) {
+    // Outside development, a missing CSRF_SECRET is a hard startup error.
+    // main.ts already asserts this in production, but staging / CI / preview
+    // envs (NODE_ENV !== 'development' && !== 'production') used to silently
+    // fall through to the 'dev-csrf-secret' literal below — a predictable
+    // secret any attacker could sign tokens with. Refuse to start instead.
+    if (!configured) {
+      if (nodeEnv !== 'development' && nodeEnv !== 'test') {
+        throw new Error(
+          `CSRF_SECRET is required when NODE_ENV=${nodeEnv}. Set it to a 32+ byte random hex string.`,
+        );
+      }
       this.logger.warn(
-        'CSRF_SECRET not configured — CSRF protection will be reduced in dev mode',
+        'CSRF_SECRET not configured — using ephemeral dev fallback. Set it for any non-development run.',
       );
     }
+
+    // Development fallback is a per-process random value, not a literal.
+    // That way a forgotten env var still gets you a working CSRF check,
+    // but a misconfigured deployment can't be attacked with a globally
+    // known secret.
+    this.secret = configured || crypto.randomBytes(32).toString('hex');
   }
 
   use(req: Request, res: Response, next: NextFunction): void {
@@ -76,7 +93,7 @@ export class CsrfMiddleware implements NestMiddleware {
     const nonce = crypto.randomBytes(16).toString('hex');
     const payload = `${timestamp}:${nonce}`;
     const hmac = crypto
-      .createHmac('sha256', this.secret || 'dev-csrf-secret')
+      .createHmac('sha256', this.secret)
       .update(payload)
       .digest('hex');
     return `${payload}:${hmac}`;
@@ -99,7 +116,7 @@ export class CsrfMiddleware implements NestMiddleware {
 
     const payload = `${timestamp}:${nonce}`;
     const expectedHmac = crypto
-      .createHmac('sha256', this.secret || 'dev-csrf-secret')
+      .createHmac('sha256', this.secret)
       .update(payload)
       .digest('hex');
 

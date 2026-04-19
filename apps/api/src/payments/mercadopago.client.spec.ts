@@ -32,22 +32,14 @@ function createClient(
 describe('MercadoPagoClient — verifyWebhookSignature', () => {
   const payload = '{"action":"payment.updated","data":{"id":"123"}}';
 
-  it('should return true in development when secret is empty', async () => {
-    const client = await createClient('', 'development');
-
-    expect(client.verifyWebhookSignature(payload, 'any-sig')).toBe(true);
-  });
-
-  it('should return false in production when secret is empty (fail closed)', async () => {
-    const client = await createClient('', 'production');
-
-    expect(client.verifyWebhookSignature(payload, 'any-sig')).toBe(false);
-  });
-
-  it('should return false in staging when secret is empty (fail closed)', async () => {
-    const client = await createClient('', 'staging');
-
-    expect(client.verifyWebhookSignature(payload, 'any-sig')).toBe(false);
+  it('fails closed in EVERY environment when the secret is empty', async () => {
+    // Previously dev returned true (fail-open), which leaked into staging
+    // deployments that forgot to flip NODE_ENV. Now the rule is
+    // unconditional: no secret → no trust, any environment.
+    for (const env of ['development', 'production', 'staging', 'test']) {
+      const client = await createClient('', env);
+      expect(client.verifyWebhookSignature(payload, 'any-sig')).toBe(false);
+    }
   });
 
   it('should return true for valid HMAC-SHA256 signature', async () => {

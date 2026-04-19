@@ -55,6 +55,33 @@ export class EmailService {
     await this.send(to, subject, html);
   }
 
+  async sendVerificationEmail(
+    to: string,
+    name: string,
+    verificationToken: string,
+  ): Promise<void> {
+    const verifyUrl = `https://vintage.br/auth/verify-email?token=${encodeURIComponent(verificationToken)}`;
+    const subject = 'Confirme seu email — Vintage.br';
+    const html = this.buildHtml(`
+      <h1 style="color: #333; font-size: 24px; margin-bottom: 16px;">Olá, ${this.escapeHtml(name)}!</h1>
+      <p style="color: #555; font-size: 16px; line-height: 1.6;">
+        Para começar a usar sua conta no Vintage.br, confirme seu email
+        clicando no botão abaixo. O link expira em 24 horas.
+      </p>
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${verifyUrl}" style="background-color: #e91e63; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-size: 16px; font-weight: bold;">
+          Confirmar email
+        </a>
+      </div>
+      <p style="color: #999; font-size: 14px; line-height: 1.6;">
+        Se você não criou uma conta no Vintage.br, ignore este email.
+        Sua conta será removida automaticamente.
+      </p>
+    `);
+
+    await this.send(to, subject, html);
+  }
+
   async sendPasswordResetEmail(
     to: string,
     name: string,

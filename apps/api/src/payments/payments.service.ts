@@ -124,9 +124,11 @@ export class PaymentsService {
     return result;
   }
 
-  async handleWebhook(payload: Record<string, unknown>, signature?: string) {
-    const payloadStr = JSON.stringify(payload);
-
+  async handleWebhook(
+    rawBody: Buffer | undefined,
+    payload: Record<string, unknown>,
+    signature?: string,
+  ) {
     // Signature is MANDATORY in every environment. Dev may configure a
     // known-value webhook secret (e.g. MERCADOPAGO_WEBHOOK_SECRET=test-secret-dev)
     // but the signature still has to verify.
@@ -135,7 +137,18 @@ export class PaymentsService {
       throw new UnauthorizedException('Assinatura do webhook ausente.');
     }
 
-    const valid = this.mercadoPago.verifyWebhookSignature(payloadStr, signature);
+    // The HMAC is computed against the exact bytes Mercado Pago sent.
+    // If raw-body capture didn't run (route never hit the rawBody
+    // middleware) refuse rather than fall back to JSON.stringify(parsed)
+    // — re-stringifying re-orders keys / changes spacing and either
+    // breaks legitimate webhooks or, worse, could quietly accept a
+    // crafted payload whose stringified form matches a known signature.
+    if (!rawBody || rawBody.length === 0) {
+      this.logger.error('Webhook rejected: raw body unavailable for signature verification');
+      throw new UnauthorizedException('Assinatura do webhook não pôde ser verificada.');
+    }
+
+    const valid = this.mercadoPago.verifyWebhookSignature(rawBody, signature);
     if (!valid) {
       this.logger.warn('Webhook rejected: invalid signature');
       throw new UnauthorizedException('Assinatura do webhook inválida.');
@@ -231,9 +244,16 @@ export class PaymentsService {
     // fraudulent event — flag the order, notify admins, and reject outright.
     const paymentDetails = await this.mercadoPago.getPaymentStatus(paymentId);
     if (paymentDetails.transaction_amount !== undefined) {
-      const orderTotal = Number(order.totalBrl);
-      if (Math.abs(paymentDetails.transaction_amount - orderTotal) > 0.01) {
-        const reason = `Payment amount mismatch: paid R$${paymentDetails.transaction_amount}, expected R$${orderTotal}`;
+      // Compare in integer centavos. The previous epsilon-of-0.01 check
+      // accepted any amount within one centavo of the order total, which
+      // floating-point drift across multi-installment / coupon flows
+      // could quietly exploit. Integer math removes the ambiguity: the
+      // amounts either match exactly (mod 1 centavo rounding by Mercado
+      // Pago) or they don't.
+      const paidCentavos = Math.round(paymentDetails.transaction_amount * 100);
+      const expectedCentavos = Math.round(Number(order.totalBrl) * 100);
+      if (paidCentavos !== expectedCentavos) {
+        const reason = `Payment amount mismatch: paid R$${paymentDetails.transaction_amount}, expected R$${order.totalBrl}`;
         this.logger.error(
           `${reason} for order ${order.id}. Flagged for manual review.`,
         );

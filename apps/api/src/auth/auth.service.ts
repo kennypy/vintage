@@ -35,6 +35,42 @@ const SMS_CODE_TTL_SECONDS = 5 * 60; // 5 min
 const SMS_RESEND_COOLDOWN_SECONDS = 30; // 30 s between sends to same user
 const SMS_MAX_SENDS_PER_HOUR = 5; // hard ceiling to control cost + abuse
 
+/**
+ * Per-email login brute-force lockout. Kicks in AFTER the global per-IP rate
+ * limit and captcha, so an attacker rotating IPs (credential stuffing at
+ * scale) still gets stopped cold once they've guessed wrong N times on one
+ * account. Counter TTL is rolling: each failure refreshes the window.
+ *
+ * Self-DoS risk: a troll who knows a victim's email can lock them out for
+ * 30 min. Acceptable because the user can bypass the lock via password
+ * reset (which clears the counter) — documented in the UX copy.
+ */
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_LOCK_TTL_SECONDS = 30 * 60;
+const LOGIN_ATTEMPTS_TTL_SECONDS = 60 * 60;
+
+/**
+ * Pre-computed bcrypt hash used to run a comparison even on unknown-email
+ * logins. Without this, response time leaks whether the email exists
+ * (unknown email → no bcrypt, fast; known email → bcrypt, slow). The cost
+ * factor MUST match the register path (12) so both paths take the same
+ * wall time.
+ */
+const DUMMY_BCRYPT_HASH =
+  '$2b$12$CwTycUXWue0Thq9StjUM0u4vB8nPDC2b2M6iPOFSZa.KJSfIZbyha';
+
+/** Hard ceiling on external OAuth verification calls (Google tokeninfo). */
+const GOOGLE_TOKENINFO_TIMEOUT_MS = 3000;
+
+/** Email verification token lifetime — long enough to survive an inbox
+ *  delay, short enough that an intercepted email isn't a long-lived key.
+ */
+const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+/** Throttle for /auth/request-email-verification (per-user). Prevents
+ *  email-flooding a victim by repeatedly registering their address. */
+const EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
+const EMAIL_VERIFICATION_MAX_PER_HOUR = 5;
+
 export interface SocialProfile {
   email: string;
   name: string;
@@ -113,12 +149,33 @@ export class AuthService {
       throw new ConflictException('CPF inválido');
     }
 
-    // Check uniqueness
-    const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, { cpf: cleanCpf }] },
+    // Check uniqueness — but allow recycling an unverified-and-stale
+    // record so an attacker can't permanently squat on someone else's
+    // email by registering it first. CPF collision is always a hard
+    // failure (CPFs identify a real person; reuse is fraud).
+    const existingByCpf = await this.prisma.user.findFirst({
+      where: { cpf: cleanCpf },
     });
-    if (existing) {
+    if (existingByCpf) {
       throw new ConflictException('Email ou CPF já cadastrado');
+    }
+
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existingByEmail) {
+      const isUnverifiedSquatter =
+        existingByEmail.emailVerifiedAt === null &&
+        existingByEmail.socialProvider === null &&
+        existingByEmail.deletedAt === null;
+      if (!isUnverifiedSquatter) {
+        throw new ConflictException('Email ou CPF já cadastrado');
+      }
+      // Wipe the squatted record so the real owner can claim the
+      // address. Cascade deletes the wallet + any pending verification
+      // tokens. The attacker's password hash is gone, the new
+      // registration writes a fresh one.
+      await this.prisma.user.delete({ where: { id: existingByEmail.id } });
     }
 
     // Hash password
@@ -138,9 +195,19 @@ export class AuthService {
         cpfChecksumValid: true,
         acceptedTosAt: new Date(),
         acceptedTosVersion: dto.tosVersion,
+        // emailVerifiedAt left null — the verification email below has
+        // to be redeemed before the account can log in. Closes the
+        // "register with someone else's email" attack at the source.
         wallet: { create: {} },
       },
     });
+
+    // Issue + send the verification email. Fire-and-forget so a transient
+    // SMTP outage doesn't 500 the registration — the user can request a
+    // resend from the verification screen.
+    this.issueEmailVerificationToken(user.id, user.email, user.name).catch(
+      (err) => this.logger.warn(`verification email issue failed: ${String(err).slice(0, 200)}`),
+    );
 
     const tokens = await this.generateTokensWithUser(user.id);
 
@@ -180,28 +247,211 @@ export class AuthService {
     return { success: true, tosVersion: version };
   }
 
+  // ── Email-ownership verification helpers ─────────────────────────────
+  private hashVerificationToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Mint a fresh verification token, persist its hash, and send the email.
+   * Used both at register-time and for /auth/request-email-verification.
+   * Rate-limited per-user via Redis to stop attackers email-flooding a
+   * victim by hammering /auth/request-email-verification with their id.
+   */
+  private async issueEmailVerificationToken(
+    userId: string,
+    email: string,
+    name: string,
+  ): Promise<void> {
+    // Per-user counter — at most N issuances per hour and a short cooldown
+    // between them. Both keys are scoped to the user, not the IP, since
+    // the threat model is sender-flooding a victim's inbox.
+    const cooldownKey = `auth:verify-email:cooldown:${userId}`;
+    const claimed = await this.redis.setNx(
+      cooldownKey,
+      '1',
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    );
+    if (!claimed) {
+      throw new HttpException(
+        'Aguarde antes de reenviar o email de verificação.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const hourKey = `auth:verify-email:hourly:${userId}`;
+    const count = await this.redis.incrWithTtl(hourKey, 60 * 60);
+    if (count > EMAIL_VERIFICATION_MAX_PER_HOUR) {
+      throw new HttpException(
+        'Limite de envios de verificação atingido. Tente novamente mais tarde.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashVerificationToken(rawToken);
+    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS);
+
+    await this.prisma.emailVerificationToken.create({
+      data: { userId, tokenHash, expiresAt },
+    });
+
+    await this.emailService.sendVerificationEmail(email, name, rawToken);
+  }
+
+  /**
+   * User-initiated re-issue of the verification email (e.g. the original
+   * mail got buried). Rate-limited inside issueEmailVerificationToken.
+   * Returns success even when the email isn't registered so callers can't
+   * use this endpoint to enumerate registered emails.
+   */
+  async requestEmailVerification(email: string): Promise<{ success: true }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+    if (user && !user.emailVerifiedAt && !user.deletedAt) {
+      try {
+        await this.issueEmailVerificationToken(user.id, user.email, user.name);
+      } catch (err) {
+        // Swallow rate-limit + delivery errors so we don't leak account
+        // state. Real users see a "check your inbox" screen regardless.
+        this.logger.warn(
+          `verify-email re-issue suppressed: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+    return { success: true };
+  }
+
+  /**
+   * Consume a verification token. Single-use (usedAt set), expires in 24h,
+   * bumps the user's tokenVersion so any tokens minted before verification
+   * are revoked (an attacker who guessed enough of the address to register
+   * never gets a usable session).
+   */
+  async verifyEmail(rawToken: string): Promise<{ success: true; email: string }> {
+    if (!rawToken || rawToken.length < 32) {
+      throw new BadRequestException('Token de verificação inválido.');
+    }
+    const tokenHash = this.hashVerificationToken(rawToken);
+    const record = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Token de verificação inválido ou expirado.');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: record.userId },
+      select: { id: true, email: true, emailVerifiedAt: true, deletedAt: true, tokenVersion: true },
+    });
+    if (!user || user.deletedAt) {
+      throw new BadRequestException('Conta não encontrada.');
+    }
+    if (user.emailVerifiedAt) {
+      // Already verified — mark token used so it can't be replayed and
+      // return success. Idempotent from the caller's perspective.
+      await this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      return { success: true, email: user.email };
+    }
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifiedAt: new Date(),
+          // Bump tokenVersion so any pre-verification tokens (we hand out
+          // tokens at register-time so the client can show a "check your
+          // email" screen) are invalidated by jwt-auth.guard.ts.
+          tokenVersion: { increment: 1 },
+        },
+      }),
+    ]);
+    return { success: true, email: user.email };
+  }
+
+  // ── Per-email login brute-force helpers ─────────────────────────────
+  private loginEmailHash(email: string): string {
+    // Trim + lowercase first so casing quirks don't bifurcate the counter.
+    // Hash-truncate to 16 hex chars — collision risk is negligible at our
+    // scale and keeps the Redis key short.
+    return crypto
+      .createHash('sha256')
+      .update(email.trim().toLowerCase())
+      .digest('hex')
+      .slice(0, 16);
+  }
+  private loginAttemptsKey(email: string): string {
+    return `auth:login:attempts:${this.loginEmailHash(email)}`;
+  }
+  private loginLockKey(email: string): string {
+    return `auth:login:lock:${this.loginEmailHash(email)}`;
+  }
+  private async assertLoginNotLocked(email: string): Promise<void> {
+    const locked = await this.redis.get(this.loginLockKey(email));
+    if (locked) {
+      throw new ForbiddenException(
+        'Conta bloqueada temporariamente por tentativas excessivas. Aguarde 30 minutos ou use "Esqueci minha senha" para redefini-la.',
+      );
+    }
+  }
+  private async recordLoginFailure(email: string): Promise<void> {
+    const count = await this.redis.incrWithTtl(
+      this.loginAttemptsKey(email),
+      LOGIN_ATTEMPTS_TTL_SECONDS,
+    );
+    if (count >= LOGIN_MAX_ATTEMPTS) {
+      await this.redis.setNx(this.loginLockKey(email), '1', LOGIN_LOCK_TTL_SECONDS);
+    }
+  }
+  private async resetLoginAttempts(email: string): Promise<void> {
+    await this.redis.del(this.loginAttemptsKey(email));
+    await this.redis.del(this.loginLockKey(email));
+  }
+
   async login(dto: LoginDto, ipHash?: string, deviceIdHash?: string, platform?: string) {
+    // Lock check runs BEFORE we look up the user so an attacker can't use
+    // the lookup existence side-channel (see the dummy-hash comparison below).
+    await this.assertLoginNotLocked(dto.email);
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
 
-    if (!user) {
-      throw new UnauthorizedException('Email ou senha inválidos');
-    }
+    // ALWAYS run bcrypt — even on unknown emails — so response time doesn't
+    // leak whether the email is registered. The dummy hash has the same
+    // cost factor as real hashes (12) to keep the timing constant.
+    const hashToCheck = user ? user.passwordHash : DUMMY_BCRYPT_HASH;
+    const valid = await bcrypt.compare(dto.password, hashToCheck);
 
-    const valid = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!valid) {
-      // Log failed attempt for anomaly detection (fire-and-forget).
-      // Use async IIFE + try/catch to guard against both synchronous errors
-      // (e.g. loginEvent undefined when Prisma client is stale) and async ones.
-      if (ipHash) {
-        (async () => {
-          try {
-            await this.prisma.loginEvent.create({
-              data: { userId: user.id, ipHash, deviceIdHash: deviceIdHash ?? null, platform: platform ?? null, success: false },
-            });
-          } catch { /* never let anomaly logging break the auth response */ }
-        })();
+    if (!user || !valid) {
+      // Only count failures against a real account — otherwise an attacker
+      // could DOS arbitrary strangers by hammering invalid emails.
+      if (user) {
+        await this.recordLoginFailure(dto.email);
+
+        // Log failed attempt for anomaly detection (fire-and-forget).
+        if (ipHash) {
+          (async () => {
+            try {
+              await this.prisma.loginEvent.create({
+                data: {
+                  userId: user.id,
+                  ipHash,
+                  deviceIdHash: deviceIdHash ?? null,
+                  platform: platform ?? null,
+                  success: false,
+                },
+              });
+            } catch {
+              /* never let anomaly logging break the auth response */
+            }
+          })();
+        }
       }
       throw new UnauthorizedException('Email ou senha inválidos');
     }
@@ -213,6 +463,26 @@ export class AuthService {
     if (user.deletedAt) {
       throw new UnauthorizedException('Esta conta foi excluída.');
     }
+
+    // Email-ownership gate. A null emailVerifiedAt means the user
+    // registered with this email but has not proven control of the
+    // mailbox. Refuse login until they redeem the verification link.
+    // Returning a structured code so the client can route to the
+    // "resend verification email" screen.
+    if (!user.emailVerifiedAt) {
+      throw new HttpException(
+        {
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+          message:
+            'Confirme seu email para entrar. Reenviamos o link de verificação para sua caixa de entrada.',
+        },
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    // Successful password match — clear the per-email failure counter so
+    // the next legitimate login isn't still riding a stale count.
+    await this.resetLoginAttempts(dto.email);
 
     // Check ToS / Privacy current version acceptance
     const currentTosVersion = this.getCurrentTosVersion();
@@ -770,15 +1040,25 @@ export class AuthService {
         throw new UnauthorizedException('Esta conta foi excluída.');
       }
 
-      // Update social provider info if not already set
-      if (!existingUser.socialProvider) {
-        await this.prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            socialProvider: provider,
-            socialProviderId: profile.providerId,
-            avatarUrl: existingUser.avatarUrl ?? profile.avatarUrl ?? null,
-          },
+      // OAuth account-takeover protection: only accept the token when the
+      // existing user has ALREADY linked this provider with this specific
+      // provider ID. Before, we silently wrote the provider fields on
+      // first OAuth hit — meaning anyone who later controlled the email
+      // address at Google/Apple could walk into an existing password
+      // account just by clicking "Sign in with <provider>". The link flow
+      // is now an authenticated, password-gated action (linkSocialProvider
+      // below + POST /auth/link-social).
+      const providerMatches =
+        existingUser.socialProvider === provider &&
+        existingUser.socialProviderId === profile.providerId;
+      if (!providerMatches) {
+        throw new ConflictException({
+          code: 'SOCIAL_PROVIDER_LINK_REQUIRED',
+          message:
+            'Este email já possui uma conta. Entre com sua senha e vincule seu login social em Configurações antes de usar este método.',
+          // Hint which sign-in path the user should follow. The client
+          // gets `password` or whichever provider was already linked.
+          registeredWith: existingUser.socialProvider ?? 'password',
         });
       }
 
@@ -826,6 +1106,11 @@ export class AuthService {
         cpfChecksumValid: false,
         acceptedTosAt: new Date(),
         acceptedTosVersion: currentTosVersion,
+        // Google / Apple already verified the email address (we refuse
+        // tokens with email_verified !== true and only accept JWKS-signed
+        // Apple tokens). Mark the account as verified eagerly so OAuth
+        // users skip the inbox round-trip.
+        emailVerifiedAt: new Date(),
         wallet: { create: {} },
       },
     });
@@ -837,16 +1122,99 @@ export class AuthService {
     return { ...tokens, cpfVerified: false };
   }
 
+  /**
+   * Authenticated flow that lets a signed-in user link a social provider
+   * to their existing account. Replaces the previous silent-merge behaviour
+   * of socialLogin. Requires the account password so a stolen session can't
+   * attach an attacker's Google/Apple account to the victim's login.
+   *
+   * The social profile is verified by the caller (controller calls
+   * verifyGoogleIdToken / appleStrategy.verifyIdentityToken first) — we
+   * trust it here, same as socialLogin does.
+   */
+  async linkSocialProvider(
+    userId: string,
+    password: string,
+    provider: 'google' | 'apple',
+    profile: SocialProfile,
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedException('Senha incorreta');
+    }
+
+    // The linking flow only makes sense when the social identity the user
+    // just verified at the OAuth provider matches the email on their
+    // Vintage account. Otherwise we'd be linking "bob's Google" to
+    // "alice@vintage.br" — an obvious identity mismatch.
+    if (user.email.toLowerCase() !== profile.email.toLowerCase()) {
+      throw new BadRequestException(
+        'O email da sua conta não corresponde à conta social escolhida.',
+      );
+    }
+
+    // Idempotent: if the same provider+providerId is already linked, this
+    // is a no-op so the UI can retry without tripping.
+    if (
+      user.socialProvider === provider &&
+      user.socialProviderId === profile.providerId
+    ) {
+      return { success: true, alreadyLinked: true };
+    }
+
+    // Different provider already linked — refuse rather than silently
+    // overwrite. User must explicitly unlink the current one first (not
+    // exposed yet; add when the feature ships).
+    if (user.socialProvider && user.socialProvider !== provider) {
+      throw new ConflictException(
+        'Sua conta já tem outro login social vinculado. Desvincule-o antes de vincular um novo.',
+      );
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        socialProvider: provider,
+        socialProviderId: profile.providerId,
+        avatarUrl: user.avatarUrl ?? profile.avatarUrl ?? null,
+      },
+    });
+    return { success: true, provider };
+  }
+
   async verifyGoogleIdToken(idToken: string): Promise<SocialProfile> {
     const clientId = this.config.get<string>('GOOGLE_CLIENT_ID', '');
+
+    // Refuse to verify if no client ID is configured. Previously a deployment
+    // that forgot GOOGLE_CLIENT_ID would silently SKIP the `aud` check and
+    // accept tokens for any app on any project — same class of bug the Apple
+    // strategy had before it grew JWKS verification.
+    if (!clientId) {
+      this.logger.error(
+        'GOOGLE_CLIENT_ID is not set — refusing to verify Google ID tokens.',
+      );
+      throw new UnauthorizedException('Google Sign In não está configurado.');
+    }
+
+    // Bound the outbound call — without a timeout, a slow Google POP can
+    // tie up the login handler indefinitely and drain our event-loop slots.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GOOGLE_TOKENINFO_TIMEOUT_MS);
 
     let res: Response;
     try {
       res = await fetch(
         `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+        { signal: controller.signal },
       );
     } catch {
       throw new UnauthorizedException('Falha ao verificar token do Google');
+    } finally {
+      clearTimeout(timer);
     }
 
     if (!res.ok) {
@@ -856,13 +1224,26 @@ export class AuthService {
     const data = await res.json() as {
       aud?: string;
       email?: string;
+      email_verified?: string | boolean;
       name?: string;
       picture?: string;
       sub?: string;
     };
 
-    if (clientId && data.aud !== clientId) {
+    if (data.aud !== clientId) {
       throw new UnauthorizedException('Token do Google inválido para este app');
+    }
+
+    // Google's tokeninfo returns email_verified="true" (string) when the
+    // Google account owner has verified the email. Refuse unverified
+    // emails — an attacker can create a Google account with any unverified
+    // address and use it to claim a Vintage account.
+    const emailVerified =
+      data.email_verified === true || data.email_verified === 'true';
+    if (!emailVerified) {
+      throw new UnauthorizedException(
+        'O email da conta Google não está verificado.',
+      );
     }
 
     if (!data.email || !data.sub) {

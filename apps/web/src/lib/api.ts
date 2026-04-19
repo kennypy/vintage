@@ -6,10 +6,22 @@ interface RequestOptions {
   isFormData?: boolean;
 }
 
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('vintage_token');
-}
+// ── Session storage ──────────────────────────────────────────────────────────
+//
+// The web client used to read/write the JWT in localStorage and send it via
+// `Authorization: Bearer`. localStorage is XSS-stealable: any compromised
+// dependency, third-party widget, or unsanitised innerHTML inside the app
+// could exfiltrate the token. We've migrated to HttpOnly + Secure +
+// SameSite=Strict cookies set by the API on /auth/login, /auth/register,
+// /auth/refresh, /auth/2fa/confirm-login and the social-login endpoints.
+//
+// As a result, the web client no longer touches the token at all — the
+// browser sends it automatically thanks to `credentials: 'include'`, and
+// the response cookie is invisible to JavaScript (HttpOnly).
+//
+// setAuthToken / clearAuthToken below are kept as no-ops so existing call
+// sites compile without churning every page in the same commit. They will
+// be removed in a follow-up cleanup once every page stops calling them.
 
 // ── CSRF token cache ──────────────────────────────────────────────────────────
 let _csrfToken: string | null = null;
@@ -17,7 +29,11 @@ let _csrfToken: string | null = null;
 async function getCsrfToken(): Promise<string> {
   if (_csrfToken) return _csrfToken;
   try {
-    const res = await fetch(`${API_URL}/auth/csrf-token`);
+    const res = await fetch(`${API_URL}/auth/csrf-token`, {
+      // Same credentials posture as the rest of the client so a future
+      // session-bound CSRF rotation lands on the right session.
+      credentials: 'include',
+    });
     if (res.ok) {
       const data = await res.json() as { csrfToken: string };
       _csrfToken = data.csrfToken;
@@ -37,7 +53,6 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const token = getAuthToken();
   const headers: Record<string, string> = {
     ...options.headers,
   };
@@ -46,9 +61,10 @@ async function request<T>(
     headers['Content-Type'] = 'application/json';
   }
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  // Authorization header intentionally absent. The session lives in an
+  // HttpOnly cookie set by the API; the browser sends it automatically
+  // when we opt in to `credentials: 'include'`. JavaScript can't read it,
+  // so XSS in the web app cannot exfiltrate the JWT.
 
   if (MUTATING_METHODS.has(method)) {
     headers['X-CSRF-Token'] = await getCsrfToken();
@@ -57,6 +73,10 @@ async function request<T>(
   const response = await fetch(`${API_URL}${path}`, {
     method,
     headers,
+    // Send + accept cookies (the session, refresh, and CSRF cookies all
+    // live here). Same-origin / same-site only thanks to SameSite=Strict
+    // on the API's Set-Cookie header.
+    credentials: 'include',
     body: options.isFormData
       ? (options.body as FormData)
       : options.body
@@ -72,6 +92,7 @@ async function request<T>(
       const retry = await fetch(`${API_URL}${path}`, {
         method,
         headers,
+        credentials: 'include',
         body: options.isFormData
           ? (options.body as FormData)
           : options.body
@@ -124,14 +145,45 @@ export function apiDelete<T>(
   return request<T>('DELETE', path, { body, headers });
 }
 
-export function setAuthToken(token: string): void {
+/**
+ * Token storage moved to HttpOnly cookies set by the API after login;
+ * the web client never touches the JWT directly anymore. We still write
+ * a non-secret presence marker to localStorage ("1") because layouts
+ * across /conta, /admin, /sell, etc. read this key to decide whether
+ * to render account-scoped chrome or redirect to /auth/login. The
+ * marker is NOT a credential — every API call is authenticated by the
+ * HttpOnly cookie, so leaking the marker is harmless.
+ */
+export function setAuthToken(_token: string): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('vintage_token', token);
+    try {
+      localStorage.setItem('vintage_token', '1');
+    } catch {
+      /* private mode / storage disabled — server-side cookie still works */
+    }
   }
 }
 
-export function clearAuthToken(): void {
+/**
+ * POSTs /auth/logout so the API clears the session + refresh cookies,
+ * then sweeps any stale localStorage token. Mobile keeps using its own
+ * local clearTokens flow.
+ */
+export async function clearAuthToken(): Promise<void> {
+  try {
+    await fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': await getCsrfToken() },
+    });
+  } catch {
+    /* server-side cookie clear best-effort — local cleanup still runs */
+  }
   if (typeof window !== 'undefined') {
-    localStorage.removeItem('vintage_token');
+    try {
+      localStorage.removeItem('vintage_token');
+    } catch {
+      /* ignore */
+    }
   }
 }

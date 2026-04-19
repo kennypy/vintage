@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
@@ -23,10 +24,34 @@ function runMigrations() {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true enables req.rawBody on routes that ask for it
+  // (@RawBodyRequest). Required for HMAC-SHA256 webhook signature
+  // verification — signatures are computed against the exact bytes
+  // the sender transmitted, and re-stringifying the parsed JSON would
+  // re-order keys / change spacing and break verification (or, worse,
+  // accept a forged payload whose stringified form happened to match).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
   const nodeEnv = config.get<string>('NODE_ENV', 'development');
+
+  // Behind a load balancer / CDN / reverse proxy (Fly.io, Cloudflare, nginx),
+  // req.ip resolves to the last proxy in the chain unless Express is told how
+  // many hops to trust. Without this, every request looks like it came from
+  // the proxy's IP → the per-IP rate-limit bucket collides across users and
+  // a single attacker exhausts the limit for everyone behind the proxy (DoS).
+  // Setting the hop count too high is equally bad: it lets an attacker spoof
+  // any IP via X-Forwarded-For. The env var makes the trusted depth explicit
+  // per deployment (Fly.io = 1, Fly behind Cloudflare = 2, local dev = 0).
+  const trustedProxyHops = Number(
+    config.get<string>('TRUSTED_PROXY_HOPS', nodeEnv === 'production' ? '1' : '0'),
+  );
+  if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0) {
+    throw new Error(
+      `TRUSTED_PROXY_HOPS must be a non-negative integer (got ${trustedProxyHops}).`,
+    );
+  }
+  app.getHttpAdapter().getInstance().set('trust proxy', trustedProxyHops);
 
   // Auto-apply pending migrations in development so devs don't need to run
   // `prisma migrate deploy` manually after pulling new code.
@@ -78,6 +103,13 @@ async function bootstrap() {
       }
     }
   }
+
+  // Cookie parser — required for the HttpOnly session cookies the auth
+  // controller sets after login/refresh. Sits before helmet/CSRF so both
+  // can introspect req.cookies. signed: false because we don't use
+  // signed cookies; the session cookie itself carries a JWT (HMAC-signed)
+  // and the CSRF cookie is a separate HMAC token.
+  app.use(cookieParser());
 
   // Security headers
   app.use(

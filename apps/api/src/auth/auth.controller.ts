@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, UseGuards, Req, Res, BadRequestException, UnauthorizedException, Headers } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
@@ -8,12 +9,26 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
+  clearSessionCookies,
+  parseExpiryToSeconds,
+  resolveCookieConfig,
+  setSessionCookies,
+  type SessionCookieConfig,
+} from './cookie.constants';
+import {
   VerifyTwoFaDto,
   ConfirmLoginTwoFaDto,
   ResendLoginSmsDto,
   SetupSmsDto,
+  LinkSocialDto,
 } from './dto/two-fa.dto';
-import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
+import {
+  ChangePasswordDto,
+  ForgotPasswordDto,
+  RequestEmailVerificationDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+} from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CaptchaGuard } from './captcha.guard';
@@ -28,14 +43,59 @@ const TWOFA_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
 /** Password reset endpoints: 5 requests per 15 minutes to prevent enumeration spam. */
 const PASSWORD_THROTTLE = { default: { limit: 5, ttl: 15 * 60 * 1000 } };
 
+/**
+ * Login endpoint: tight per-tracker (per-IP or per-API-key) throttle to cap
+ * credential-stuffing from a single origin. Complements the per-email
+ * progressive lockout inside AuthService.login, which survives attackers
+ * rotating IPs.
+ */
+const LOGIN_THROTTLE = { default: { limit: 10, ttl: 15 * 60 * 1000 } };
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
+  private readonly cookieConfig: SessionCookieConfig;
+  private readonly accessCookieMaxSeconds: number;
+  private readonly refreshCookieMaxSeconds: number;
+
   constructor(
     private authService: AuthService,
     private appleStrategy: AppleStrategy,
     private csrfMiddleware: CsrfMiddleware,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.cookieConfig = resolveCookieConfig(config);
+    this.accessCookieMaxSeconds = parseExpiryToSeconds(
+      config.get<string>('JWT_EXPIRY'),
+      15 * 60,
+    );
+    this.refreshCookieMaxSeconds = parseExpiryToSeconds(
+      config.get<string>('JWT_REFRESH_EXPIRY'),
+      7 * 24 * 60 * 60,
+    );
+  }
+
+  /**
+   * Inspect a service result and, when it carries access+refresh tokens,
+   * write them into the HttpOnly session + refresh cookies. Lets the web
+   * client stop touching tokens entirely (they live in HttpOnly cookies
+   * the JS can't read) while mobile keeps reading them from the response
+   * body — same response shape, opt-in storage transport per client.
+   */
+  private maybeSetSessionCookies(res: Response, result: unknown): void {
+    if (!result || typeof result !== 'object') return;
+    const r = result as { accessToken?: unknown; refreshToken?: unknown };
+    if (typeof r.accessToken === 'string' && typeof r.refreshToken === 'string') {
+      setSessionCookies(
+        res,
+        r.accessToken,
+        r.refreshToken,
+        this.cookieConfig,
+        this.accessCookieMaxSeconds,
+        this.refreshCookieMaxSeconds,
+      );
+    }
+  }
 
   @Get('csrf-token')
   @ApiOperation({ summary: 'Obter token CSRF para requisições mutáveis' })
@@ -51,8 +111,10 @@ export class AuthController {
     description:
       'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. No-op otherwise.',
   })
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.register(dto);
+    this.maybeSetSessionCookies(res, result);
+    return result;
   }
 
   @Post('accept-tos')
@@ -67,26 +129,48 @@ export class AuthController {
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)' })
-  login(
+  @Throttle(LOGIN_THROTTLE)
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)',
+    description:
+      'Requires `captchaToken` in the body when CAPTCHA_ENFORCE=true. Global 60/min throttle plus 10/15min on this endpoint plus the per-email progressive lockout in the service layer close the credential-stuffing window.',
+  })
+  async login(
     @Body() dto: LoginDto,
-    @Req() req: { ip?: string; headers: Record<string, string | undefined> },
+    @Req() req: { ip?: string },
+    @Res({ passthrough: true }) res: Response,
     @Headers('x-device-id') rawDeviceId?: string,
     @Headers('x-platform') platform?: string,
   ) {
-    const ip = (req.headers['x-forwarded-for'] as string | undefined) ?? req.ip ?? '';
+    // main.ts sets Express `trust proxy` to the configured hop count, so
+    // req.ip is the real client IP. Never read X-Forwarded-For directly —
+    // attackers forge it, which used to poison the login audit trail and
+    // let attackers hide the origin of a new-device alert.
+    const ip = req.ip ?? '';
     const ipHash = crypto.createHash('sha256').update(ip).digest('hex');
     const deviceIdHash = rawDeviceId
       ? crypto.createHash('sha256').update(rawDeviceId).digest('hex')
       : undefined;
-    return this.authService.login(dto, ipHash, deviceIdHash, platform);
+    const result = await this.authService.login(dto, ipHash, deviceIdHash, platform);
+    // Only set cookies on the success branch — when login returns a 2FA
+    // challenge, no real tokens have been issued yet (the tempToken is
+    // never put into a session cookie). maybeSetSessionCookies is a no-op
+    // for token-less responses, which preserves that.
+    this.maybeSetSessionCookies(res, result);
+    return result;
   }
 
   @Post('2fa/confirm-login')
   @Throttle(TWOFA_THROTTLE)
   @ApiOperation({ summary: 'Confirmar login com código 2FA (após requiresTwoFa:true)' })
-  confirmLoginWithTwoFa(@Body() dto: ConfirmLoginTwoFaDto) {
-    return this.authService.confirmLoginWithTwoFa(dto.tempToken, dto.token);
+  async confirmLoginWithTwoFa(
+    @Body() dto: ConfirmLoginTwoFaDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.confirmLoginWithTwoFa(dto.tempToken, dto.token);
+    this.maybeSetSessionCookies(res, result);
+    return result;
   }
 
   @Post('2fa/setup')
@@ -168,13 +252,38 @@ export class AuthController {
   @Post('refresh')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Renovar token de acesso (requer refresh token)' })
-  refresh(@Req() req: { headers: Record<string, string | undefined> }) {
+  async refresh(
+    @Req() req: { headers: Record<string, string | undefined>; cookies?: Record<string, string> },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Accept refresh token from EITHER:
+    //   • the vintage_refresh HttpOnly cookie (web — preferred, never
+    //     readable by JavaScript), OR
+    //   • the Authorization: Bearer header (mobile — keys are kept in
+    //     the OS keychain, the cookie path doesn't apply).
+    const cookieToken = req.cookies?.['vintage_refresh'];
     const authHeader = req.headers['authorization'] ?? '';
-    const rawToken = authHeader.replace('Bearer ', '');
+    const headerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length)
+      : '';
+    const rawToken = cookieToken || headerToken;
     if (!rawToken) {
       throw new UnauthorizedException('Token ausente');
     }
-    return this.authService.refreshToken(rawToken);
+    const result = await this.authService.refreshToken(rawToken);
+    this.maybeSetSessionCookies(res, result);
+    return result;
+  }
+
+  @Post('logout')
+  @ApiOperation({
+    summary: 'Encerrar sessão (limpa cookies HttpOnly do navegador)',
+    description:
+      'Stateless on the server side — JWTs aren\'t blacklisted. Web clients call this to drop the session + refresh cookies; mobile clients can simply discard their tokens locally.',
+  })
+  logout(@Res({ passthrough: true }) res: Response) {
+    clearSessionCookies(res, this.cookieConfig);
+    return { success: true };
   }
 
   @Get('google')
@@ -192,6 +301,7 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const result = await this.authService.socialLogin('google', req.user);
+    this.maybeSetSessionCookies(res, result);
     res.json(result);
   }
 
@@ -199,6 +309,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Callback do Apple Sign In' })
   async appleCallback(
     @Body() body: { identityToken: string; name?: string },
+    @Res({ passthrough: true }) res: Response,
   ) {
     if (!body.identityToken) {
       throw new BadRequestException('Token de identidade Apple é obrigatório');
@@ -209,17 +320,52 @@ export class AuthController {
       body.name,
     );
 
-    return this.authService.socialLogin('apple', profile);
+    const result = await this.authService.socialLogin('apple', profile);
+    this.maybeSetSessionCookies(res, result);
+    return result;
   }
 
   @Post('google/token')
   @ApiOperation({ summary: 'Login com Google via ID token (mobile)' })
-  async googleTokenAuth(@Body() body: { idToken: string }) {
+  async googleTokenAuth(
+    @Body() body: { idToken: string },
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (!body.idToken) {
       throw new BadRequestException('ID token do Google é obrigatório');
     }
     const profile = await this.authService.verifyGoogleIdToken(body.idToken);
-    return this.authService.socialLogin('google', profile);
+    const result = await this.authService.socialLogin('google', profile);
+    this.maybeSetSessionCookies(res, result);
+    return result;
+  }
+
+  @Post('link-social')
+  @UseGuards(JwtAuthGuard)
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Vincular login social (Google/Apple) à conta atual',
+    description:
+      'Required second step for users who registered with password and want to add a social login. Replaces the previous silent-merge behaviour of /auth/google/token and /auth/apple/callback, which let anyone controlling the email at Google/Apple take over an existing password account.',
+  })
+  async linkSocial(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: LinkSocialDto,
+  ) {
+    // Verify the social identity token inside the controller so the service
+    // only receives an already-vouched profile — same pattern as
+    // googleTokenAuth + appleCallback above.
+    const profile =
+      dto.provider === 'google'
+        ? await this.authService.verifyGoogleIdToken(dto.idToken)
+        : await this.appleStrategy.verifyIdentityToken(dto.idToken);
+    return this.authService.linkSocialProvider(
+      user.id,
+      dto.password,
+      dto.provider,
+      profile,
+    );
   }
 
   @Post('forgot-password')
@@ -239,6 +385,25 @@ export class AuthController {
   @ApiOperation({ summary: 'Redefinir senha com token recebido por email' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Post('request-email-verification')
+  @Throttle(PASSWORD_THROTTLE)
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Reenviar email de verificação',
+    description:
+      'Always returns success regardless of whether the email is registered. The actual issuance is rate-limited per-user inside AuthService (1 per minute, 5 per hour) so this endpoint cannot be used to flood a victim\'s inbox.',
+  })
+  requestEmailVerification(@Body() dto: RequestEmailVerificationDto) {
+    return this.authService.requestEmailVerification(dto.email);
+  }
+
+  @Post('verify-email')
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiOperation({ summary: 'Confirmar email com token recebido' })
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
   }
 
   @Post('change-password')

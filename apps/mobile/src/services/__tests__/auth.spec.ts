@@ -29,7 +29,14 @@ describe('login', () => {
     expect(mockApiFetch).toHaveBeenCalledWith('/auth/login', {
       method: 'POST',
       authenticated: false,
-      body: JSON.stringify({ email: 'ana@test.com', password: 'pass123' }),
+      // captchaToken is shipped as null while CAPTCHA_ENFORCE=false so the
+      // wire shape stays stable across the rollout. Same pattern as
+      // register / forgotPassword / resendLoginSms.
+      body: JSON.stringify({
+        email: 'ana@test.com',
+        password: 'pass123',
+        captchaToken: null,
+      }),
     });
     expect(mockSetTokens).toHaveBeenCalledWith('at-123', 'rt-456');
     expect(result).toEqual(response);

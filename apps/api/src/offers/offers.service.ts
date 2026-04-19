@@ -146,7 +146,10 @@ export class OffersService {
       throw new BadRequestException('Esta oferta não está mais pendente');
     }
 
-    if (offer.expiresAt < new Date()) {
+    // Use <= so an offer whose expiresAt lands at exactly `now` is
+    // refused. With strict < the buyer could race accept vs. expire
+    // on the millisecond boundary.
+    if (offer.expiresAt <= new Date()) {
       throw new BadRequestException('Esta oferta expirou');
     }
 

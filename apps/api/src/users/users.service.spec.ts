@@ -35,6 +35,9 @@ const mockPrisma = {
   payoutMethod: {
     deleteMany: jest.fn(),
   },
+  consentRecord: {
+    deleteMany: jest.fn(),
+  },
   $transaction: jest.fn(),
   address: {
     findMany: jest.fn(),

@@ -607,6 +607,13 @@ export class UsersService {
         data: { status: 'REJECTED' },
       });
 
+      // LGPD: consent history must be purged alongside PII (the linked
+      // ipHash / user-agent rows re-identify the deleted account). We
+      // delete inline inside the same transaction so the commit atomicity
+      // matches the User row anonymization — no window where the User
+      // row is anonymized but the consent trail still points at them.
+      await tx.consentRecord.deleteMany({ where: { userId } });
+
       // Create audit record
       await tx.deletionAuditLog.create({
         data: {
@@ -762,8 +769,25 @@ export class UsersService {
 
   // --- Admin Methods ---
 
-  async listUsersAdmin(page: number, pageSize: number, search?: string) {
+  async listUsersAdmin(
+    page: number,
+    pageSize: number,
+    search: string | undefined,
+    adminId: string,
+  ) {
     const skip = (page - 1) * pageSize;
+
+    // Privacy audit trail — an admin who types an email into the search
+    // box is effectively doing a targeted lookup against our user base.
+    // Log every such query (with the admin's id + the substring) so a
+    // compromised admin account can't silently enumerate emails
+    // without leaving evidence. Audit entry is best-effort — a logging
+    // failure must not break the admin tool.
+    if (search && search.includes('@')) {
+      this.logger.warn(
+        `[privacy-audit] admin ${adminId} ran email-substring lookup: ${search.slice(0, 64)}`,
+      );
+    }
 
     const where = search
       ? {

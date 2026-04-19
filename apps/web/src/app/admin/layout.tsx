@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { apiGet } from '@/lib/api';
 
 const NAV_ITEMS = [
   { href: '/admin', label: 'Painel', icon: '~' },
@@ -16,15 +17,6 @@ const NAV_ITEMS = [
   { href: '/admin/analytics', label: 'Vendas & Analytics', icon: '~' },
 ];
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const base64 = token.split('.')[1];
-    return JSON.parse(atob(base64));
-  } catch {
-    return null;
-  }
-}
-
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -32,30 +24,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('vintage_token');
-    if (!token) {
+    // Cookie migration: the JWT lives in an HttpOnly cookie that JS can't
+    // read, so we can no longer decode the token client-side to check the
+    // role. Instead, hit /users/me — the API resolves the cookie session
+    // and returns the role authoritatively. The presence marker in
+    // localStorage is a fast pre-check to avoid an unnecessary network
+    // round-trip on a fully-anonymous visit.
+    const hasSessionMarker =
+      typeof window !== 'undefined' && !!localStorage.getItem('vintage_token');
+    if (!hasSessionMarker) {
       router.replace('/auth/login');
       return;
     }
-    const payload = decodeJwtPayload(token);
-    if (!payload || payload.role !== 'ADMIN') {
-      // Try fetching user profile to check role
-      fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1'}/users/me`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      )
-        .then((res) => res.json())
-        .then((data: { role?: string }) => {
-          if (data.role === 'ADMIN') {
-            setAuthorized(true);
-          } else {
-            router.replace('/');
-          }
-        })
-        .catch(() => router.replace('/auth/login'));
-      return;
-    }
-    setAuthorized(true);
+    apiGet<{ role?: string }>('/users/me')
+      .then((data) => {
+        if (data.role === 'ADMIN') {
+          setAuthorized(true);
+        } else {
+          router.replace('/');
+        }
+      })
+      .catch(() => router.replace('/auth/login'));
   }, [router]);
 
   if (!authorized) {

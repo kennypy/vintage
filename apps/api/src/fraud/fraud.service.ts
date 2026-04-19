@@ -64,8 +64,16 @@ export class FraudService {
 
       if (recentOrders < rule.threshold) return { action: 'ALLOW' };
 
+      // Defensive: a missing or future-dated user.createdAt yields NaN /
+      // Infinity from the time math above. Coerce to a reasonable
+      // sentinel so the JSON evidence column never ships a `NaN` string
+      // (Prisma JSON serialises NaN to null but downstream Postgres ⇒
+      // BI tooling chokes on the round-trip).
+      const safeAccountAgeDays = Number.isFinite(accountAgeDays)
+        ? Math.round(accountAgeDays * 10) / 10
+        : -1;
       const flag = await this.createFlag(buyerId, rule.code, {
-        accountAgeDays: Math.round(accountAgeDays * 10) / 10,
+        accountAgeDays: safeAccountAgeDays,
         ordersInWindow: recentOrders,
         windowMinutes: rule.windowMinutes,
         threshold: rule.threshold,
@@ -108,7 +116,9 @@ export class FraudService {
       if (ageMinutes > rule.windowMinutes) return { action: 'ALLOW' };
 
       const flag = await this.createFlag(userId, rule.code, {
-        payoutMethodAgeMinutes: Math.round(ageMinutes * 10) / 10,
+        payoutMethodAgeMinutes: Number.isFinite(ageMinutes)
+          ? Math.round(ageMinutes * 10) / 10
+          : -1,
         windowMinutes: rule.windowMinutes,
       });
       return {

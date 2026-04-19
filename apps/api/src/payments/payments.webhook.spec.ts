@@ -77,6 +77,13 @@ describe('PaymentsService — Webhook Signature Verification', () => {
     data: { id: 'pay-123' },
   };
 
+  // handleWebhook now takes (rawBody, parsedPayload, signature). Tests
+  // exercise the in-service branches, not HTTP-layer raw-body capture,
+  // so we synthesise a Buffer from the parsed payload. Production code
+  // verifies against the wire bytes (see payments.controller).
+  const rawOf = (payload: unknown): Buffer =>
+    Buffer.from(JSON.stringify(payload));
+
   describe('production mode (NODE_ENV=production)', () => {
     let service: PaymentsService;
 
@@ -86,7 +93,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
 
     it('should reject missing signature in production with 401', async () => {
       await expect(
-        service.handleWebhook(validPayload, undefined),
+        service.handleWebhook(rawOf(validPayload), validPayload, undefined),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -94,7 +101,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(false);
 
       await expect(
-        service.handleWebhook(validPayload, 'bad-signature'),
+        service.handleWebhook(rawOf(validPayload), validPayload, 'bad-signature'),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -104,14 +111,16 @@ describe('PaymentsService — Webhook Signature Verification', () => {
         status: 'approved',
       });
 
+      const raw = rawOf(validPayload);
       const result = await service.handleWebhook(
+        raw,
         validPayload,
         'valid-signature',
       );
 
       expect(result).toEqual({ received: true });
       expect(mockMercadoPago.verifyWebhookSignature).toHaveBeenCalledWith(
-        JSON.stringify(validPayload),
+        raw,
         'valid-signature',
       );
     });
@@ -126,7 +135,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
 
     it('should still reject missing signature in development mode', async () => {
       await expect(
-        service.handleWebhook(validPayload, undefined),
+        service.handleWebhook(rawOf(validPayload), validPayload, undefined),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -134,7 +143,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(false);
 
       await expect(
-        service.handleWebhook(validPayload, 'bad-signature'),
+        service.handleWebhook(rawOf(validPayload), validPayload, 'bad-signature'),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -145,6 +154,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       });
 
       const result = await service.handleWebhook(
+        rawOf(validPayload),
         validPayload,
         'valid-signature',
       );
@@ -162,24 +172,32 @@ describe('PaymentsService — Webhook Signature Verification', () => {
     });
 
     it('should reject payload missing "action" field', async () => {
+      const body = { data: { id: 'pay-1' } };
       await expect(
-        service.handleWebhook({ data: { id: 'pay-1' } }, 'valid-sig'),
+        service.handleWebhook(rawOf(body), body, 'valid-sig'),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should reject payload missing "data" field', async () => {
+      const body = { action: 'payment.updated' };
       await expect(
-        service.handleWebhook(
-          { action: 'payment.updated' },
-          'valid-sig',
-        ),
+        service.handleWebhook(rawOf(body), body, 'valid-sig'),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('should reject completely empty payload', async () => {
-      await expect(service.handleWebhook({}, 'valid-sig')).rejects.toThrow(
-        BadRequestException,
-      );
+      const body = {};
+      await expect(
+        service.handleWebhook(rawOf(body), body, 'valid-sig'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a well-formed payload when rawBody is missing', async () => {
+      // Defence in depth: if the HTTP layer forgot to capture rawBody,
+      // handleWebhook must refuse rather than fall back to re-stringify.
+      await expect(
+        service.handleWebhook(undefined, validPayload, 'valid-sig'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should accept well-formed payload with both action and data', async () => {
@@ -187,7 +205,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
         status: 'approved',
       });
 
-      const result = await service.handleWebhook(validPayload, 'valid-sig');
+      const result = await service.handleWebhook(rawOf(validPayload), validPayload, 'valid-sig');
 
       expect(result).toEqual({ received: true });
     });
@@ -211,11 +229,9 @@ describe('PaymentsService — Webhook Signature Verification', () => {
     it('records the delivery id on first receipt', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
       mockMercadoPago.getPaymentStatus.mockResolvedValue({ status: 'approved' });
+      const body = { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } };
 
-      await service.handleWebhook(
-        { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } },
-        'valid-sig',
-      );
+      await service.handleWebhook(rawOf(body), body, 'valid-sig');
 
       expect(mockPrisma.processedWebhook.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -230,11 +246,9 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
       const p2002 = Object.assign(new Error('unique violation'), { code: 'P2002' });
       mockPrisma.processedWebhook.create.mockRejectedValueOnce(p2002);
+      const body = { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } };
 
-      const result = await service.handleWebhook(
-        { id: 'delivery-abc', action: 'payment.updated', data: { id: 'pay-1' } },
-        'valid-sig',
-      );
+      const result = await service.handleWebhook(rawOf(body), body, 'valid-sig');
 
       expect(result).toEqual({ received: true, duplicate: true });
       // Critical: the payment status fetch + processApprovedPayment
@@ -244,12 +258,10 @@ describe('PaymentsService — Webhook Signature Verification', () => {
 
     it('rejects a payload without any id (cannot dedup → refuse to process)', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
+      const body = { action: 'payment.updated', data: {} };
 
       await expect(
-        service.handleWebhook(
-          { action: 'payment.updated', data: {} },
-          'valid-sig',
-        ),
+        service.handleWebhook(rawOf(body), body, 'valid-sig'),
       ).rejects.toThrow(/id ausente/);
       expect(mockPrisma.processedWebhook.create).not.toHaveBeenCalled();
     });

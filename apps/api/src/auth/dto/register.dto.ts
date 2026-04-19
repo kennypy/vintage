@@ -42,4 +42,10 @@ export class RegisterDto {
   @MinLength(1)
   @MaxLength(32)
   tosVersion!: string;
+
+  // Cloudflare Turnstile token — see LoginDto for the ValidationPipe note.
+  @ApiProperty({ description: 'Cloudflare Turnstile token', required: false })
+  @IsOptional()
+  @IsString()
+  captchaToken?: string;
 }

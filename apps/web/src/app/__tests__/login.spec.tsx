@@ -77,12 +77,23 @@ describe('LoginPage', () => {
         ([url]: [string]) => url.includes('/auth/login') && !url.includes('csrf'),
       );
       expect(loginCall).toBeDefined();
-      expect(JSON.parse(loginCall[1].body)).toEqual({ email: 'user@test.com', password: 'password123' });
+      // captchaToken is null until the Turnstile widget solves (it never
+      // does under jsdom). The backend CaptchaGuard no-ops when
+      // CAPTCHA_ENFORCE=false, so null is the correct wire value here.
+      expect(JSON.parse(loginCall[1].body)).toEqual({
+        email: 'user@test.com',
+        password: 'password123',
+        captchaToken: null,
+      });
     });
   });
 
-  it('stores token on successful login', async () => {
-    mockFetch({ accessToken: 'my-token-abc' });
+  it('marks the browser as signed-in after a successful login', async () => {
+    // Cookie migration: the JWT itself lives in an HttpOnly cookie set
+    // by the API and is invisible to JS. What remains in localStorage
+    // is a non-secret presence marker ("1") that layout-level auth
+    // gates read to decide whether to render account chrome.
+    mockFetch({ accessToken: 'my-token-abc', refreshToken: 'r-1' });
     render(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'user@test.com' } });
@@ -90,7 +101,7 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
 
     await waitFor(() => {
-      expect(localStorage.getItem('vintage_token')).toBe('my-token-abc');
+      expect(localStorage.getItem('vintage_token')).toBe('1');
     });
   });
 

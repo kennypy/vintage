@@ -13,6 +13,16 @@ if (!ENV_API_URL && !IS_DEV) {
 
 const API_BASE_URL = ENV_API_URL ?? 'http://localhost:3001/api/v1';
 
+// Defence in depth: even if EXPO_PUBLIC_ENV is somehow tampered with
+// at build time (eg. a wrong EAS profile), refuse to ship a build
+// that talks to the API over plaintext HTTP. Production traffic carries
+// JWTs + PII + payment intents — every byte must be on TLS.
+if (!IS_DEV && API_BASE_URL.startsWith('http://')) {
+  throw new Error(
+    'Production builds must use https:// for EXPO_PUBLIC_API_URL. Cleartext API URLs would expose tokens and payment data.',
+  );
+}
+
 const TOKEN_KEY = 'vintage_access_token';
 const REFRESH_KEY = 'vintage_refresh_token';
 

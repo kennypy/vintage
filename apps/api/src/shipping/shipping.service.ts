@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as QRCode from 'qrcode';
 import { CorreiosClient } from './correios.client';
 import { JadlogClient } from './jadlog.client';
 import { KanguClient } from './kangu.client';
 import { PegakiClient } from './pegaki.client';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface ShippingOption {
   carrier: string;
@@ -49,7 +50,28 @@ export class ShippingService {
     private readonly jadlog: JadlogClient,
     private readonly kangu: KanguClient,
     private readonly pegaki: PegakiClient,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Ownership gate for generateShippingLabel. The previous controller
+   * accepted an orderId and a userId-less service call, which meant any
+   * authenticated user could generate — and pay for — a shipping label
+   * for any order they knew the id of. Resolve the order and refuse
+   * unless the caller is its seller.
+   */
+  private async assertSellerOfOrder(orderId: string, userId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { sellerId: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Pedido não encontrado');
+    }
+    if (order.sellerId !== userId) {
+      throw new ForbiddenException('Você não é o vendedor deste pedido.');
+    }
+  }
 
   /**
    * Calcula fretes disponíveis com base no CEP de origem/destino e peso.
@@ -133,7 +155,9 @@ export class ShippingService {
     originAddress: string,
     destinationAddress: string,
     weightG: number,
+    userId: string,
   ): Promise<ShippingLabel> {
+    await this.assertSellerOfOrder(orderId, userId);
     const normalizedCarrier = carrier.toLowerCase();
 
     if (normalizedCarrier === 'jadlog') {

@@ -61,7 +61,12 @@ describe('CaptchaGuard', () => {
     expect(ok).toBe(true);
   });
 
-  it('prefers X-Forwarded-For over req.ip for remoteIp', async () => {
+  it('uses Express-resolved req.ip and ignores raw X-Forwarded-For', async () => {
+    // Trust-proxy is configured in main.ts, so Express already resolves
+    // req.ip from the correct hop. Reading X-Forwarded-For directly
+    // would let an attacker forge the remoteip field sent to Turnstile
+    // (poisoning its risk score for other users). Pin that the guard
+    // no longer touches the raw header.
     const captcha = {
       enforceEnabled: true,
       verify: jest.fn().mockResolvedValue(true),
@@ -78,6 +83,6 @@ describe('CaptchaGuard', () => {
     } as unknown as ExecutionContext;
 
     await guard.canActivate(ctx);
-    expect(captcha.verify).toHaveBeenCalledWith('t', '203.0.113.5');
+    expect(captcha.verify).toHaveBeenCalledWith('t', '10.0.0.1');
   });
 });

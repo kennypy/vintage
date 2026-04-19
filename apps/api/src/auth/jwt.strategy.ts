@@ -1,8 +1,22 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ExtractJwt, Strategy, type JwtFromRequestFunction } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { SESSION_COOKIE_NAME } from './cookie.constants';
+
+/**
+ * Pull the access token out of the HttpOnly session cookie set by the
+ * auth controller after login. Used by the web client (which can no
+ * longer touch the token because it lives in an HttpOnly cookie). Mobile
+ * clients keep using the Authorization: Bearer header — the extractor
+ * chain below tries the cookie first then falls back to the header so
+ * both transports work simultaneously.
+ */
+const cookieExtractor: JwtFromRequestFunction = (req) => {
+  const cookies = (req as { cookies?: Record<string, string> }).cookies;
+  return cookies?.[SESSION_COOKIE_NAME] ?? null;
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -19,7 +33,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new Error('JWT_SECRET is required');
     }
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        cookieExtractor,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: secret,
     });

@@ -18,7 +18,12 @@ const securityHeaders = [
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' https: blob:",
+      // No `blob:` — we don't render any user-supplied blob/data URIs
+      // anywhere. Allowing blob: would let stored XSS pop an attacker-
+      // controlled image (which becomes a vector for phishing overlays
+      // when combined with a CSS exploit). Re-add behind a strict scope
+      // if a future feature legitimately needs it.
+      "img-src 'self' https:",
       "font-src 'self' data:",
       "connect-src 'self' https://api.vintage.br https://api-staging.vintage.br",
       "frame-ancestors 'none'",

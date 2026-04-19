@@ -136,7 +136,13 @@ export class PromotionsService {
       throw new BadRequestException('Carteira não encontrada. Adicione saldo primeiro');
     }
 
-    if (Number(wallet.balanceBrl) < BUMP_PRICE_BRL) {
+    // Compare in integer centavos so the pre-flight check is exact.
+    // The authoritative debit below still runs through the conditional
+    // updateMany gate in walletsService, but this pre-check should not
+    // drift from it because of float representation.
+    const balanceCentavos = Math.round(Number(wallet.balanceBrl) * 100);
+    const priceCentavos = Math.round(BUMP_PRICE_BRL * 100);
+    if (balanceCentavos < priceCentavos) {
       throw new BadRequestException(
         `Saldo insuficiente. Necessário R$${BUMP_PRICE_BRL.toFixed(2)}`,
       );

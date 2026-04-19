@@ -68,11 +68,17 @@ export class UploadsController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido' })
   async uploadAvatar(
     @UploadedFile() file: UploadedFileInfo,
+    @CurrentUser() user: AuthUser,
   ): Promise<{ url: string; key: string }> {
     if (!file || !file.buffer) {
       throw new BadRequestException('Nenhum arquivo enviado.');
     }
-    return this.uploadsService.uploadAvatar(file.buffer, file.originalname, file.mimetype);
+    return this.uploadsService.uploadAvatar(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      user.id,
+    );
   }
 
   @Post('listing-video')
@@ -85,20 +91,33 @@ export class UploadsController {
   @ApiResponse({ status: 400, description: 'Arquivo inválido' })
   async uploadListingVideo(
     @UploadedFile() file: UploadedFileInfo,
+    @CurrentUser() user: AuthUser,
   ): Promise<{ url: string; key: string }> {
     if (!file || !file.buffer) {
       throw new BadRequestException('Nenhum arquivo de vídeo enviado.');
     }
-    return this.uploadsService.uploadListingVideo(file.buffer, file.originalname, file.mimetype);
+    return this.uploadsService.uploadListingVideo(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      user.id,
+    );
   }
 
   @Delete(':key')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Remover imagem ou vídeo' })
+  @ApiOperation({
+    summary: 'Remover imagem ou vídeo',
+    description:
+      'Only the owner of the resource can delete. Listing media is gated by listing.sellerId; avatars are gated by the path matching the user\'s current avatarUrl.',
+  })
   @ApiResponse({ status: 200, description: 'Arquivo removido' })
-  async deleteImage(@Param('key') key: string) {
-    await this.uploadsService.deleteImage(key);
+  async deleteImage(
+    @Param('key') key: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    await this.uploadsService.deleteImage(key, user.id);
     return { deleted: true };
   }
 }

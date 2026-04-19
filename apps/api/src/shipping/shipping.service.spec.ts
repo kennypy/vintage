@@ -14,11 +14,20 @@ const mockConfigService = {
   get: jest.fn().mockReturnValue(''),
 };
 
+// generateShippingLabel now asserts the caller is the order's seller.
+// Every test below passes 'seller-1' + arranges a matching order row.
+const mockPrisma = {
+  order: {
+    findUnique: jest.fn(),
+  },
+};
+
 describe('ShippingService', () => {
   let service: ShippingService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.order.findUnique.mockResolvedValue({ sellerId: 'seller-1' });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -28,6 +37,10 @@ describe('ShippingService', () => {
         KanguClient,
         PegakiClient,
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: require('../prisma/prisma.service').PrismaService,
+          useValue: mockPrisma,
+        },
       ],
     }).compile();
 
@@ -70,6 +83,7 @@ describe('ShippingService', () => {
         'Rua A, 100, SP',
         'Rua B, 200, PR',
         500,
+        'seller-1',
       );
 
       expect(result.trackingCode).toMatch(/^BR/);
@@ -86,10 +100,42 @@ describe('ShippingService', () => {
         'Rua A, 100, SP',
         'Rua B, 200, RJ',
         300,
+        'seller-1',
       );
 
       expect(result.trackingCode).toMatch(/^JD/);
       expect(result.carrier).toBe('Jadlog');
+    });
+
+    it('refuses when the caller is not the seller of the order', async () => {
+      // IDOR guard — the whole reason this commit exists. Any
+      // authenticated non-seller used to be able to burn the real
+      // seller's carrier credits / generate spurious labels.
+      mockPrisma.order.findUnique.mockResolvedValueOnce({ sellerId: 'seller-2' });
+      await expect(
+        service.generateShippingLabel(
+          'order-3',
+          'Correios',
+          'Rua A, 100, SP',
+          'Rua B, 200, SP',
+          200,
+          'not-the-seller',
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('refuses when the order does not exist', async () => {
+      mockPrisma.order.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.generateShippingLabel(
+          'order-missing',
+          'Correios',
+          'Rua A',
+          'Rua B',
+          200,
+          'seller-1',
+        ),
+      ).rejects.toThrow();
     });
   });
 
