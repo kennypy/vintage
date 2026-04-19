@@ -54,9 +54,18 @@ const mockPrisma = {
     updateMany: jest.fn(),
     deleteMany: jest.fn(),
   },
-  $transaction: jest.fn().mockImplementation((ops: unknown[]) => Promise.all(ops)),
+  $transaction: jest.fn().mockImplementation((argsOrCb: unknown) => {
+    if (typeof argsOrCb === 'function') {
+      // Pass a tx that defaults to the same mockPrisma surface — tests that
+      // care about specific tx behaviour override the callback.
+      return (argsOrCb as (tx: typeof mockPrisma) => unknown)(mockPrisma);
+    }
+    return Promise.all(argsOrCb as unknown[]);
+  }),
   passwordResetToken: {
     updateMany: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
   },
 };
 
@@ -330,9 +339,12 @@ describe('AuthService', () => {
 
     beforeEach(() => {
       jest.clearAllMocks();
-      mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
-        Promise.all(ops),
-      );
+      mockPrisma.$transaction.mockImplementation((argsOrCb: unknown) => {
+        if (typeof argsOrCb === 'function') {
+          return (argsOrCb as (tx: typeof mockPrisma) => unknown)(mockPrisma);
+        }
+        return Promise.all(argsOrCb as unknown[]);
+      });
     });
 
     it('rotates: marks the presented row used, issues a new pair, and links replacedById', async () => {
@@ -739,6 +751,232 @@ describe('AuthService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('resetPassword (A-01: race-safe single-use claim)', () => {
+    const rawToken = 'a'.repeat(64);
+    const tokenHash = require('crypto')
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
+    const future = () => new Date(Date.now() + 60_000);
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_new_password');
+    });
+
+    it('happy path: claim wins, password + tokenVersion updated, sibling tokens invalidated', async () => {
+      mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+        id: 'prt-1',
+        userId: 'user-1',
+        tokenHash,
+        usedAt: null,
+        expiresAt: future(),
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        deletedAt: null,
+      });
+      // Tx callback receives the same mockPrisma; the claim wins.
+      mockPrisma.passwordResetToken.updateMany.mockResolvedValueOnce({ count: 1 });
+
+      await service.resetPassword(rawToken, 'BrandNewPass123!');
+
+      // Claim came first, INSIDE the tx, with the right where-clause.
+      expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'prt-1',
+            usedAt: null,
+            expiresAt: { gt: expect.any(Date) },
+          }),
+        }),
+      );
+      // Then user.update.
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            passwordHash: 'hashed_new_password',
+            tokenVersion: { increment: 1 },
+          }),
+        }),
+      );
+    });
+
+    it('A-01: race loser (updateMany count=0) throws and writes NO password / NO tokenVersion bump', async () => {
+      mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+        id: 'prt-1',
+        userId: 'user-1',
+        tokenHash,
+        usedAt: null,
+        expiresAt: future(),
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        deletedAt: null,
+      });
+      // Concurrent winner already claimed.
+      mockPrisma.passwordResetToken.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        service.resetPassword(rawToken, 'AttackerPass99!'),
+      ).rejects.toThrow(/inválido|expirado/i);
+
+      // Critical: no password write, no tokenVersion bump, no sibling
+      // invalidation (all of which would let the race re-stack effects).
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the token is not found', async () => {
+      mockPrisma.passwordResetToken.findUnique.mockResolvedValue(null);
+      await expect(
+        service.resetPassword(rawToken, 'whatever'),
+      ).rejects.toThrow(/inválido|expirado/i);
+    });
+
+    it('rejects when the token has already been used', async () => {
+      mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+        id: 'prt-1',
+        userId: 'user-1',
+        tokenHash,
+        usedAt: new Date(),
+        expiresAt: future(),
+      });
+      await expect(
+        service.resetPassword(rawToken, 'whatever'),
+      ).rejects.toThrow(/inválido|expirado/i);
+    });
+  });
+
+  describe('forgotPassword (A-04: per-user throttle, neutral response)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockRedisService.setNx.mockResolvedValue(true);
+      mockRedisService.incrWithTtl.mockResolvedValue(1);
+    });
+
+    it('throttles per user across IP rotation: cooldown bucket short-circuits silently', async () => {
+      // First call wins the cooldown — but for THIS test we simulate the
+      // attacker's second call against the SAME victim email, where the
+      // cooldown is still held.
+      mockRedisService.setNx.mockResolvedValueOnce(false);
+      // Critical: we still return the neutral response, never enumerate.
+      const res = await service.forgotPassword('victim@example.com');
+      expect(res.success).toBe(true);
+      // No DB lookup, no token row written.
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.passwordResetToken.create).not.toHaveBeenCalled();
+      // Cooldown key is keyed on the lowercased+hashed email, NOT the IP.
+      expect(mockRedisService.setNx).toHaveBeenCalledWith(
+        expect.stringMatching(/^auth:pwreset:cooldown:[0-9a-f]{16}$/),
+        '1',
+        expect.any(Number),
+      );
+    });
+
+    it('throttles per user when hourly cap is exceeded (still neutral)', async () => {
+      mockRedisService.setNx.mockResolvedValue(true);
+      mockRedisService.incrWithTtl.mockResolvedValue(99);
+      const res = await service.forgotPassword('victim@example.com');
+      expect(res.success).toBe(true);
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.passwordResetToken.create).not.toHaveBeenCalled();
+    });
+
+    it('case-folds the email so attackers cannot rotate case to multiply the bucket', async () => {
+      mockRedisService.setNx.mockResolvedValue(true);
+      mockRedisService.incrWithTtl.mockResolvedValue(1);
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      await service.forgotPassword('Victim@DAST.test');
+      await service.forgotPassword('victim@dast.test');
+      await service.forgotPassword('VICTIM@DAST.TEST');
+
+      // All three should have hit the SAME cooldown key.
+      const keys = mockRedisService.setNx.mock.calls.map((c) => c[0]);
+      expect(new Set(keys).size).toBe(1);
+    });
+
+    it('returns the neutral response even when the user is unknown (no enumeration)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      const res = await service.forgotPassword('nobody@nowhere.test');
+      expect(res.success).toBe(true);
+      expect(mockPrisma.passwordResetToken.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmLoginWithTwoFa (A-06: re-checks delete/ban on confirm)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockJwtService.verify.mockReturnValue({ sub: 'user-1', type: 'twofa_pending' });
+      mockRedisService.get.mockResolvedValue(null);
+    });
+
+    it('refuses to mint tokens when the user was soft-deleted between login and 2FA confirm', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: true,
+        twoFaMethod: 'TOTP',
+        twoFaSecret: 'SECRET',
+        deletedAt: new Date(),
+        isBanned: false,
+      });
+      await expect(
+        service.confirmLoginWithTwoFa('tmp', '123456'),
+      ).rejects.toThrow(/inválido/i);
+    });
+
+    it('refuses to mint tokens when the user was banned between login and 2FA confirm', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        twoFaEnabled: true,
+        twoFaMethod: 'TOTP',
+        twoFaSecret: 'SECRET',
+        deletedAt: null,
+        isBanned: true,
+      });
+      await expect(
+        service.confirmLoginWithTwoFa('tmp', '123456'),
+      ).rejects.toThrow(/inválido/i);
+    });
+  });
+
+  describe('adminSetup (A-10: timing-safe key compare)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'ADMIN_SETUP_KEY') return 'super-secret-admin-key-zxcvbnm';
+        if (key === 'TOS_VERSION') return '1.0.0';
+        return undefined;
+      });
+    });
+
+    it('rejects a wrong key without throwing on length mismatch (timingSafeEqual would, we collapse)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.adminSetup('user-1', 'short')).rejects.toThrow(
+        /inválida/,
+      );
+    });
+
+    it('rejects a same-length but wrong key (constant-time path)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      await expect(
+        service.adminSetup('user-1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+      ).rejects.toThrow(/inválida/);
+    });
+
+    it('accepts the correct key (sanity)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        deletedAt: null,
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+      await expect(
+        service.adminSetup('user-1', 'super-secret-admin-key-zxcvbnm'),
+      ).resolves.toBeDefined();
     });
   });
 });
