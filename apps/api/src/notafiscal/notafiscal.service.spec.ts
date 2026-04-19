@@ -3,6 +3,7 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { NotaFiscalService } from './notafiscal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NFeClient } from './nfe.client';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 const mockPrisma = {
   order: {
@@ -30,6 +31,7 @@ describe('NotaFiscalService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         NotaFiscalService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NFeClient, useValue: mockNFeClient },
@@ -57,7 +59,7 @@ describe('NotaFiscalService', () => {
         buyerId: 'buyer-1',
         sellerId: 'seller-1',
         itemPriceBrl: 150,
-        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        buyer: { id: 'buyer-1', cpfEncrypted: 'ENC(12345678901)', cpfLookupHash: 'HASH(12345678901)' },
         seller: { id: 'seller-1', cnpj: null, cpfIdentityVerified: true, addresses: [] },
         shippingAddress: { state: 'RJ' },
         notaFiscal: null,
@@ -84,7 +86,7 @@ describe('NotaFiscalService', () => {
         buyerId: 'buyer-1',
         sellerId: 'seller-1',
         itemPriceBrl: 150,
-        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        buyer: { id: 'buyer-1', cpfEncrypted: 'ENC(12345678901)', cpfLookupHash: 'HASH(12345678901)' },
         seller: { id: 'seller-1', cnpj: null, cpfIdentityVerified: true, addresses: [] },
         shippingAddress: null,
         notaFiscal: existingNfe,
@@ -103,7 +105,7 @@ describe('NotaFiscalService', () => {
         buyerId: 'buyer-1',
         sellerId: 'seller-1',
         itemPriceBrl: 150,
-        buyer: { id: 'buyer-1', cpf: '12345678901' },
+        buyer: { id: 'buyer-1', cpfEncrypted: 'ENC(12345678901)', cpfLookupHash: 'HASH(12345678901)' },
         seller: {
           id: 'seller-1',
           cnpj: '12345678000190',

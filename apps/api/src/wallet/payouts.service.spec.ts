@@ -13,6 +13,7 @@ import {
 } from '../payments/mercadopago.client';
 import { FraudService } from '../fraud/fraud.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 jest.mock('@vintage/shared', () => ({
   MIN_PAYOUT_BRL: 10.0,
@@ -49,7 +50,7 @@ describe('PayoutsService', () => {
 
     // Default: caller has verified CPF.
     mockPrisma.user.findUnique.mockResolvedValue({
-      cpf: '52998224725',
+      cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
       cpfIdentityVerified: true,
     });
     mockPayoutMethods.getOwnedOrThrow.mockResolvedValue({
@@ -61,6 +62,7 @@ describe('PayoutsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         PayoutsService,
         { provide: PrismaService, useValue: mockPrisma },
@@ -125,7 +127,7 @@ describe('PayoutsService', () => {
     });
 
     it('rejects users whose CPF is linked but NOT verified (Wave 3C tightening)', async () => {
-      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: '52998224725', cpfIdentityVerified: false });
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)', cpfIdentityVerified: false });
 
       await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
         /Verificação de identidade pendente/,

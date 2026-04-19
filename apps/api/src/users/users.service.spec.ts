@@ -9,6 +9,7 @@ import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
 import * as bcrypt from 'bcrypt';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 jest.mock('bcrypt');
 
@@ -64,6 +65,7 @@ describe('UsersService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
@@ -356,18 +358,24 @@ describe('UsersService', () => {
       );
     });
 
-    it('persists the CPF as digits-only and marks checksum valid — identity still unverified', async () => {
+    it('persists the CPF as AES-encrypted ciphertext + lookup hash — identity still unverified', async () => {
       mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.setCpf('user-1', VALID_CPF_FORMATTED);
 
       expect(result).toEqual({ success: true });
-      // Modulo-11 passed; the row gets cpfChecksumValid=true. The
-      // separate cpfIdentityVerified column stays at its default
-      // (false) — only a Track-B KYC provider can flip that.
+      // Modulo-11 passed; the row gets cpfChecksumValid=true. CPF
+      // itself is stored as CpfVaultService ciphertext + HMAC lookup
+      // hash; the plaintext never touches the DB. The separate
+      // cpfIdentityVerified column stays at its default (false) —
+      // only a Track-B KYC provider can flip that.
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
-        where: { id: 'user-1', cpf: null },
-        data: { cpf: VALID_CPF_PLAIN, cpfChecksumValid: true },
+        where: { id: 'user-1', cpfEncrypted: null, cpfLookupHash: null },
+        data: {
+          cpfEncrypted: `ENC(${VALID_CPF_PLAIN})`,
+          cpfLookupHash: `HASH(${VALID_CPF_PLAIN})`,
+          cpfChecksumValid: true,
+        },
       });
     });
   });

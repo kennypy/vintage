@@ -30,6 +30,8 @@ jest.mock('@vintage/shared', () => ({
 }));
 
 import { isValidCPF } from '@vintage/shared';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 const mockPrisma = {
   user: {
@@ -118,6 +120,8 @@ describe('AuthService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MetricsService, useValue: { authLoginFailed: { inc: jest.fn() }, authLoginLocked: { inc: jest.fn() }, authRefreshReuse: { inc: jest.fn() }, authCsrfRejected: { inc: jest.fn() }, paymentFlagCreated: { inc: jest.fn() }, webhookSignatureRejected: { inc: jest.fn() }, webhookDuplicate: { inc: jest.fn() }, privacyAudit: { inc: jest.fn() }, orderCreate: { observe: jest.fn() } } },
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwtService },
@@ -146,16 +150,18 @@ describe('AuthService', () => {
 
     it('should create user with hashed password, create wallet, and return tokens', async () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
-      mockPrisma.user.findFirst.mockResolvedValue(null); // CPF uniqueness
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
       mockPrisma.user.create.mockResolvedValue({ id: 'user-1', email: 'test@example.com', name: 'Maria Silva' });
-      // Email-uniqueness lookup goes first; subsequent findUnique calls
-      // are generateTokens (tokenVersion read) and generateTokensWithUser.
+      // CPF-at-rest changed the register-path reads: CPF is now a
+      // findUnique on cpfLookupHash, followed by the email findUnique,
+      // then generateTokens reads tokenVersion, then
+      // generateTokensWithUser reads the full row.
       mockPrisma.user.findUnique
-        .mockResolvedValueOnce(null) // email uniqueness — no existing record
+        .mockResolvedValueOnce(null) // cpfLookupHash uniqueness — clear
+        .mockResolvedValueOnce(null) // email uniqueness — clear
         .mockResolvedValue({
           id: 'user-1', name: 'Maria Silva', email: 'test@example.com',
-          cpf: '52998224725', avatarUrl: null, createdAt: new Date(),
+          cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)', avatarUrl: null, createdAt: new Date(),
           tokenVersion: 0,
         });
       mockJwtService.sign.mockReturnValue('access-token');
@@ -168,7 +174,7 @@ describe('AuthService', () => {
         data: expect.objectContaining({
           email: 'test@example.com',
           passwordHash: 'hashed_password',
-          cpf: '52998224725',
+          cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
           name: 'Maria Silva',
           phone: '+5511999999999',
           wallet: { create: {} },
@@ -184,7 +190,8 @@ describe('AuthService', () => {
 
     it('should reject duplicate CPF', async () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
-      mockPrisma.user.findFirst.mockResolvedValue({ id: 'existing-user' });
+      // CPF lookup (first findUnique) returns an existing row.
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ id: 'existing-user' });
 
       await expect(service.register(registerDto)).rejects.toThrow(
         ConflictException,
@@ -196,8 +203,9 @@ describe('AuthService', () => {
 
     it('should reject duplicate email when the existing record is verified', async () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
-      mockPrisma.user.findFirst.mockResolvedValue(null); // CPF clear
-      mockPrisma.user.findUnique.mockResolvedValueOnce({
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // cpfLookupHash uniqueness — clear
+        .mockResolvedValueOnce({
         id: 'existing-user',
         email: 'test@example.com',
         emailVerifiedAt: new Date(),
@@ -217,8 +225,8 @@ describe('AuthService', () => {
       // owner register normally instead of being permanently locked
       // out by an attacker who registered first.
       (isValidCPF as jest.Mock).mockReturnValue(true);
-      mockPrisma.user.findFirst.mockResolvedValue(null);
       mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // cpfLookupHash uniqueness — clear
         .mockResolvedValueOnce({
           id: 'squatter-1',
           email: 'test@example.com',
@@ -230,7 +238,7 @@ describe('AuthService', () => {
           id: 'real-user-1',
           name: 'Maria Silva',
           email: 'test@example.com',
-          cpf: '52998224725',
+          cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
           avatarUrl: null,
           createdAt: new Date(),
           tokenVersion: 0,
@@ -274,7 +282,7 @@ describe('AuthService', () => {
         passwordHash: 'hashed_password',
         name: 'Test',
         email: 'test@example.com',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         avatarUrl: null,
         createdAt: new Date(),
         isBanned: false,

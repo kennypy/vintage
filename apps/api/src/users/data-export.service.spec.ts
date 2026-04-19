@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import * as unzipper from 'node:zlib';
 import { DataExportService, maskPixKey } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 const mockPrisma = {
   user: { findUnique: jest.fn() },
@@ -16,6 +17,7 @@ const mockPrisma = {
   notification: { findMany: jest.fn().mockResolvedValue([]) },
   review: { findMany: jest.fn().mockResolvedValue([]) },
   fraudFlag: { findMany: jest.fn().mockResolvedValue([]) },
+  consentRecord: { findMany: jest.fn().mockResolvedValue([]) },
 };
 
 async function drain(stream: Readable): Promise<Buffer> {
@@ -36,7 +38,7 @@ describe('DataExportService', () => {
       id: 'user-1',
       email: 'user@example.com',
       name: 'Jane',
-      cpf: '52998224725',
+      cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
       cnpj: null,
       phone: '+5511900000000',
       bio: null,
@@ -69,6 +71,7 @@ describe('DataExportService', () => {
 
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         DataExportService,
         { provide: PrismaService, useValue: mockPrisma },
       ],

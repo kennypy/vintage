@@ -46,6 +46,7 @@ import { FraudModule } from './fraud/fraud.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { IdentityModule } from './identity/identity.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
     CommonModule,
     PrismaModule,
     AuditLogModule,
+    MetricsModule,
     AuthModule,
     UsersModule,
     ListingsModule,

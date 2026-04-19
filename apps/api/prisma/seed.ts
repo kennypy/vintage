@@ -2,10 +2,39 @@ import { PrismaClient, ItemCondition, OrderStatus, AuthenticityStatus, UserRole 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import * as path from 'path';
 
 loadEnv({ path: path.join(__dirname, '../.env') });
+
+// ---------------------------------------------------------------------------
+// CPF-at-rest helpers (duplicated from CpfVaultService — the seed script
+// runs outside the Nest injector). Uses the SAME env vars the service
+// uses, so seeded rows are decryptable by the running API. If the keys
+// are unset in this env, we fall back to a deterministic dev key so
+// `npm run seed` works out-of-the-box; production never runs the seed.
+// ---------------------------------------------------------------------------
+const DEV_FALLBACK_ENC_KEY = 'dev-only-cpf-encryption-key-do-not-use-for-prod-data-0123456789ab';
+const DEV_FALLBACK_LOOKUP_KEY = 'dev-only-cpf-lookup-key-do-not-use-for-prod-data-abcdef0123456789';
+const encKey = Buffer.from(
+  (process.env.CPF_ENCRYPTION_KEY || DEV_FALLBACK_ENC_KEY).slice(0, 64).padEnd(64, '0'),
+  'hex',
+);
+const lookupKey = Buffer.from(
+  (process.env.CPF_LOOKUP_KEY || DEV_FALLBACK_LOOKUP_KEY).slice(0, 64).padEnd(64, '0'),
+  'hex',
+);
+function encCpf(cpf: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', encKey, iv);
+  const enc = Buffer.concat([cipher.update(cpf, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
+}
+function hashCpf(cpf: string): string {
+  return crypto.createHmac('sha256', lookupKey).update(cpf).digest('hex');
+}
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
 const adapter = new PrismaPg(pool);
@@ -233,7 +262,8 @@ async function main() {
       email: 'teste@vintage.com.br',
       passwordHash: pw,
       name: 'Maria Teste',
-      cpf: '52998224725',
+      cpfEncrypted: encCpf('52998224725'),
+      cpfLookupHash: hashCpf('52998224725'),
       cpfChecksumValid: true, cpfIdentityVerified: true,
       verified: true,
       bio: 'Usuária de teste principal. Compra e vende muito!',
@@ -250,7 +280,8 @@ async function main() {
       email: 'ana.vendedora@vintage.com.br',
       passwordHash: pw,
       name: 'Ana Vendedora',
-      cpf: '11144477735',
+      cpfEncrypted: encCpf('11144477735'),
+      cpfLookupHash: hashCpf('11144477735'),
       cpfChecksumValid: true, cpfIdentityVerified: true,
       verified: true,
       bio: 'Apaixonada por moda sustentável. Mais de 50 vendas!',
@@ -267,7 +298,8 @@ async function main() {
       email: 'joao.comprador@vintage.com.br',
       passwordHash: pw,
       name: 'João Comprador',
-      cpf: '98765432100',
+      cpfEncrypted: encCpf('98765432100'),
+      cpfLookupHash: hashCpf('98765432100'),
       cpfChecksumValid: true, cpfIdentityVerified: true,
       verified: true,
       ...seedAcceptedTos,
@@ -283,7 +315,8 @@ async function main() {
       email: 'admin@vintage.com.br',
       passwordHash: pw,
       name: 'Admin Vintage',
-      cpf: '00000000191',
+      cpfEncrypted: encCpf('00000000191'),
+      cpfLookupHash: hashCpf('00000000191'),
       cpfChecksumValid: true, cpfIdentityVerified: true,
       verified: true,
       role: UserRole.ADMIN,

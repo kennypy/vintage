@@ -74,6 +74,8 @@ async function bootstrap() {
     const requiredSecrets = [
       { key: 'JWT_SECRET', label: 'JWT signing secret' },
       { key: 'CSRF_SECRET', label: 'CSRF protection secret' },
+      { key: 'CPF_ENCRYPTION_KEY', label: 'CPF-at-rest AES-256 key (64 hex chars)' },
+      { key: 'CPF_LOOKUP_KEY', label: 'CPF-at-rest HMAC lookup key (64 hex chars)' },
       { key: 'MERCADOPAGO_ACCESS_TOKEN', label: 'Mercado Pago access token' },
       { key: 'MERCADOPAGO_WEBHOOK_SECRET', label: 'Mercado Pago webhook secret' },
       { key: 'NFE_API_KEY', label: 'NF-e API key' },

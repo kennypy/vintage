@@ -10,6 +10,8 @@ import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -87,6 +89,8 @@ describe('AuthService - Social Login', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: MetricsService, useValue: { authLoginFailed: { inc: jest.fn() }, authLoginLocked: { inc: jest.fn() }, authRefreshReuse: { inc: jest.fn() }, authCsrfRejected: { inc: jest.fn() }, paymentFlagCreated: { inc: jest.fn() }, webhookSignatureRejected: { inc: jest.fn() }, webhookDuplicate: { inc: jest.fn() }, privacyAudit: { inc: jest.fn() }, orderCreate: { observe: jest.fn() } } },
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwtService },

@@ -6,6 +6,7 @@ import { MercadoPagoClient } from './mercadopago.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -46,6 +47,7 @@ mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
 function createService(nodeEnv: string): Promise<PaymentsService> {
   return Test.createTestingModule({
     providers: [
+        { provide: MetricsService, useValue: { authLoginFailed: { inc: jest.fn() }, authLoginLocked: { inc: jest.fn() }, authRefreshReuse: { inc: jest.fn() }, authCsrfRejected: { inc: jest.fn() }, paymentFlagCreated: { inc: jest.fn() }, webhookSignatureRejected: { inc: jest.fn() }, webhookDuplicate: { inc: jest.fn() }, privacyAudit: { inc: jest.fn() }, orderCreate: { observe: jest.fn() } } },
       PaymentsService,
       { provide: MercadoPagoClient, useValue: mockMercadoPago },
       {
