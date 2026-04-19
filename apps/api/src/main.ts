@@ -15,6 +15,7 @@ import cookieParser = require('cookie-parser');
 import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
+import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
 
 const logger = new Logger('Bootstrap');
 
@@ -147,6 +148,21 @@ async function bootstrap() {
     }),
   );
 
+  // Align X-XSS-Protection with CLAUDE.md §Security Standards
+  // (DAST minor observation, track 2). Helmet v7+ emits `0` by default
+  // because the old IE/Edge XSS filter caused more harm than it prevented
+  // — all current browsers ignore this header. We set `1; mode=block`
+  // anyway because the CLAUDE.md spec mandates it, the value is harmless
+  // in every modern browser (ignored), and it keeps the prod response
+  // surface matching the documented security baseline.
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+      res.setHeader('X-XSS-Protection', '1; mode=block');
+      next();
+    });
+
   // CORS — explicit allowlist with wildcard rejection.
   // Production MUST provide CORS_ORIGIN. In non-prod, fall back to localhost dev origins.
   const rawCorsOrigin = config.get<string>('CORS_ORIGIN', '');
@@ -189,6 +205,11 @@ async function bootstrap() {
     maxAge: 600,
     credentials: true,
   });
+
+  // Mask body-parser JSON syntax errors so responses don't leak the
+  // underlying parser's error wording (stack fingerprint). See
+  // JsonSyntaxExceptionFilter for the full rationale.
+  app.useGlobalFilters(new JsonSyntaxExceptionFilter());
 
   // Global validation pipe
   app.useGlobalPipes(

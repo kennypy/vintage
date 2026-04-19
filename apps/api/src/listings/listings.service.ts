@@ -6,16 +6,11 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
+import { buildAllowedImageHosts, validateImageUrl } from '../common/validators/image-url.validator';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
 import { MAX_LISTING_IMAGES, containsProhibitedContent } from '@vintage/shared';
-
-/** Default allowlist when ALLOWED_IMAGE_HOSTS env is not configured. */
-const DEFAULT_ALLOWED_IMAGE_HOSTS = [
-  'picsum.photos',        // dev placeholder
-  's3.amazonaws.com',     // generic AWS S3
-];
 
 @Injectable()
 export class ListingsService {
@@ -28,52 +23,11 @@ export class ListingsService {
     private readonly searchService: SearchService,
     private readonly analytics: AnalyticsService,
   ) {
-    const raw = this.config.get<string>('ALLOWED_IMAGE_HOSTS', '');
-    const bucket = this.config.get<string>('S3_BUCKET', '');
-    const region = this.config.get<string>('S3_REGION', '');
-    const hosts = raw
-      .split(',')
-      .map((h) => h.trim().toLowerCase())
-      .filter(Boolean);
-
-    // Auto-include virtual-hosted-style and path-style S3 URLs for the
-    // configured bucket + region so the default config just works.
-    if (bucket && region) {
-      hosts.push(`${bucket}.s3.${region}.amazonaws.com`);
-      hosts.push(`${bucket}.s3.amazonaws.com`);
-      hosts.push(`s3.${region}.amazonaws.com`);
-    }
-    if (hosts.length === 0) {
-      hosts.push(...DEFAULT_ALLOWED_IMAGE_HOSTS);
-    }
-    this.allowedImageHosts = Array.from(new Set(hosts));
-  }
-
-  /** Validate a listing image URL is on the configured allowlist (SSRF + data-exfil defense). */
-  private validateImageUrl(url: string): void {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      throw new BadRequestException('URL de imagem inválida.');
-    }
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new BadRequestException('Protocolo de URL de imagem não permitido.');
-    }
-    const host = parsed.hostname.toLowerCase();
-    const ok = this.allowedImageHosts.some((allowed) => {
-      // Exact match or subdomain match
-      return host === allowed || host.endsWith(`.${allowed}`);
-    });
-    if (!ok) {
-      throw new BadRequestException(
-        `Domínio de imagem não permitido: ${host}`,
-      );
-    }
+    this.allowedImageHosts = buildAllowedImageHosts(this.config);
   }
 
   private validateImageUrls(urls: string[]): void {
-    for (const u of urls) this.validateImageUrl(u);
+    for (const u of urls) validateImageUrl(u, this.allowedImageHosts);
   }
 
   /**
