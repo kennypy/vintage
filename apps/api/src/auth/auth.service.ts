@@ -71,6 +71,26 @@ const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
 const EMAIL_VERIFICATION_MAX_PER_HOUR = 5;
 
+/**
+ * Refresh-token rotation (P-07). Every successful /auth/refresh mints a
+ * new row and marks the presented row `usedAt = now`. If a caller ever
+ * presents a row whose `usedAt` is already set, we treat that as a theft
+ * event: every outstanding refresh token for that user is revoked and
+ * their `tokenVersion` is bumped so any access tokens minted before now
+ * stop verifying. 7-day rolling expiry keeps the database bounded.
+ */
+const REFRESH_TOKEN_BYTES = 48; // 64 base64url chars; well above brute-force range
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/** Optional request context passed through token issuance so the
+ *  RefreshToken row records which device/IP the session started from.
+ *  Everything on it is client-supplied — never used as authentication,
+ *  only as evidence when triaging a suspected theft. */
+export interface TokenIssueContext {
+  userAgent?: string | null;
+  ipAddress?: string | null;
+}
+
 export interface SocialProfile {
   email: string;
   name: string;
@@ -1507,55 +1527,147 @@ export class AuthService {
     return { success: true, message: 'Conta promovida a administrador.' };
   }
 
-  async refreshToken(rawToken: string) {
-    let payload: { sub: string; type?: string; ver?: number };
-    try {
-      payload = this.jwtService.verify(rawToken) as {
-        sub: string;
-        type?: string;
-        ver?: number;
-      };
-    } catch {
+  /**
+   * Redeem a refresh token: atomically mark it used, mint a new
+   * (access, refresh) pair, and link the old row to its replacement.
+   *
+   * Reuse detection: if the token's hash exists but `usedAt` is already
+   * set (or the row is revoked), we treat that as an active theft — the
+   * legitimate client has already rotated past this token, so anyone
+   * replaying it has a copy they shouldn't. We then nuke every
+   * outstanding refresh token for that user AND bump `tokenVersion` so
+   * in-flight access tokens stop verifying on the next request. This is
+   * the OWASP-recommended pattern for rotating refresh tokens.
+   */
+  async refreshToken(rawToken: string, ctx: TokenIssueContext = {}) {
+    if (!rawToken || typeof rawToken !== 'string' || rawToken.length < 32) {
+      throw new UnauthorizedException('Token inválido ou expirado');
+    }
+    const tokenHash = this.hashRefreshToken(rawToken);
+
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!record) {
+      // Unknown hash. Either a fake token or one we've already garbage-
+      // collected. Indistinguishable to the caller — same 401.
       throw new UnauthorizedException('Token inválido ou expirado');
     }
 
-    if (payload.type !== 'refresh') {
-      throw new UnauthorizedException('Token inválido para renovação — use o refresh token');
+    // Reuse detection. A used-or-revoked row replayed = theft.
+    if (record.usedAt || record.revokedAt) {
+      await this.handleRefreshTokenReuse(record.userId, record.id);
+      throw new UnauthorizedException(
+        'Sessão invalidada por suspeita de reutilização do token. Entre novamente.',
+      );
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, tokenVersion: true },
+    if (record.expiresAt < new Date()) {
+      // Expired but not yet used — just a stale client. Clean 401, no
+      // theft signal.
+      throw new UnauthorizedException('Token inválido ou expirado');
+    }
+
+    // Mark the row used atomically. If two concurrent /refresh calls
+    // race with the same token, exactly one updateMany returns count=1;
+    // the loser sees count=0 and is indistinguishable from a reuse
+    // attempt, which is correct — the loser's copy of the token was
+    // stolen, replayed, or is a latent double-tap. Tripping the theft
+    // response on a genuine double-tap is acceptable (rare, user just
+    // has to log in again).
+    const claim = await this.prisma.refreshToken.updateMany({
+      where: { id: record.id, usedAt: null, revokedAt: null },
+      data: { usedAt: new Date() },
     });
-    if (!user) {
-      throw new UnauthorizedException('Usuário não encontrado');
+    if (claim.count !== 1) {
+      await this.handleRefreshTokenReuse(record.userId, record.id);
+      throw new UnauthorizedException(
+        'Sessão invalidada por suspeita de reutilização do token. Entre novamente.',
+      );
     }
 
-    // Refresh tokens minted before a tokenVersion bump (email change /
-    // password change / admin force-logout) must NOT be usable to mint
-    // new access tokens. Without this check, a compromised refresh
-    // token could cheerfully keep an attacker authenticated indefinitely
-    // after the owner changed their email/password to kick them out.
-    if (typeof payload.ver !== 'number' || payload.ver !== user.tokenVersion) {
-      throw new UnauthorizedException('Session invalidated. Sign in again.');
+    const newTokens = await this.generateTokens(record.userId, ctx);
+
+    // Breadcrumb: link the used row to its replacement so a future
+    // theft-triage session can reconstruct the chain.
+    const replacement = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash: this.hashRefreshToken(newTokens.refreshToken) },
+      select: { id: true },
+    });
+    if (replacement) {
+      await this.prisma.refreshToken.update({
+        where: { id: record.id },
+        data: { replacedById: replacement.id },
+      });
     }
 
-    return this.generateTokens(user.id);
+    return newTokens;
+  }
+
+  /**
+   * Revocation sweep triggered when a used/revoked refresh token is
+   * replayed. Two moves in one transaction:
+   *   1. Revoke every outstanding refresh row for the user (so any other
+   *      live client is kicked to re-auth; the attacker loses as much
+   *      ground as the legitimate user did).
+   *   2. Bump `tokenVersion`, which invalidates every already-minted
+   *      access token the moment it reaches JwtStrategy.
+   */
+  private async handleRefreshTokenReuse(
+    userId: string,
+    presentedRowId: string,
+  ): Promise<void> {
+    this.logger.warn(
+      `Refresh-token reuse detected for user ${userId} (row ${presentedRowId}) — revoking all sessions.`,
+    );
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+    ]);
+  }
+
+  /**
+   * Hash helper for refresh tokens. SHA-256 is fine here because the
+   * raw token is 48 random bytes — no dictionary attack surface, no
+   * bcrypt cost needed. Storing only the hash means a DB dump can't
+   * be turned back into live credentials.
+   */
+  private hashRefreshToken(raw: string): string {
+    return crypto.createHash('sha256').update(raw).digest('hex');
+  }
+
+  /**
+   * Revoke a specific refresh token (logout flow). Idempotent — an
+   * unknown or already-revoked token returns silently so /auth/logout
+   * can't be used to enumerate valid tokens.
+   */
+  async revokeRefreshToken(rawToken: string): Promise<void> {
+    if (!rawToken || typeof rawToken !== 'string') return;
+    const tokenHash = this.hashRefreshToken(rawToken);
+    await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 
   /**
    * Mint an access + refresh token pair bound to the user's current
    * tokenVersion. JwtStrategy checks that `ver` matches on every
-   * authenticated request; the refresh controller re-reads the user and
-   * re-signs so a refresh token issued before a version bump is
-   * immediately rejected.
+   * authenticated request; the refresh endpoint goes through
+   * refreshToken() above, which additionally enforces single-use
+   * rotation against the RefreshToken table.
    */
-  private async generateTokens(userId: string) {
-    // Read tokenVersion as part of the same boot path so both tokens agree.
-    // A concurrent email-change/password-change that bumps the version
-    // between issuance of access and refresh would normally leave one of
-    // them already stale; reading once is the cheapest way to keep them
-    // in lock-step.
+  private async generateTokens(userId: string, ctx: TokenIssueContext = {}) {
+    // Read tokenVersion as part of the same boot path so access + refresh
+    // agree. A concurrent email-change / password-change that bumps the
+    // version between issuance would normally leave one of them stale;
+    // reading once is the cheapest way to keep them in lock-step.
     const u = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { tokenVersion: true },
@@ -1565,24 +1677,36 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign({ sub: userId, ver });
 
-    // jsonwebtoken@9 (pulled by @nestjs/jwt v11) requires expiresIn to be
-    // a number of seconds or a `ms`-compatible template literal like
-    // `"7d"` / `"15m"`. The env value is one of those by convention.
-    const refreshExpiry = this.config.get<string>(
-      'JWT_REFRESH_EXPIRY',
-      '7d',
-    ) as `${number}${'s' | 'm' | 'h' | 'd'}`;
-    const refreshToken = this.jwtService.sign(
-      { sub: userId, type: 'refresh', ver },
-      { expiresIn: refreshExpiry },
-    );
+    // Opaque, random, server-tracked refresh token. No JWT envelope —
+    // clients just stash the string and hand it back on /auth/refresh;
+    // they never need to parse it. 48 random bytes → 64 base64url chars,
+    // well beyond any brute-force regime.
+    const rawRefresh = crypto
+      .randomBytes(REFRESH_TOKEN_BYTES)
+      .toString('base64url');
+    const tokenHash = this.hashRefreshToken(rawRefresh);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+    await this.prisma.refreshToken.create({
+      data: {
+        userId,
+        tokenHash,
+        expiresAt,
+        // Context is evidence-only — never trusted for authorization.
+        // Trim to keep the row bounded when clients send ridiculous UAs.
+        userAgent: ctx.userAgent?.slice(0, 512) ?? null,
+        ipAddress: ctx.ipAddress?.slice(0, 64) ?? null,
+      },
+    });
 
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken: rawRefresh };
   }
 
   /** Returns tokens + the user object expected by the mobile client. */
-  private async generateTokensWithUser(userId: string) {
-    const tokens = await this.generateTokens(userId);
+  private async generateTokensWithUser(
+    userId: string,
+    ctx: TokenIssueContext = {},
+  ) {
+    const tokens = await this.generateTokens(userId, ctx);
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, email: true, cpf: true, avatarUrl: true, createdAt: true },

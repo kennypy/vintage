@@ -253,7 +253,12 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Renovar token de acesso (requer refresh token)' })
   async refresh(
-    @Req() req: { headers: Record<string, string | undefined>; cookies?: Record<string, string> },
+    @Req() req: {
+      headers: Record<string, string | undefined>;
+      cookies?: Record<string, string>;
+      ip?: string;
+      socket?: { remoteAddress?: string };
+    },
     @Res({ passthrough: true }) res: Response,
   ) {
     // Accept refresh token from EITHER:
@@ -270,18 +275,39 @@ export class AuthController {
     if (!rawToken) {
       throw new UnauthorizedException('Token ausente');
     }
-    const result = await this.authService.refreshToken(rawToken);
+    // Evidence-only context stamped onto the new RefreshToken row. Used
+    // for theft triage, never for authorization.
+    const ctx = {
+      userAgent: req.headers['user-agent'] ?? null,
+      ipAddress: req.ip ?? req.socket?.remoteAddress ?? null,
+    };
+    const result = await this.authService.refreshToken(rawToken, ctx);
     this.maybeSetSessionCookies(res, result);
     return result;
   }
 
   @Post('logout')
   @ApiOperation({
-    summary: 'Encerrar sessão (limpa cookies HttpOnly do navegador)',
+    summary: 'Encerrar sessão (revoga refresh token e limpa cookies)',
     description:
-      'Stateless on the server side — JWTs aren\'t blacklisted. Web clients call this to drop the session + refresh cookies; mobile clients can simply discard their tokens locally.',
+      'Revokes the presented refresh token server-side so a stolen copy cannot be used after logout. Access JWT is still stateless (15-min ceiling) — the combination is what makes sign-out effective.',
   })
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Req() req: {
+      headers: Record<string, string | undefined>;
+      cookies?: Record<string, string>;
+    },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const cookieToken = req.cookies?.['vintage_refresh'];
+    const authHeader = req.headers['authorization'] ?? '';
+    const headerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length)
+      : '';
+    const rawToken = cookieToken || headerToken;
+    if (rawToken) {
+      await this.authService.revokeRefreshToken(rawToken);
+    }
     clearSessionCookies(res, this.cookieConfig);
     return { success: true };
   }
