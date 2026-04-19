@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
@@ -96,6 +97,13 @@ async function bootstrap() {
       }
     }
   }
+
+  // Cookie parser — required for the HttpOnly session cookies the auth
+  // controller sets after login/refresh. Sits before helmet/CSRF so both
+  // can introspect req.cookies. signed: false because we don't use
+  // signed cookies; the session cookie itself carries a JWT (HMAC-signed)
+  // and the CSRF cookie is a separate HMAC token.
+  app.use(cookieParser());
 
   // Security headers
   app.use(

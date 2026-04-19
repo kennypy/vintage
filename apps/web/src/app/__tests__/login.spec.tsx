@@ -88,8 +88,12 @@ describe('LoginPage', () => {
     });
   });
 
-  it('stores token on successful login', async () => {
-    mockFetch({ accessToken: 'my-token-abc' });
+  it('marks the browser as signed-in after a successful login', async () => {
+    // Cookie migration: the JWT itself lives in an HttpOnly cookie set
+    // by the API and is invisible to JS. What remains in localStorage
+    // is a non-secret presence marker ("1") that layout-level auth
+    // gates read to decide whether to render account chrome.
+    mockFetch({ accessToken: 'my-token-abc', refreshToken: 'r-1' });
     render(<LoginPage />);
 
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'user@test.com' } });
@@ -97,7 +101,7 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
 
     await waitFor(() => {
-      expect(localStorage.getItem('vintage_token')).toBe('my-token-abc');
+      expect(localStorage.getItem('vintage_token')).toBe('1');
     });
   });
 
