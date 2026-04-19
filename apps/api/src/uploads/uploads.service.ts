@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -376,6 +377,7 @@ export class UploadsService {
     file: Buffer,
     filename: string,
     mimeType: string,
+    userId: string,
   ): Promise<{ url: string; key: string }> {
     this.validateFileSize(file);
     const detectedMime = this.validateMimeType(file);
@@ -392,10 +394,14 @@ export class UploadsService {
         throw new Error('S3 storage not configured — cannot upload avatars in production');
       }
       const seed = timestamp % 1000;
-      return {
-        url: `https://picsum.photos/seed/${seed}/512/512`,
-        key,
-      };
+      const placeholderUrl = `https://picsum.photos/seed/${seed}/512/512`;
+      // Persist the avatar URL on the user row even in dev so the rest
+      // of the app (profile pages, message threads) sees the upload.
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: placeholderUrl },
+      });
+      return { url: placeholderUrl, key };
     }
 
     try {
@@ -415,6 +421,13 @@ export class UploadsService {
       );
 
       const url = await this.generatePresignedUrl(key);
+      // Atomically tie the new avatar key to the user. Without this row
+      // update, the deleteImage authorization check below has nothing to
+      // match against — the avatar would be orphaned and unrecoverable.
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: url },
+      });
       return { url, key };
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -444,25 +457,87 @@ export class UploadsService {
   }
 
   /**
-   * Delete an image from S3.
+   * Delete an S3 object. The previous implementation did no ownership
+   * check — any authenticated user could delete any S3 key just by
+   * knowing it, which turned /uploads/:key into a destructive IDOR. This
+   * version resolves the key to one of three known resource types and
+   * refuses the operation if the caller isn't the owner.
+   *
+   *   avatars/<key>   → must match the caller's User.avatarUrl
+   *   listings/<key>  → must belong to a listing the caller owns
+   *   videos/<key>    → must belong to a listing the caller owns
+   *
+   * Unrecognised prefixes are refused. We never swallow-succeed on an
+   * unknown key because that would let an attacker fish for object
+   * names by observing the response.
    */
-  async deleteImage(key: string): Promise<void> {
+  async deleteImage(key: string, userId: string): Promise<void> {
+    const normalised = key.trim();
+    if (!normalised) {
+      throw new BadRequestException('Chave do arquivo é obrigatória.');
+    }
+
+    const authorized = await this.assertCanDelete(normalised, userId);
+    if (!authorized) {
+      throw new ForbiddenException(
+        'Você não tem permissão para remover este arquivo.',
+      );
+    }
+
     try {
       await this.s3.send(
         new DeleteObjectCommand({
           Bucket: this.bucket,
-          Key: key,
+          Key: normalised,
         }),
       );
-      this.logger.log(`Deleted image: ${key}`);
+      this.logger.log(`Deleted ${normalised} for user ${userId}`);
     } catch (error) {
       this.logger.error(
-        `Failed to delete image ${key}: ${String(error).slice(0, 200)}`,
+        `Failed to delete ${normalised}: ${String(error).slice(0, 200)}`,
       );
       throw new InternalServerErrorException(
         'Erro ao remover imagem. Tente novamente.',
       );
     }
+  }
+
+  /**
+   * Returns true when `userId` owns the resource stored at `key`. See
+   * deleteImage() above for the resolution rules. We search by URL
+   * substring (contains: key) because the DB stores the presigned URL,
+   * whose query-string changes every refresh but whose path carries
+   * the stable S3 key.
+   */
+  private async assertCanDelete(key: string, userId: string): Promise<boolean> {
+    if (key.startsWith('avatars/')) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatarUrl: true },
+      });
+      return Boolean(user?.avatarUrl?.includes(key));
+    }
+    if (key.startsWith('listings/')) {
+      const image = await this.prisma.listingImage.findFirst({
+        where: {
+          url: { contains: key },
+          listing: { sellerId: userId },
+        },
+        select: { id: true },
+      });
+      return image !== null;
+    }
+    if (key.startsWith('videos/')) {
+      const video = await this.prisma.listingVideo.findFirst({
+        where: {
+          url: { contains: key },
+          listing: { sellerId: userId },
+        },
+        select: { id: true },
+      });
+      return video !== null;
+    }
+    return false;
   }
 
   /**
@@ -489,6 +564,7 @@ export class UploadsService {
     file: Buffer,
     filename: string,
     _mimeType: string,
+    _userId: string,
   ): Promise<{ url: string; key: string }> {
     // 1. Validate size (100 MB max) — chunk-based early abort
     const chunkSize = 64 * 1024;
