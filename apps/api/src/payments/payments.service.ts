@@ -16,6 +16,23 @@ import { MercadoPagoClient } from './mercadopago.client';
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
 
+/**
+ * Sentinel thrown from inside the outbox $transaction when Prisma
+ * returns P2002 on the ProcessedWebhook insert — i.e. MP has
+ * redelivered an event we already processed. Throwing it rolls back
+ * the transaction (no duplicate order flip, no duplicate wallet
+ * credit); the outer catch swallows it and returns a plain 200 so
+ * MP stops retrying. Any OTHER error surfaces normally so the
+ * legitimate-but-partial-write case (DB hiccup) rolls back and MP
+ * retries cleanly on the next schedule.
+ */
+class DuplicateWebhookSignal extends Error {
+  constructor(public readonly deliveryId: string) {
+    super(`duplicate webhook: mercadopago:${deliveryId}`);
+    this.name = 'DuplicateWebhookSignal';
+  }
+}
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -168,88 +185,160 @@ export class PaymentsService {
     const data = payload['data'] as Record<string, unknown>;
     const dataId = data['id'] as string | undefined;
 
-    // Dedup. MP redelivers every 5 minutes until it gets a 2xx, and
-    // retries 5xx for up to 3 days. Without this guard a redelivery of
-    // an already-processed `payment.updated` event would re-run
-    // processApprovedPayment → re-credit the seller's escrow. We
-    // insert a row keyed on the MP-assigned `id` field; the UNIQUE on
-    // (provider, externalEventId) rejects duplicates.
-    //
-    // Prefer `payload.id` (MP's per-delivery id) if present; fall back
-    // to `data.id` for older webhook shapes that don't include the
-    // delivery-level id. Both are stable under retry.
+    // MP redelivers every 5 minutes until it gets a 2xx, and retries
+    // 5xx for up to 3 days. The dedup row keyed on (provider, externalEventId)
+    // is what turns those retries into no-ops once we've handled a
+    // delivery. Prefer the envelope-level `payload.id` (MP's per-delivery
+    // id) and fall back to `data.id` for older webhook shapes that don't
+    // carry one. Both are stable under retry.
     const deliveryId =
       (payload['id'] as string | undefined) ?? dataId ?? null;
     if (!deliveryId) {
       this.logger.warn('Webhook rejected: no id in payload — cannot dedup');
       throw new BadRequestException('Payload inválido: id ausente.');
     }
-    try {
-      await this.prisma.processedWebhook.create({
-        data: {
-          provider: 'mercadopago',
-          externalEventId: String(deliveryId),
-          action,
-        },
-      });
-    } catch (err) {
-      // P2002 = the (provider, externalEventId) pair already exists,
-      // meaning we processed this delivery before. Acknowledge with
-      // 200 so MP stops retrying, but do NOT re-run side effects.
-      const code = (err as { code?: string })?.code;
-      if (code === 'P2002') {
-        this.logger.log(
-          `Webhook duplicate — already processed mercadopago:${deliveryId}`,
-        );
-        return { received: true, duplicate: true };
-      }
-      throw err;
-    }
 
     this.logger.log('Webhook received and verified');
 
-    // Process payment notification
-    if (action === 'payment.updated' && dataId) {
-      const status = await this.mercadoPago.getPaymentStatus(dataId);
+    // Fast-path dedup. If the ProcessedWebhook row already exists, we
+    // KNOW this delivery has been fully handled — the outbox design
+    // below guarantees the row and the side effects commit together,
+    // so a present row cannot outrun an absent side effect. Short-
+    // circuiting here avoids a wasted Mercado Pago API round-trip on
+    // every redelivery of a settled payment (MP retries every 5 min
+    // for up to 3 days).
+    const already = await this.prisma.processedWebhook.findUnique({
+      where: {
+        provider_externalEventId: {
+          provider: 'mercadopago',
+          externalEventId: String(deliveryId),
+        },
+      },
+      select: { id: true },
+    });
+    if (already) {
       this.logger.log(
-        `Payment ${dataId} status updated: ${status.status}`,
+        `Webhook duplicate — already processed mercadopago:${deliveryId}`,
       );
+      return { received: true, duplicate: true };
+    }
 
-      if (status.status === 'approved') {
-        await this.processApprovedPayment(dataId);
-      }
+    // Route. Each handler makes its dedup row and its side effects
+    // commit together — i.e. the ProcessedWebhook insert lives INSIDE
+    // the same $transaction as the order / wallet writes. The old flow
+    // committed the dedup row first and then did the side effect in a
+    // separate transaction, so a crash between the two left the order
+    // stuck in PENDING forever while MP happily saw "duplicate" on
+    // every retry (pen-test note P-08).
+    if (action === 'payment.updated' && dataId) {
+      await this.handlePaymentUpdated(String(deliveryId), action, dataId);
+    } else {
+      // Events we don't act on still deserve a dedup row — otherwise
+      // MP will keep redelivering until the 3-day ceiling.
+      await this.recordWebhookProcessed(String(deliveryId), action);
     }
 
     return { received: true };
   }
 
   /**
-   * Transitions order from PENDING → PAID and creates an escrow hold
-   * on the seller's wallet (funds in pendingBrl, not balanceBrl).
+   * Commit a dedup row without any side effects. Used for webhook
+   * actions we don't care about (everything except `payment.updated`)
+   * so MP stops retrying. Treats P2002 as success so concurrent
+   * deliveries converge cleanly.
    */
-  private async processApprovedPayment(paymentId: string) {
+  private async recordWebhookProcessed(
+    deliveryId: string,
+    action: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.processedWebhook.create({
+        data: { provider: 'mercadopago', externalEventId: deliveryId, action },
+      });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        this.logger.log(
+          `Webhook duplicate — already processed mercadopago:${deliveryId}`,
+        );
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Handle `payment.updated` deliveries. Single-transaction contract:
+   * the ProcessedWebhook row and the order / wallet writes commit
+   * together or not at all. A crash after this function returns means
+   * MP will retry and see `duplicate`; a crash during the transaction
+   * rolls back the dedup row and MP's retry will succeed.
+   */
+  private async handlePaymentUpdated(
+    deliveryId: string,
+    action: string,
+    paymentId: string,
+  ): Promise<void> {
+    // Remote status fetch is network I/O — must live outside the
+    // database transaction or we'd hold row locks for the RTT.
+    const status = await this.mercadoPago.getPaymentStatus(paymentId);
+    this.logger.log(`Payment ${paymentId} status updated: ${status.status}`);
+
+    if (status.status !== 'approved') {
+      // Anything other than approved (rejected, in_process, cancelled,
+      // refunded) we only note for dedup — no order state to flip yet.
+      await this.recordWebhookProcessed(deliveryId, action);
+      return;
+    }
+
+    await this.processApprovedPayment(deliveryId, action, paymentId, status);
+  }
+
+  /**
+   * Transitions order from PENDING → PAID, opens escrow on the seller's
+   * wallet, and commits the ProcessedWebhook dedup row in the same
+   * database transaction so that a crash can never leave the dedup
+   * row ahead of the side effects.
+   *
+   * Amount mismatch is still handled BEFORE the transaction — we want
+   * the PaymentFlag row and admin notification to survive even though
+   * we refuse the payment; and we DO NOT want to record a dedup row
+   * on rejection (MP stops retrying on 4xx anyway, and if they do
+   * retry we want the flag to fire again on re-evaluation).
+   */
+  private async processApprovedPayment(
+    deliveryId: string,
+    action: string,
+    paymentId: string,
+    paymentDetails: { transaction_amount?: number },
+  ) {
     const order = await this.prisma.order.findFirst({
       where: { paymentId, status: 'PENDING' },
       include: { listing: { select: { title: true } } },
     });
 
     if (!order) {
+      // Either a duplicate (we already flipped this one) or the order
+      // was never created. Either way, record the dedup row so MP
+      // stops retrying — no other state to flip.
       this.logger.log(
-        `No PENDING order found for paymentId ${paymentId} — already processed or missing`,
+        `No PENDING order found for paymentId ${paymentId} — recording dedup row and returning`,
       );
+      await this.recordWebhookProcessed(deliveryId, action);
       return;
     }
 
-    // Verify payment amount matches order total. A mismatch is a potentially
-    // fraudulent event — flag the order, notify admins, and reject outright.
-    const paymentDetails = await this.mercadoPago.getPaymentStatus(paymentId);
+    // Verify payment amount matches order total. A mismatch is a
+    // potentially fraudulent event — flag the order, notify admins,
+    // and reject outright. These writes are intentionally OUTSIDE
+    // the main $transaction below: we want the flag to survive the
+    // rejection (the throw rolls back only the outbox transaction,
+    // which we haven't opened yet).
     if (paymentDetails.transaction_amount !== undefined) {
       // Compare in integer centavos. The previous epsilon-of-0.01 check
       // accepted any amount within one centavo of the order total, which
       // floating-point drift across multi-installment / coupon flows
-      // could quietly exploit. Integer math removes the ambiguity: the
-      // amounts either match exactly (mod 1 centavo rounding by Mercado
-      // Pago) or they don't.
+      // could quietly exploit. Integer math removes the ambiguity.
       const paidCentavos = Math.round(paymentDetails.transaction_amount * 100);
       const expectedCentavos = Math.round(Number(order.totalBrl) * 100);
       if (paidCentavos !== expectedCentavos) {
@@ -302,33 +391,65 @@ export class PaymentsService {
 
     const itemAmount = Number(order.itemPriceBrl);
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { status: 'PAID' },
-      });
+    // Transactional outbox: dedup row + side effects commit or roll
+    // back together. Duplicate redeliveries surface as a Prisma P2002
+    // on the ProcessedWebhook insert — we catch that *inside* the
+    // transaction, flag it with a sentinel, and swallow the sentinel
+    // outside so a legitimate duplicate is a silent success.
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        try {
+          await tx.processedWebhook.create({
+            data: {
+              provider: 'mercadopago',
+              externalEventId: deliveryId,
+              action,
+            },
+          });
+        } catch (err) {
+          const code = (err as { code?: string })?.code;
+          if (code === 'P2002') {
+            // Duplicate — abort the transaction and swallow outside.
+            throw new DuplicateWebhookSignal(deliveryId);
+          }
+          throw err;
+        }
 
-      const wallet = await tx.wallet.upsert({
-        where: { userId: order.sellerId },
-        create: { userId: order.sellerId, balanceBrl: 0, pendingBrl: 0 },
-        update: {},
-      });
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: 'PAID' },
+        });
 
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { pendingBrl: { increment: itemAmount } },
-      });
+        const wallet = await tx.wallet.upsert({
+          where: { userId: order.sellerId },
+          create: { userId: order.sellerId, balanceBrl: 0, pendingBrl: 0 },
+          update: {},
+        });
 
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: 'ESCROW_HOLD',
-          amountBrl: new Decimal(itemAmount.toFixed(2)),
-          referenceId: order.id,
-          description: `Venda em custódia: ${order.listing.title}`,
-        },
+        await tx.wallet.update({
+          where: { id: wallet.id },
+          data: { pendingBrl: { increment: itemAmount } },
+        });
+
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: 'ESCROW_HOLD',
+            amountBrl: new Decimal(itemAmount.toFixed(2)),
+            referenceId: order.id,
+            description: `Venda em custódia: ${order.listing.title}`,
+          },
+        });
       });
-    });
+    } catch (err) {
+      if (err instanceof DuplicateWebhookSignal) {
+        this.logger.log(
+          `Webhook duplicate — already processed mercadopago:${deliveryId}`,
+        );
+        return;
+      }
+      throw err;
+    }
 
     this.logger.log(
       `Order ${order.id} marked PAID — R$${itemAmount.toFixed(2)} held in escrow for seller ${order.sellerId}`,

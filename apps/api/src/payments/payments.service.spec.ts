@@ -38,6 +38,13 @@ const mockPrisma: Record<string, any> = {
   },
   processedWebhook: {
     create: jest.fn().mockResolvedValue({}),
+    findUnique: jest.fn().mockResolvedValue(null),
+  },
+  paymentFlag: {
+    create: jest.fn(),
+  },
+  user: {
+    findMany: jest.fn().mockResolvedValue([]),
   },
   $transaction: jest.fn(),
 };
