@@ -28,13 +28,18 @@ export class UsersController {
   @Get('admin/users')
   @UseGuards(AdminGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Listar todos os usuários (admin)' })
+  @ApiOperation({
+    summary: 'Listar todos os usuários (admin)',
+    description:
+      'Every search that contains `@` is logged with the admin id for privacy audit. Legitimate use cases (customer support) are unaffected; a compromised admin account leaves fingerprints on bulk enumeration.',
+  })
   listUsersAdmin(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('pageSize', new DefaultValuePipe(20), ParseIntPipe) pageSize: number,
+    @CurrentUser() admin: AuthUser,
     @Query('search') search?: string,
   ) {
-    return this.usersService.listUsersAdmin(page, Math.min(pageSize, 100), search);
+    return this.usersService.listUsersAdmin(page, Math.min(pageSize, 100), search, admin.id);
   }
 
   @Post('admin/users/:id/promote')
