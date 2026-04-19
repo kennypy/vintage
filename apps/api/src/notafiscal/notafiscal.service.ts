@@ -172,7 +172,10 @@ export class NotaFiscalService {
         pdfUrl: response.pdfUrl,
         status: this.mapStatusToEnum(response.status),
         sellerCnpj: order.seller.cnpj || null,
-        buyerCpf: buyerCpf || null,
+        // Store the buyer CPF as AES-256-GCM ciphertext on the
+        // convenience column; the authoritative plaintext copy is
+        // inside the `xml` blob per tax-record law.
+        buyerCpfEncrypted: buyerCpf ? this.cpfVault.encrypt(buyerCpf) : null,
         originState,
         destinationState,
         icmsBrl: new Decimal(taxBreakdown.icms.toFixed(2)),

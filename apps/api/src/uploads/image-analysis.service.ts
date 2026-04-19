@@ -242,14 +242,21 @@ export type ModerationDecision = 'REJECT' | 'FLAG' | 'CLEAN';
  * audit but not enforced, since medical imagery is not prohibited
  * on a fashion resale platform.
  *
- *   VERY_LIKELY → REJECT (upload refused outright)
- *   LIKELY      → FLAG   (upload succeeds + queued for admin review)
- *   else        → CLEAN
+ *   VERY_LIKELY    → REJECT (upload refused outright)
+ *   LIKELY         → FLAG   (upload succeeds + queued for admin review)
+ *   else           → CLEAN
+ *   null findings  → FLAG   (Vision disabled, outage, network hiccup).
+ *                    Pre-launch we fail-OPEN here (CLEAN), which meant a
+ *                    Vision outage silently disabled moderation. Fail-
+ *                    REVIEW is the correct posture: the upload still
+ *                    lands (we don't want to block users on vendor
+ *                    availability) but it's queued for admin sign-off
+ *                    before it can be surfaced to buyers.
  */
 export function classifyModeration(
   m: ImageModerationFindings | null,
 ): ModerationDecision {
-  if (!m) return 'CLEAN';
+  if (!m) return 'FLAG';
   const checked: SafeSearchLikelihood[] = [m.adult, m.violence, m.racy];
   if (checked.includes('VERY_LIKELY')) return 'REJECT';
   if (checked.includes('LIKELY')) return 'FLAG';

@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { DisputeReason } from './dto/create-dispute.dto';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { PaymentsService } from '../payments/payments.service';
 
 jest.mock('@vintage/shared', () => ({
   DISPUTE_WINDOW_DAYS: 7,
@@ -47,6 +48,7 @@ describe('DisputesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
+        { provide: PaymentsService, useValue: { refundPayment: jest.fn().mockResolvedValue({ id: 'refund-x' }) } },
         DisputesService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
@@ -254,6 +256,63 @@ describe('DisputesService', () => {
           },
         }),
       );
+    });
+
+    it('refund-buyer: when MP refund succeeds, buyer wallet is NOT credited (MP handles the card refund directly)', async () => {
+      // Dispute order has a paymentId, so the service should attempt
+      // MP refund first and skip the wallet fallback on success.
+      const disputeWithPayment = {
+        ...mockDispute,
+        order: { ...mockDispute.order, paymentId: 'mp-pay-123' },
+      };
+      mockPrisma.dispute.findUnique.mockResolvedValue(disputeWithPayment);
+      const resolvedDispute = { ...disputeWithPayment, status: 'RESOLVED' };
+      const mockTx = makeTx(resolvedDispute);
+      // Count of $transaction calls — a successful MP refund means
+      // only ONE tx runs (the seller-side escrow reversal). A
+      // fallback wallet credit would open a SECOND tx.
+      let txCalls = 0;
+      mockPrisma.$transaction.mockImplementation((cb: any) => {
+        txCalls += 1;
+        return cb(mockTx);
+      });
+
+      await service.resolve('dispute-1', 'Reembolso aprovado', true);
+
+      // PaymentsService was called with the paymentId + totalBrl.
+      const paymentsStub = (service as unknown as { payments: { refundPayment: jest.Mock } })
+        .payments;
+      expect(paymentsStub.refundPayment).toHaveBeenCalledWith('mp-pay-123', 150);
+      // Exactly one tx — no wallet-credit fallback.
+      expect(txCalls).toBe(1);
+    });
+
+    it('refund-buyer: MP refund failure falls back to wallet credit + PaymentFlag', async () => {
+      const disputeWithPayment = {
+        ...mockDispute,
+        order: { ...mockDispute.order, paymentId: 'mp-pay-456' },
+      };
+      mockPrisma.dispute.findUnique.mockResolvedValue(disputeWithPayment);
+      const resolvedDispute = { ...disputeWithPayment, status: 'RESOLVED' };
+      const mockTx = makeTx(resolvedDispute);
+      // Extend makeTx with paymentFlag which the fallback writes.
+      (mockTx as unknown as { paymentFlag: { create: jest.Mock } }).paymentFlag = {
+        create: jest.fn().mockResolvedValue({}),
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+      const paymentsStub = (service as unknown as { payments: { refundPayment: jest.Mock } })
+        .payments;
+      paymentsStub.refundPayment.mockRejectedValueOnce(new Error('MP outage'));
+
+      await service.resolve('dispute-1', 'Reembolso aprovado', true);
+
+      // Fallback credited the buyer's wallet AND wrote a PaymentFlag.
+      expect(mockTx.wallet.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { balanceBrl: { increment: 150 } } }),
+      );
+      expect(
+        (mockTx as unknown as { paymentFlag: { create: jest.Mock } }).paymentFlag.create,
+      ).toHaveBeenCalled();
     });
 
     it('R-01: race loser (dispute.updateMany returns count=0) throws Conflict and never credits wallet', async () => {

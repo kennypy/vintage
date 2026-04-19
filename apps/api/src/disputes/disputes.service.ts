@@ -6,18 +6,23 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { PaymentsService } from '../payments/payments.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { DISPUTE_WINDOW_DAYS } from '@vintage/shared';
 
 @Injectable()
 export class DisputesService {
+  private readonly logger = new Logger(DisputesService.name);
+
   constructor(
     private prisma: PrismaService,
     private analytics: AnalyticsService,
     private auditLog: AuditLogService,
+    private payments: PaymentsService,
   ) {}
 
   /**
@@ -262,7 +267,12 @@ export class DisputesService {
       const itemAmount = Number(dispute.order.itemPriceBrl);
 
       if (refund) {
-        // Buyer wins: refund buyer and reverse seller escrow hold
+        // Buyer wins: reverse the seller's escrow hold. The buyer's
+        // side is handled OUTSIDE this transaction — we try Mercado
+        // Pago's refund API first (so the buyer's original card /
+        // PIX gets credited directly), and only fall back to a
+        // platform wallet credit if MP refuses or the order had no
+        // paymentId (free orders).
         await tx.order.update({
           where: { id: dispute.orderId },
           data: { status: 'REFUNDED' },
@@ -291,36 +301,6 @@ export class DisputesService {
             amountBrl: new Decimal((-itemAmount).toFixed(2)),
             referenceId: dispute.orderId,
             description: `Custódia revertida (disputa): ${dispute.order.listing.title}`,
-          },
-        });
-
-        // Refund buyer's wallet with full order total
-        const buyerWallet = await tx.wallet.upsert({
-          where: { userId: dispute.order.buyerId },
-          create: {
-            userId: dispute.order.buyerId,
-            balanceBrl: 0,
-            pendingBrl: 0,
-          },
-          update: {},
-        });
-
-        const refundAmount = Number(dispute.order.totalBrl);
-
-        await tx.wallet.update({
-          where: { id: buyerWallet.id },
-          data: {
-            balanceBrl: { increment: refundAmount },
-          },
-        });
-
-        await tx.walletTransaction.create({
-          data: {
-            walletId: buyerWallet.id,
-            type: 'REFUND',
-            amountBrl: new Decimal(refundAmount.toFixed(2)),
-            referenceId: dispute.orderId,
-            description: `Reembolso da disputa: ${dispute.order.listing.title}`,
           },
         });
       } else {
@@ -372,6 +352,50 @@ export class DisputesService {
       return resolved;
     });
 
+    // Buyer-refund post-processing. MP refund is a network call —
+    // must live OUTSIDE the DB transaction or it would hold row
+    // locks for the RTT. Order of operations:
+    //   1. Try MP refund(paymentId, totalBrl). Success → buyer's
+    //      original payment method (card / PIX / boleto) gets
+    //      credited directly by Mercado Pago. No platform wallet
+    //      credit needed.
+    //   2. On MP refund failure (provider outage, unknown paymentId,
+    //      refund window expired, already-refunded, etc): fall back
+    //      to a platform-side wallet credit so the buyer at least
+    //      has liquidity. Also write a PaymentFlag so ops can chase
+    //      the MP refund manually.
+    //   3. Free orders + orders without a paymentId: straight to
+    //      wallet credit (nothing to refund on MP).
+    if (refund) {
+      const refundAmount = Number(dispute.order.totalBrl);
+      const paymentId = dispute.order.paymentId;
+      let mpRefunded = false;
+
+      if (paymentId) {
+        try {
+          await this.payments.refundPayment(paymentId, refundAmount);
+          mpRefunded = true;
+          this.logger.log(
+            `Dispute ${disputeId}: MP refund issued for payment ${paymentId} (R$${refundAmount.toFixed(2)}).`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Dispute ${disputeId}: MP refund failed for payment ${paymentId}: ${String(err).slice(0, 200)} — falling back to wallet credit.`,
+          );
+        }
+      }
+
+      if (!mpRefunded) {
+        await this.applyWalletRefundFallback(
+          dispute.order.buyerId,
+          dispute.orderId,
+          refundAmount,
+          dispute.order.listing.title,
+          paymentId,
+        );
+      }
+    }
+
     // Audit trail — outside the tx so a transient audit-write failure
     // can't roll back the money movement. AuditLogService itself
     // swallows + logs on error for exactly this reason.
@@ -390,5 +414,55 @@ export class DisputesService {
     });
 
     return updatedDispute;
+  }
+
+  /**
+   * Wallet-credit fallback for the buyer-wins branch of resolve().
+   * Runs when MP refund is unavailable (no paymentId / provider
+   * rejected). Writes a PaymentFlag alongside so ops can manually
+   * chase the card refund — the wallet credit buys the buyer
+   * liquidity but doesn't remove the platform's exposure to a
+   * chargeback.
+   */
+  private async applyWalletRefundFallback(
+    buyerId: string,
+    orderId: string,
+    refundAmount: number,
+    listingTitle: string,
+    paymentId: string | null,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const buyerWallet = await tx.wallet.upsert({
+        where: { userId: buyerId },
+        create: { userId: buyerId, balanceBrl: 0, pendingBrl: 0 },
+        update: {},
+      });
+      await tx.wallet.update({
+        where: { id: buyerWallet.id },
+        data: { balanceBrl: { increment: refundAmount } },
+      });
+      await tx.walletTransaction.create({
+        data: {
+          walletId: buyerWallet.id,
+          type: 'REFUND',
+          amountBrl: new Decimal(refundAmount.toFixed(2)),
+          referenceId: orderId,
+          description: `Reembolso da disputa (crédito de carteira): ${listingTitle}`,
+        },
+      });
+      // Only flag when there WAS a paymentId (i.e. MP refund was
+      // attempted + failed). Free-orders with no paymentId are a
+      // known branch, not an exception.
+      if (paymentId) {
+        await tx.paymentFlag.create({
+          data: {
+            orderId,
+            paymentId,
+            reason:
+              'Dispute refund: MP refund API call failed; buyer credited to platform wallet as fallback. Ops must issue the card refund manually.',
+          },
+        });
+      }
+    });
   }
 }
