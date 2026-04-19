@@ -52,7 +52,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "@babel/plugin-transform-template-literals": "^7.27.1",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.16.0",
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.5.14",

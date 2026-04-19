@@ -18,7 +18,7 @@
     "ios": "expo run:ios"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.16.0",
     "metro": "~0.82.0",
     "metro-runtime": "~0.82.0",
     "prettier": "^3.4.0",
@@ -26,7 +26,10 @@
   },
   "overrides": {
     "react-test-renderer": "19.1.0",
-    "expo-file-system": "~19.0.21"
+    "expo-file-system": "~19.0.21",
+    "@hono/node-server": "^1.19.13",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.5"
   },
   "engines": {
     "node": ">=20.0.0"
