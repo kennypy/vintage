@@ -1,49 +1,39 @@
 version: 2
 
-# Keep our dependency + CI-action versions drifting on a schedule instead
-# of accumulating into "big-bang" upgrade PRs. Weekly cadence is enough
-# to catch CVEs within a week without drowning reviewers. Patch updates
-# are grouped per-ecosystem so the PR queue stays readable — only the
-# ts / react / nest majors open dedicated PRs that reviewers can weigh
-# independently.
+# Dependabot config — quiet-by-default.
+#
+# What this file does: tells Dependabot to only surface SECURITY
+# advisories, not routine version bumps. With the defaults we
+# previously had (weekly npm updates across the whole tree) the first
+# run immediately opened ~10 PRs for every out-of-date major/minor,
+# which was noise, not signal.
+#
+# What this file does NOT do: toggle "Dependabot security updates" —
+# that's a separate switch in the repository settings (Security &
+# analysis → Dependabot security updates). Enable it there so the
+# bot opens PRs the moment a CVE is published against a dep we
+# actually use. The `allow: - dependency-type: "production"` below
+# ensures the version-update scanner only touches production deps, so
+# the bot won't open weekly PRs for dev-dep housekeeping either.
 
 updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 10
-    versioning-strategy: increase
+      interval: monthly
+    open-pull-requests-limit: 3
+    # Only production deps, only security-relevant bumps. This, combined
+    # with the monthly cadence, keeps the PR queue to a handful per
+    # quarter instead of a flood.
+    allow:
+      - dependency-type: "production"
+    versioning-strategy: increase-if-necessary
     labels:
       - dependencies
       - security
-    groups:
-      # Roll every patch + minor dev-dep into one PR per week. The
-      # rare breakage is easy to revert when the PR is scoped to
-      # dev-only.
-      dev-dependencies:
-        dependency-type: development
-        update-types:
-          - minor
-          - patch
-      # Group NestJS together — cross-package version drift is a
-      # frequent source of "works but doesn't" bugs on this stack.
-      nestjs:
-        patterns:
-          - "@nestjs/*"
-      # Prisma client + CLI must move together.
-      prisma:
-        patterns:
-          - "@prisma/*"
-          - "prisma"
     ignore:
       # Pinned for compatibility — React 19 breaks the Next 14 pages
-      # router (see CLAUDE.md §Pinned Versions). Dependabot is not
-      # allowed to propose major upgrades for this stack until we
-      # plan the migration.
+      # router (see CLAUDE.md §Pinned Versions).
       - dependency-name: "react"
         update-types: ["version-update:semver-major"]
       - dependency-name: "react-dom"
@@ -54,11 +44,8 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
     labels:
       - ci
       - security
