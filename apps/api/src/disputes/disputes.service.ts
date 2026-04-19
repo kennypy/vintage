@@ -8,6 +8,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { DISPUTE_WINDOW_DAYS } from '@vintage/shared';
 
@@ -16,6 +17,7 @@ export class DisputesService {
   constructor(
     private prisma: PrismaService,
     private analytics: AnalyticsService,
+    private auditLog: AuditLogService,
   ) {}
 
   /**
@@ -192,7 +194,12 @@ export class DisputesService {
    * - refund=true  → buyer wins: refund buyer, reverse seller escrow hold
    * - refund=false → seller wins: release escrow to seller balance
    */
-  async resolve(disputeId: string, resolution: string, refund: boolean) {
+  async resolve(
+    disputeId: string,
+    resolution: string,
+    refund: boolean,
+    actorId: string | null = null,
+  ) {
     const dispute = await this.prisma.dispute.findUnique({
       where: { id: disputeId },
       include: {
@@ -363,6 +370,23 @@ export class DisputesService {
       });
 
       return resolved;
+    });
+
+    // Audit trail — outside the tx so a transient audit-write failure
+    // can't roll back the money movement. AuditLogService itself
+    // swallows + logs on error for exactly this reason.
+    await this.auditLog.record({
+      actorId,
+      action: refund ? 'dispute.resolve.refund_buyer' : 'dispute.resolve.release_seller',
+      targetType: 'dispute',
+      targetId: disputeId,
+      metadata: {
+        orderId: dispute.orderId,
+        sellerId: dispute.order.sellerId,
+        buyerId: dispute.order.buyerId,
+        itemPriceBrl: Number(dispute.order.itemPriceBrl),
+        totalBrl: Number(dispute.order.totalBrl),
+      },
     });
 
     return updatedDispute;

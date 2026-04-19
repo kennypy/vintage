@@ -1,0 +1,30 @@
+# Secret-scan gate. Runs on every push + PR. Fails the build on any
+# leaked credential that our .gitleaks.toml allowlist doesn't cover.
+# Keep in sync with scripts/check-secrets.sh which runs the same
+# binary locally from a pre-commit hook.
+
+name: gitleaks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Scan the full history on PRs so a secret buried in an
+          # earlier commit is still caught — gitleaks will otherwise
+          # only see the PR diff.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

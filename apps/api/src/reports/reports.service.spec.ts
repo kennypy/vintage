@@ -4,6 +4,7 @@ import { ReportsService } from './reports.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListingsService } from '../listings/listings.service';
 import { ReportTargetType } from './dto/create-report.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const mockPrisma = {
   listing: {
@@ -30,6 +31,7 @@ describe('ReportsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         ReportsService,
         { provide: PrismaService, useValue: mockPrisma },
         {

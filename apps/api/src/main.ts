@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 const logger = new Logger('Bootstrap');
 
@@ -206,10 +207,16 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Mask body-parser JSON syntax errors so responses don't leak the
-  // underlying parser's error wording (stack fingerprint). See
-  // JsonSyntaxExceptionFilter for the full rationale.
-  app.useGlobalFilters(new JsonSyntaxExceptionFilter());
+  // Exception filter chain, most-specific FIRST: JsonSyntaxExceptionFilter
+  // catches body-parser SyntaxError before the catch-all maps it to a
+  // generic 500. GlobalExceptionFilter is the final backstop that
+  // truncates + redacts every other exception before the response hits
+  // the wire — including raw driver errors (Prisma, AWS SDK, fetch)
+  // whose default `.message` string leaks hostnames / error codes.
+  app.useGlobalFilters(
+    new GlobalExceptionFilter(),
+    new JsonSyntaxExceptionFilter(),
+  );
 
   // Global validation pipe
   app.useGlobalPipes(

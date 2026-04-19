@@ -46,8 +46,8 @@ export class UsersController {
   @UseGuards(AdminGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Promover usuário a ADMIN' })
-  promoteToAdmin(@Param('id') id: string) {
-    return this.usersService.promoteToAdmin(id);
+  promoteToAdmin(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.usersService.promoteToAdmin(id, user.id);
   }
 
   // --- Account Deletion ---

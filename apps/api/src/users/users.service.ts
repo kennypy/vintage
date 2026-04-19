@@ -12,6 +12,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -36,6 +37,7 @@ export class UsersService {
     private prisma: PrismaService,
     private emailService: EmailService,
     private listings: ListingsService,
+    private auditLog: AuditLogService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -853,7 +855,7 @@ export class UsersService {
     };
   }
 
-  async promoteToAdmin(userId: string) {
+  async promoteToAdmin(userId: string, actorId: string | null = null) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
     if (user.role === 'ADMIN') {
@@ -863,6 +865,14 @@ export class UsersService {
     await this.prisma.user.update({
       where: { id: userId },
       data: { role: 'ADMIN' },
+    });
+
+    await this.auditLog.record({
+      actorId,
+      action: 'user.promote_to_admin',
+      targetType: 'user',
+      targetId: userId,
+      metadata: { previousRole: user.role },
     });
 
     return { success: true, message: `Usuário ${user.name} promovido a administrador.` };

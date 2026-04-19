@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import {
   buildAllowedImageHosts,
   validateImageUrl,
@@ -21,6 +22,7 @@ export class AuthenticityService {
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
     private config: ConfigService,
+    private auditLog: AuditLogService,
   ) {
     // Pen-test follow-up P-12: proof URLs are written straight to the
     // database and later surfaced in the admin review UI; without
@@ -158,6 +160,18 @@ export class AuthenticityService {
       body,
       { listingId: request.listingId },
     );
+
+    await this.auditLog.record({
+      actorId: adminId,
+      action: decision === 'APPROVED' ? 'authenticity.approve' : 'authenticity.reject',
+      targetType: 'authenticity_request',
+      targetId: requestId,
+      metadata: {
+        listingId: request.listingId,
+        sellerId: request.listing.sellerId,
+        reviewNote: reviewNote ?? null,
+      },
+    });
 
     return updated;
   }

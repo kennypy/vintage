@@ -12,6 +12,7 @@ import {
   MercadoPagoPayoutUnavailableError,
 } from '../payments/mercadopago.client';
 import { FraudService } from '../fraud/fraud.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 jest.mock('@vintage/shared', () => ({
   MIN_PAYOUT_BRL: 10.0,
@@ -60,6 +61,7 @@ describe('PayoutsService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: AuditLogService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         PayoutsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PayoutMethodsService, useValue: mockPayoutMethods },

@@ -14,9 +14,26 @@ describe('HashThrottlerGuard.getTracker', () => {
     {} as never,
   );
 
-  it('buckets by IP address', async () => {
+  it('buckets unauthenticated callers by IP address', async () => {
     const key = await guard.tracker({ ip: '203.0.113.7' });
-    expect(key).toBe('203.0.113.7');
+    expect(key).toBe('ip:203.0.113.7');
+  });
+
+  it('buckets authenticated callers by user.id — independent of IP', async () => {
+    const a = await guard.tracker({ ip: '203.0.113.7', user: { id: 'user-1' } });
+    const b = await guard.tracker({ ip: '198.51.100.4', user: { id: 'user-1' } });
+    expect(a).toBe('u:user-1');
+    expect(b).toBe('u:user-1');
+    expect(a).toBe(b);
+  });
+
+  it('two authenticated users on the SAME IP get SEPARATE buckets', async () => {
+    // NAT / office wifi / corporate proxy: multiple users share an
+    // egress IP. Per-user bucketing keeps one compromised account
+    // from exhausting the throttle for bystanders.
+    const a = await guard.tracker({ ip: '203.0.113.7', user: { id: 'alice' } });
+    const b = await guard.tracker({ ip: '203.0.113.7', user: { id: 'bob' } });
+    expect(a).not.toBe(b);
   });
 
   it('ignores X-API-Key so the header cannot be used to escape per-IP limits', async () => {
@@ -31,8 +48,8 @@ describe('HashThrottlerGuard.getTracker', () => {
       ip: '203.0.113.7',
       headers: { 'x-api-key': 'bbbb' },
     });
-    expect(first).toBe('203.0.113.7');
-    expect(second).toBe('203.0.113.7');
+    expect(first).toBe('ip:203.0.113.7');
+    expect(second).toBe('ip:203.0.113.7');
     expect(first).toBe(second);
   });
 
@@ -40,11 +57,21 @@ describe('HashThrottlerGuard.getTracker', () => {
     const key = await guard.tracker({
       connection: { remoteAddress: '198.51.100.4' },
     });
-    expect(key).toBe('198.51.100.4');
+    expect(key).toBe('ip:198.51.100.4');
   });
 
   it('returns a stable sentinel when no IP is available', async () => {
     const key = await guard.tracker({});
-    expect(key).toBe('unknown');
+    expect(key).toBe('ip:unknown');
+  });
+
+  it('user-bucket and ip-bucket namespaces cannot collide', async () => {
+    // A user whose id happened to look like `ip:198.51.100.4` still
+    // ends up under `u:` prefix. Safety: attacker-controlled inputs
+    // (user ids are server-generated, but the guard shouldn't have
+    // to care) cannot reach an IP bucket.
+    const u = await guard.tracker({ user: { id: 'ip:198.51.100.4' } });
+    expect(u).toBe('u:ip:198.51.100.4');
+    expect(u.startsWith('u:')).toBe(true);
   });
 });

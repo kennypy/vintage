@@ -517,8 +517,7 @@ describe('AuthService', () => {
 
     it('ignores non-string / empty inputs without hitting the DB', async () => {
       await service.revokeRefreshToken('');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await service.revokeRefreshToken(undefined as any);
+      await service.revokeRefreshToken(undefined as unknown as string);
       expect(mockPrisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
   });
