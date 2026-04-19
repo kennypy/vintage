@@ -30,14 +30,54 @@ export default function CheckoutPageWrapper() {
   );
 }
 
+// Anything that flows into the checkout page from the URL is attacker-
+// controllable — even when the user is logged in, anyone could craft
+// a checkout link with their own listingId / title / price / image
+// and trick the user into paying. The fields below are display-only
+// (the API authoritatively re-prices when the order is created), but
+// we still validate at the boundary so an XSS or rendering glitch
+// can't be smuggled in via the search params.
+const LISTING_ID_RE = /^[a-z0-9_-]{8,64}$/i;       // cuid / nanoid shape
+const SAFE_TITLE_RE = /^[\p{L}\p{N} '\-_,.!?()&]{1,200}$/u;
+const SAFE_IMAGE_HOSTS = new Set([
+  'vintage.br',
+  'cdn.vintage.br',
+  'assets.vintage.br',
+  'images.unsplash.com',  // dev placeholder
+  'picsum.photos',         // dev placeholder
+]);
+
+function isSafeImageUrl(raw: string): boolean {
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:') return false;
+    return SAFE_IMAGE_HOSTS.has(u.hostname) || u.hostname.endsWith('.r2.cloudflarestorage.com');
+  } catch {
+    return false;
+  }
+}
+
 function CheckoutPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const listingId = searchParams.get('listingId') ?? '';
-  const title = searchParams.get('title') ?? 'Item';
-  const priceBrl = parseFloat(searchParams.get('price') ?? '0');
-  const imageUrl = searchParams.get('image') ?? '';
+  const rawListingId = searchParams.get('listingId') ?? '';
+  const rawTitle = searchParams.get('title') ?? 'Item';
+  const rawPrice = searchParams.get('price') ?? '0';
+  const rawImage = searchParams.get('image') ?? '';
+
+  // Refuse pathological input rather than trying to render it. The
+  // server still re-validates the listing on order creation; this is
+  // about not propagating attacker-controlled goo through the UI.
+  const listingId = LISTING_ID_RE.test(rawListingId) ? rawListingId : '';
+  const title = SAFE_TITLE_RE.test(rawTitle) ? rawTitle : 'Item';
+  const parsedPrice = Number(rawPrice);
+  const priceBrl =
+    Number.isFinite(parsedPrice) && parsedPrice >= 0 && parsedPrice <= 1_000_000
+      ? parsedPrice
+      : 0;
+  const imageUrl = isSafeImageUrl(rawImage) ? rawImage : '';
 
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
