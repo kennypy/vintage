@@ -75,16 +75,20 @@ export async function confirmLoginTwoFa(
   return data;
 }
 
-/** Ask the API to resend the login-time SMS code (valid for 5 min). */
+/** Ask the API to resend the login-time SMS code (valid for 5 min).
+ *  captchaToken is required once the API flips CAPTCHA_ENFORCE=true;
+ *  before that it's ignored. Pass null when the widget hasn't
+ *  produced a token yet — the backend guard no-ops. */
 export async function resendLoginSms(
   tempToken: string,
+  captchaToken?: string | null,
 ): Promise<{ success: boolean; phoneHint: string }> {
   return apiFetch<{ success: boolean; phoneHint: string }>(
     '/auth/2fa/sms/login-resend',
     {
       method: 'POST',
       authenticated: false,
-      body: JSON.stringify({ tempToken }),
+      body: JSON.stringify({ tempToken, captchaToken }),
     },
   );
 }
@@ -130,7 +134,11 @@ export async function register(
   email: string,
   cpf: string,
   password: string,
-  opts: { acceptedTos: boolean; tosVersion?: string } = { acceptedTos: true },
+  opts: {
+    acceptedTos: boolean;
+    tosVersion?: string;
+    captchaToken?: string | null;
+  } = { acceptedTos: true },
 ): Promise<RegisterResponse> {
   const data = await apiFetch<RegisterResponse>('/auth/register', {
     method: 'POST',
@@ -142,6 +150,10 @@ export async function register(
       password,
       acceptedTos: opts.acceptedTos,
       tosVersion: opts.tosVersion ?? CURRENT_TOS_VERSION,
+      // Null when the Turnstile widget hasn't solved yet (or isn't
+      // configured in dev). The backend CaptchaGuard is a no-op
+      // unless CAPTCHA_ENFORCE=true.
+      captchaToken: opts.captchaToken ?? null,
     }),
   });
 
@@ -216,11 +228,14 @@ export async function disableTwoFa(token: string): Promise<{ success: boolean; m
   });
 }
 
-export async function forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+export async function forgotPassword(
+  email: string,
+  captchaToken?: string | null,
+): Promise<{ success: boolean; message: string }> {
   return apiFetch<{ success: boolean; message: string }>('/auth/forgot-password', {
     method: 'POST',
     authenticated: false,
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, captchaToken: captchaToken ?? null }),
   });
 }
 

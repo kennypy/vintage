@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -78,6 +79,7 @@ export class NotaFiscalService {
           select: {
             id: true,
             cnpj: true,
+            cpfIdentityVerified: true,
             addresses: {
               where: { isDefault: true },
               take: 1,
@@ -99,9 +101,22 @@ export class NotaFiscalService {
       throw new ForbiddenException('Acesso negado a este pedido');
     }
 
-    // Return existing NF-e if already generated
+    // Return existing NF-e if already generated — re-reading an
+    // NF-e that was emitted while the seller was verified doesn't
+    // need re-validation; the identity gate only applies to NEW
+    // emissions below.
     if (order.notaFiscal) {
       return this.mapToNFeData(order.notaFiscal);
+    }
+
+    // Identity gate — we can't emit a tax document on behalf of
+    // a seller whose identity hasn't been confirmed at Receita.
+    // Gate is on the SELLER's cpfIdentityVerified; buyers don't
+    // need KYC to receive an NF-e.
+    if (!order.seller.cpfIdentityVerified) {
+      throw new BadRequestException(
+        'Nota fiscal indisponível — vendedor ainda não concluiu a verificação de identidade.',
+      );
     }
 
     // Resolve origin state from seller's default address

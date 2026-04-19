@@ -29,7 +29,13 @@ interface AuthContextType {
   isDemoMode: boolean;
   signIn: (email: string, password: string) => Promise<TwoFaChallenge | null>;
   completeTwoFaChallenge: (tempToken: string, code: string) => Promise<void>;
-  signUp: (name: string, email: string, cpf: string, password: string) => Promise<void>;
+  signUp: (
+    name: string,
+    email: string,
+    cpf: string,
+    password: string,
+    opts?: { captchaToken?: string | null },
+  ) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
   signInWithApple: (identityToken: string, name?: string) => Promise<void>;
   signInDemo: (name?: string, email?: string, cpf?: string) => Promise<void>;
@@ -171,9 +177,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const signUp = useCallback(async (name: string, email: string, cpf: string, password: string) => {
+  const signUp = useCallback(async (
+    name: string,
+    email: string,
+    cpf: string,
+    password: string,
+    opts?: { captchaToken?: string | null },
+  ) => {
     try {
-      const response = await registerService(name, email, cpf, password);
+      const response = await registerService(name, email, cpf, password, {
+        acceptedTos: true,
+        captchaToken: opts?.captchaToken ?? null,
+      });
       setDemoActive(false);
       setUser(response.user);
       registerForPushNotifications().catch(() => {});

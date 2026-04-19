@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { TurnstileWebView } from '../../src/components/TurnstileWebView';
 
 type Step = 'account' | 'address' | 'interests';
 
@@ -46,6 +47,7 @@ export default function RegisterScreen() {
 
   // Interests
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
 
@@ -99,7 +101,7 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       const rawCpf = cpf.replace(/\D/g, '');
-      await signUp(name, email, rawCpf, password);
+      await signUp(name, email, rawCpf, password, { captchaToken });
       router.replace('/(tabs)');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível criar sua conta. Verifique os dados e tente novamente.';
@@ -273,6 +275,10 @@ export default function RegisterScreen() {
                 );
               })}
             </View>
+            <TurnstileWebView
+              onToken={setCaptchaToken}
+              onExpired={() => setCaptchaToken(null)}
+            />
             <TouchableOpacity
               style={[styles.button, loading && styles.buttonDisabled]}
               onPress={handleRegister}

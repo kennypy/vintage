@@ -1,12 +1,14 @@
 import {
-  Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards,
+  Controller, Get, Post, Patch, Delete, Param, Body, Query, Res, UseGuards,
   DefaultValuePipe, ParseIntPipe,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
+import { DataExportService } from './data-export.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -16,7 +18,10 @@ import { Throttle } from '@nestjs/throttler';
 @ApiTags('users')
 @Controller()
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly dataExport: DataExportService,
+  ) {}
 
   // --- Admin Endpoints ---
 
@@ -63,6 +68,37 @@ export class UsersController {
     @Body() dto: DeleteAccountDto,
   ) {
     return this.usersService.deleteAccount(user.id, dto);
+  }
+
+  // LGPD Art. 18(V) — portability. ZIP stream piped straight into the
+  // response so the ZIP never fully materialises in server memory.
+  // Rate-limited via the global throttler (60/min) plus explicit
+  // per-user throttle of 5/hour below — building the ZIP hits every
+  // table the user owns and we don't want a user (or attacker via a
+  // stolen session) hammering this.
+  @Post('users/me/export')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60 * 60 * 1000 } })
+  @ApiOperation({
+    summary: 'Exportar todos os dados da conta (LGPD Art. 18) como ZIP',
+  })
+  async exportMyData(
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ): Promise<void> {
+    const stream = await this.dataExport.buildExport(user.id);
+
+    const filename = `vintage-export-${user.id}-${Date.now()}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    // No caching — each export is a fresh snapshot.
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+
+    stream.pipe(res);
   }
 
   // --- User Blocks ---

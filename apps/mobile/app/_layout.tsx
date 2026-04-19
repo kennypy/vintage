@@ -13,6 +13,7 @@ import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
+import { PostHogBootstrap } from '../src/components/PostHogBootstrap';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
@@ -93,6 +94,7 @@ function AppShell() {
 
   return (
     <NavThemeProvider value={navTheme}>
+      <PostHogBootstrap />
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -128,6 +130,7 @@ function AppShell() {
         <Stack.Screen name="conta/ajuda" options={{ title: 'Ajuda' }} />
         <Stack.Screen name="conta/alterar-senha" options={{ title: 'Alterar senha' }} />
         <Stack.Screen name="conta/seguranca" options={{ title: 'Segurança' }} />
+        <Stack.Screen name="conta/deletar-conta" options={{ title: 'Excluir conta' }} />
         <Stack.Screen name="(auth)/forgot-password" options={{ title: 'Esqueci a senha' }} />
         <Stack.Screen name="(auth)/reset-password" options={{ title: 'Nova senha' }} />
         <Stack.Screen name="listing/edit/[id]" options={{ title: 'Editar anúncio' }} />

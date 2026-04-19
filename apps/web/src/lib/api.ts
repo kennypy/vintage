@@ -112,8 +112,16 @@ export function apiPatch<T>(path: string, body?: unknown, headers?: Record<strin
   return request<T>('PATCH', path, { body, headers });
 }
 
-export function apiDelete<T>(path: string, headers?: Record<string, string>): Promise<T> {
-  return request<T>('DELETE', path, { headers });
+export function apiDelete<T>(
+  path: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+): Promise<T> {
+  // Accepts an optional body so DELETE /users/me can carry the
+  // LGPD delete-account payload (password + reason). No-body DELETEs
+  // (unfollow, unblock, remove listing) call with the single-arg
+  // form and pass body=undefined.
+  return request<T>('DELETE', path, { body, headers });
 }
 
 export function setAuthToken(token: string): void {

@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 const NAV_ITEMS = [
   { href: '/admin', label: 'Painel', icon: '~' },
   { href: '/admin/moderation', label: 'Moderação', icon: '~' },
+  { href: '/admin/image-flags', label: 'Imagens sinalizadas', icon: '~' },
   { href: '/admin/disputes', label: 'Disputas', icon: '~' },
   { href: '/admin/authenticity', label: 'Autenticidade', icon: '~' },
   { href: '/admin/payouts', label: 'Saques', icon: '~' },

@@ -58,7 +58,7 @@ describe('NotaFiscalService', () => {
         sellerId: 'seller-1',
         itemPriceBrl: 150,
         buyer: { id: 'buyer-1', cpf: '12345678901' },
-        seller: { id: 'seller-1', cnpj: null, addresses: [] },
+        seller: { id: 'seller-1', cnpj: null, cpfIdentityVerified: true, addresses: [] },
         shippingAddress: { state: 'RJ' },
         notaFiscal: null,
       });
@@ -85,7 +85,7 @@ describe('NotaFiscalService', () => {
         sellerId: 'seller-1',
         itemPriceBrl: 150,
         buyer: { id: 'buyer-1', cpf: '12345678901' },
-        seller: { id: 'seller-1', cnpj: null, addresses: [] },
+        seller: { id: 'seller-1', cnpj: null, cpfIdentityVerified: true, addresses: [] },
         shippingAddress: null,
         notaFiscal: existingNfe,
       });
@@ -107,6 +107,7 @@ describe('NotaFiscalService', () => {
         seller: {
           id: 'seller-1',
           cnpj: '12345678000190',
+          cpfIdentityVerified: true,
           addresses: [{ state: 'SP' }],
         },
         shippingAddress: { state: 'RJ' },

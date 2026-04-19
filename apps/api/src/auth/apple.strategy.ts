@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export interface AppleProfile {
@@ -44,7 +44,7 @@ export class AppleStrategy {
     // Decode JWT payload (base64url)
     const parts = identityToken.split('.');
     if (parts.length !== 3) {
-      throw new Error('Token Apple inválido');
+      throw new UnauthorizedException('Token Apple inválido');
     }
 
     const payloadStr = Buffer.from(parts[1], 'base64url').toString('utf-8');
@@ -52,22 +52,22 @@ export class AppleStrategy {
     try {
       payload = JSON.parse(payloadStr) as AppleIdTokenPayload;
     } catch {
-      throw new Error('Token Apple inválido');
+      throw new UnauthorizedException('Token Apple inválido');
     }
 
     // Validate issuer
     if (payload.iss !== 'https://appleid.apple.com') {
-      throw new Error('Emissor do token Apple inválido');
+      throw new UnauthorizedException('Emissor do token Apple inválido');
     }
 
     // Validate audience matches our client ID
     if (this.clientId && payload.aud !== this.clientId) {
-      throw new Error('Audiência do token Apple inválida');
+      throw new UnauthorizedException('Audiência do token Apple inválida');
     }
 
     const email = payload.email;
     if (!email) {
-      throw new Error('Email não disponível na conta Apple');
+      throw new UnauthorizedException('Email não disponível na conta Apple');
     }
 
     return {

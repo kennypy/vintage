@@ -18,7 +18,7 @@ import type { PayoutRequestStatus } from '@prisma/client';
 /**
  * End-to-end payout request pipeline:
  *
- *   1. Validate caller (cpfVerified, active wallet, method ownership)
+ *   1. Validate caller (cpfIdentityVerified, active wallet, method ownership)
  *   2. Atomic debit of the wallet in one UPDATE ... WHERE balance >= amt
  *      (this is the ONLY race-safe anti-overdraft gate)
  *   3. Create a PayoutRequest row referencing the wallet transaction
@@ -52,23 +52,28 @@ export class PayoutsService {
       throw new BadRequestException(`Valor mínimo para saque: R$${MIN_PAYOUT_BRL}`);
     }
 
-    // cpfVerified gate (Wave 3C). Upstream we accepted any linked CPF
-    // (`cpf != null`) as a stopgap for launch. Now Receita Federal /
-    // identity-verification is the bar — Mercado Pago's own KYC refuses
-    // payouts to unverified CPFs anyway, so failing at the API boundary
-    // is a clearer UX than a generic MP reject 30 seconds later.
+    // Identity-verification gate. Upstream we accepted any linked
+    // CPF (`cpf != null`) as a stopgap for launch. Before Track B
+    // shipped, the gate was cpfChecksumValid (Modulo-11 only), which
+    // trivially passes for every registered user and wasn't a real
+    // protection. Now the bar is cpfIdentityVerified — true only
+    // after a KYC provider (Serpro / Caf / Mercado Pago callback)
+    // has confirmed CPF is ATIVO at Receita and the name matches.
+    // This blocks payouts to unverified accounts at the API boundary,
+    // which is a cleaner UX than letting MP's own KYC reject the
+    // transfer 30 seconds later.
     const caller = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { cpf: true, cpfVerified: true },
+      select: { cpf: true, cpfIdentityVerified: true },
     });
     if (!caller?.cpf) {
       throw new BadRequestException(
         'Adicione um CPF antes de solicitar saques. Vá em Conta → CPF.',
       );
     }
-    if (!caller.cpfVerified) {
+    if (!caller.cpfIdentityVerified) {
       throw new BadRequestException(
-        'CPF não verificado. Envie seu documento em Conta → Verificação antes de solicitar saques.',
+        'Verificação de identidade pendente. Conclua a verificação em Conta → Verificação para liberar saques.',
       );
     }
 

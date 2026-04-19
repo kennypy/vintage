@@ -75,11 +75,34 @@ export class UploadsService {
     private readonly imageAnalysisService: ImageAnalysisService,
     private readonly prisma: PrismaService,
   ) {
-    const region = this.configService.get<string>('S3_REGION', 'us-east-1');
     const endpoint = this.configService.get<string>('S3_ENDPOINT', '');
+    // Region handling: AWS S3 needs a real region ('us-east-1', 'sa-east-1').
+    // Cloudflare R2 is region-neutral and expects 'auto' — passing a real
+    // AWS region against R2 makes presigned URLs fail signature validation
+    // on redirect. We infer R2 from the endpoint hostname so ops don't have
+    // to remember the quirk, and fall back to the explicit env var when set.
+    const explicitRegion = this.configService.get<string>('S3_REGION', '');
+    const isR2Endpoint = /\.r2\.cloudflarestorage\.com$/i.test(
+      (() => {
+        try {
+          return endpoint ? new URL(endpoint).hostname : '';
+        } catch {
+          return '';
+        }
+      })(),
+    );
+    const region =
+      explicitRegion || (isR2Endpoint ? 'auto' : 'us-east-1');
+
     // SSRF defense: reject endpoints pointing at loopback, metadata services,
     // or private IPs. Fails fast at startup.
     assertSafeS3Endpoint(endpoint);
+
+    if (isR2Endpoint && explicitRegion && explicitRegion !== 'auto') {
+      this.logger.warn(
+        `S3_REGION="${explicitRegion}" with an R2 endpoint — R2 signs with 'auto'. Presigned URLs may 403. Set S3_REGION=auto or unset it.`,
+      );
+    }
     const accessKeyId = this.configService.get<string>('S3_ACCESS_KEY', '');
     const secretAccessKey = this.configService.get<string>(
       'S3_SECRET_KEY',

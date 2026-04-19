@@ -7,6 +7,7 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { resendLoginSms } from '../../src/services/auth';
+import { TurnstileWebView } from '../../src/components/TurnstileWebView';
 import { ApiError } from '../../src/services/api';
 
 export default function TwoFaChallengeScreen() {
@@ -26,6 +27,7 @@ export default function TwoFaChallengeScreen() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [resendCaptchaToken, setResendCaptchaToken] = useState<string | null>(null);
   const [resentMessage, setResentMessage] = useState<string | null>(null);
 
   const handleConfirm = async () => {
@@ -59,7 +61,7 @@ export default function TwoFaChallengeScreen() {
     setResending(true);
     setResentMessage(null);
     try {
-      const res = await resendLoginSms(tempToken);
+      const res = await resendLoginSms(tempToken, resendCaptchaToken);
       setResentMessage(`Novo código enviado para ${res.phoneHint}.`);
     } catch (err) {
       const msg = err instanceof ApiError && err.message ? err.message : 'Não foi possível reenviar.';
@@ -114,16 +116,22 @@ export default function TwoFaChallengeScreen() {
         </TouchableOpacity>
 
         {method === 'SMS' && (
-          <TouchableOpacity
-            onPress={handleResend}
-            disabled={resending}
-            style={styles.resendLink}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.resendText, { color: colors.primary[600] }]}>
-              {resending ? 'Reenviando…' : 'Reenviar código'}
-            </Text>
-          </TouchableOpacity>
+          <>
+            <TurnstileWebView
+              onToken={setResendCaptchaToken}
+              onExpired={() => setResendCaptchaToken(null)}
+            />
+            <TouchableOpacity
+              onPress={handleResend}
+              disabled={resending}
+              style={styles.resendLink}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.resendText, { color: colors.primary[600] }]}>
+                {resending ? 'Reenviando…' : 'Reenviar código'}
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
 
         {resentMessage && (

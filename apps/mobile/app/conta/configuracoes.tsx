@@ -68,29 +68,12 @@ export default function ConfiguracoesScreen() {
     setMode(value ? 'dark' : 'light');
   };
 
+  // Navigates to the dedicated confirm-and-delete screen. That screen
+  // collects password / emailCode + the typed-EXCLUIR safety gate
+  // before POSTing — doing it inline here bypassed server-side auth
+  // checks for accounts without passwords.
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Excluir conta',
-      'Tem certeza que deseja excluir sua conta? Esta ação não pode ser desfeita.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              await apiFetch('/users/me', { method: 'DELETE', authenticated: true });
-              await signOut();
-            } catch (_e) {
-              Alert.alert('Erro', 'Não foi possível excluir sua conta. Tente novamente.');
-            } finally {
-              setDeleting(false);
-            }
-          },
-        },
-      ],
-    );
+    router.push('/conta/deletar-conta');
   };
 
   return (

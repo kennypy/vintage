@@ -24,7 +24,23 @@ model User {
   avatarUrl          String?
   bio                String?
   verified           Boolean   @default(false)
-  cpfVerified        Boolean   @default(false)
+  // Modulo-11 checksum validation — cheap, no vendor call. Set to true
+  // at registration when the CPF digits produce a valid check digit.
+  // Used to be named `cpfVerified`; renamed because "verified" was
+  // misleading — a valid-check-digit CPF is NOT a verified identity.
+  cpfChecksumValid   Boolean   @default(false)
+  // True only after a Tier-2 / Tier-3 KYC provider (Serpro / Serasa /
+  // idwall / Unico / Mercado Pago's own KYC callback) confirms that
+  // (a) the CPF is ATIVO at Receita Federal, AND (b) the full name
+  // on the account matches the CPF holder. Defaults false for every
+  // new user until the KYC flow completes. Gates payout (see
+  // payouts.service.ts) and NF-e issuance (nfe.client.ts).
+  cpfIdentityVerified Boolean  @default(false)
+  // Self-declared birth date. Required input for the Serpro
+  // Datavalid CPF check (Receita matches on CPF + name + DOB).
+  // Nullable so existing accounts don't break; KYC flow prompts
+  // for it when missing.
+  birthDate          DateTime? @db.Date
   twoFaEnabled       Boolean   @default(false)
   // Monotonically-incremented every time we need to globally invalidate
   // existing sessions for this user (email change, password change, admin
@@ -94,6 +110,7 @@ model User {
   listingImageFlagReviews ListingImageFlag[] @relation("ListingImageFlagReviewer")
   fraudFlags             FraudFlag[]         @relation("FraudFlagSubject")
   fraudFlagReviews       FraudFlag[]         @relation("FraudFlagReviewer")
+  cpfVerificationLogs    CpfVerificationLog[]
 
   @@index([email])
   @@index([cpf])
@@ -618,6 +635,39 @@ enum ListingImageFlagStatus {
   PENDING
   DISMISSED
   REJECTED
+}
+
+// --- CPF identity verification audit log ---
+//
+// Every call we make to a KYC provider (Serpro / Caf / etc.) writes a
+// row here. Used for: ops triage of failed verifications, RIPD audit
+// trail, and retention purge (docs/privacy/ripd.md §5).
+//
+// We deliberately store ONLY a SHA256 of the raw CPF — per CLAUDE.md
+// §Logging, CPFs must never be persisted outside the User row. The
+// hash lets ops correlate "which user tried to verify CPF X N times"
+// without exposing the value.
+model CpfVerificationLog {
+  id          String   @id @default(cuid())
+  userId      String
+  cpfHash     String   @db.VarChar(64)
+  provider    String // 'SERPRO' | 'CAF' | 'MP_WEBHOOK' | 'MANUAL_ADMIN'
+  // Result taxonomy. Keep stable — dashboards slice on this column:
+  //   VERIFIED          — CPF ATIVO + name matched
+  //   NAME_MISMATCH     — CPF ATIVO but name differs from our row
+  //   CPF_SUSPENDED     — Receita reports SUSPENSA
+  //   CPF_CANCELED      — Receita reports CANCELADA / NULA
+  //   DECEASED          — TITULAR FALECIDO
+  //   PROVIDER_ERROR    — vendor returned 5xx / timeout / invalid payload
+  //   CONFIG_ERROR      — our side: missing env / flag off
+  result      String   @db.VarChar(32)
+  attemptedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, attemptedAt])
+  @@index([cpfHash])
+  @@index([attemptedAt])
 }
 
 // --- Fraud signals ---
