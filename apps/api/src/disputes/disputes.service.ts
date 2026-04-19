@@ -213,13 +213,26 @@ export class DisputesService {
     }
 
     const updatedDispute = await this.prisma.$transaction(async (tx) => {
-      // Resolve the dispute
-      const resolved = await tx.dispute.update({
+      // Claim the dispute atomically. Two concurrent admin resolves
+      // could both pass the outer `status !== 'OPEN'` check (that read
+      // is OUTSIDE the tx), then both reach this point — the previous
+      // code unconditionally updated to RESOLVED inside each tx and
+      // credited the buyer's wallet twice. The conditional updateMany
+      // collapses the race: the first writer wins (count=1), the
+      // second writer sees count=0 and short-circuits with a
+      // ConflictException — no refund, no escrow reversal, no
+      // ledger duplication. Red-team finding R-01 (pen-test track 4).
+      const claim = await tx.dispute.updateMany({
+        where: { id: disputeId, status: 'OPEN' },
+        data: { status: 'RESOLVED', resolution },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Esta disputa já está sendo resolvida ou foi resolvida.',
+        );
+      }
+      const resolved = await tx.dispute.findUniqueOrThrow({
         where: { id: disputeId },
-        data: {
-          status: 'RESOLVED',
-          resolution,
-        },
         include: {
           order: {
             include: {

@@ -216,15 +216,51 @@ export class PayoutsService {
       throw new BadRequestException('PayoutRequest já está em estado terminal.');
     }
 
+    // Atomic claim. Two admins clicking "Fail" simultaneously on the
+    // same payout both passed the outer terminal-state check above —
+    // the previous code then fell through to `failAndRefundByRecord`
+    // twice and credited the user's balanceBrl twice. The conditional
+    // updateMany makes the transition single-shot: the first writer
+    // wins (count=1) and commits the refund/completion; the second
+    // writer sees count=0 and the method returns cleanly without
+    // moving any money. Red-team finding R-02 (pen-test track 4).
     if (next === 'FAILED') {
-      await this.failAndRefundByRecord(pr, failureReason ?? 'Falha marcada pelo suporte.');
+      const claim = await this.prisma.payoutRequest.updateMany({
+        where: {
+          id: payoutRequestId,
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
+        data: {
+          status: 'FAILED',
+          failureReason: failureReason ?? 'Falha marcada pelo suporte.',
+          completedAt: new Date(),
+        },
+      });
+      if (claim.count === 0) {
+        // Lost the race (or the row was already terminal). Don't
+        // throw — idempotent from ops' POV — but also don't refund.
+        return { ok: true, status: 'FAILED' as const, alreadyTerminal: true };
+      }
+      // We won the claim. Refund the wallet in a separate tx. The
+      // helper is now idempotent by construction (see R-03), so a
+      // retry after a partial commit is safe.
+      await this.refundWalletForFailedPayout(
+        pr,
+        failureReason ?? 'Falha marcada pelo suporte.',
+      );
       return { ok: true, status: 'FAILED' as const };
     }
 
-    await this.prisma.payoutRequest.update({
-      where: { id: payoutRequestId },
+    const claim = await this.prisma.payoutRequest.updateMany({
+      where: {
+        id: payoutRequestId,
+        status: { in: ['PENDING', 'PROCESSING'] },
+      },
       data: { status: 'COMPLETED', completedAt: new Date() },
     });
+    if (claim.count === 0) {
+      return { ok: true, status: 'COMPLETED' as const, alreadyTerminal: true };
+    }
     return { ok: true, status: 'COMPLETED' as const };
   }
 
@@ -314,6 +350,13 @@ export class PayoutsService {
     };
   }
 
+  /**
+   * Auto-fail + refund path — called only when the MP send throws and
+   * the PayoutRequest is still PENDING (never admin-claimed). Wraps
+   * the status flip + wallet credit + ledger row in one transaction.
+   * Uses a conditional updateMany on status so that a concurrent admin
+   * adminUpdateStatus('FAILED') doesn't double-refund.
+   */
   private async failAndRefund(
     payoutRequestId: string,
     walletTransactionId: string | null,
@@ -322,6 +365,23 @@ export class PayoutsService {
     failureReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      // Race guard. If an admin just claimed this PayoutRequest as
+      // FAILED (and refunded) in a concurrent flow, their updateMany
+      // moved status → FAILED and this one returns count=0 — we bail
+      // without moving any money. Red-team finding R-03 (pen-test
+      // track 4): the old code unconditionally credited the wallet
+      // every time failAndRefund ran, so any double-invocation (two
+      // admins clicking fail, admin clicking while MP-error-path was
+      // still resolving, etc.) credited the user twice.
+      const claim = await tx.payoutRequest.updateMany({
+        where: {
+          id: payoutRequestId,
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
+        data: { status: 'FAILED', failureReason, completedAt: new Date() },
+      });
+      if (claim.count === 0) return;
+
       await tx.wallet.update({
         where: { id: walletId },
         data: { balanceBrl: { increment: amountBrl } },
@@ -335,14 +395,6 @@ export class PayoutsService {
           description: 'Estorno de saque PIX (falha no processamento)',
         },
       });
-      await tx.payoutRequest.update({
-        where: { id: payoutRequestId },
-        data: {
-          status: 'FAILED',
-          failureReason,
-          completedAt: new Date(),
-        },
-      });
       // Silence the unused-var warning — walletTransactionId is part of
       // the caller's context for future extension (e.g. voiding the
       // original debit rather than emitting a counter-credit).
@@ -350,30 +402,59 @@ export class PayoutsService {
     });
   }
 
-  private async failAndRefundByRecord(
+  /**
+   * Admin-triggered refund. The caller has ALREADY claimed the row as
+   * FAILED via a conditional updateMany (see adminUpdateStatus), so
+   * this helper only needs to credit the wallet + write the ledger.
+   * We do NOT re-flip the status — that would overwrite the admin's
+   * winning claim on the off-chance a concurrent failAndRefund also
+   * tried.
+   */
+  private async refundWalletForFailedPayout(
     pr: {
       id: string;
       userId: string;
       amountBrl: unknown;
-      walletTransactionId: string | null;
       status: PayoutRequestStatus;
     },
-    failureReason: string,
+    _failureReason: string,
   ): Promise<void> {
     const wallet = await this.prisma.wallet.findUnique({
       where: { userId: pr.userId },
     });
     if (!wallet) {
-      // Shouldn't happen — wallets are created on signup — but fail loud.
       throw new NotFoundException('Carteira do usuário não encontrada');
     }
-    await this.failAndRefund(
-      pr.id,
-      pr.walletTransactionId,
-      wallet.id,
-      Number(pr.amountBrl),
-      failureReason,
-    );
+    const amountBrl = Number(pr.amountBrl);
+
+    await this.prisma.$transaction(async (tx) => {
+      // Idempotency guard. If a REFUND walletTransaction already
+      // exists for this payoutRequest, another path already refunded
+      // — don't credit again.
+      const prior = await tx.walletTransaction.findFirst({
+        where: {
+          walletId: wallet.id,
+          referenceId: pr.id,
+          type: 'REFUND',
+        },
+        select: { id: true },
+      });
+      if (prior) return;
+
+      await tx.wallet.update({
+        where: { id: wallet.id },
+        data: { balanceBrl: { increment: amountBrl } },
+      });
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: 'REFUND',
+          amountBrl,
+          referenceId: pr.id,
+          description: 'Estorno de saque PIX (falha no processamento)',
+        },
+      });
+    });
   }
 
   /** Suppress the "only used as type" TS warning for ForbiddenException. */

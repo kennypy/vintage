@@ -122,6 +122,26 @@ describe('PaymentsService', () => {
         service.createPixPayment('order-1', 'attacker-1'),
       ).rejects.toThrow();
     });
+
+    it('R-04: refuses to mint a second MP payment when the order already has one (dual-payment guard)', async () => {
+      // Pre-fix, every create{Pix,Card,Boleto} call overwrote
+      // order.paymentId and orphaned the previous MP charge. A buyer
+      // who generated a PIX then switched to a card could pay BOTH
+      // and get double-charged (the card's webhook flipped the order
+      // PAID; the PIX payment arrived later and silently no-op'd
+      // because its paymentId no longer matched order.paymentId).
+      mockPrisma.order.findUnique.mockResolvedValue({
+        ...mockOrder,
+        paymentId: 'pix-already-active',
+      });
+
+      await expect(
+        service.createPixPayment('order-1', 'buyer-1'),
+      ).rejects.toThrow(/Já existe um pagamento em andamento/);
+      // Critical: the MP client must NOT be called — we'd create a
+      // third charge otherwise.
+      expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+    });
   });
 
   describe('createCardPayment', () => {
@@ -228,18 +248,43 @@ describe('PaymentsService', () => {
   });
 
   describe('getPaymentStatus', () => {
-    it('should return payment status', async () => {
+    it('returns payment status ONLY when the caller owns the order', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue({ id: 'order-1' });
       mockMercadoPago.getPaymentStatus.mockResolvedValue({
         id: 'pay-1',
         status: 'pending',
         updatedAt: '2026-01-01T00:00:00Z',
       });
 
-      const result = await service.getPaymentStatus('pay-1');
+      const result = await service.getPaymentStatus('pay-1', 'user-buyer');
 
+      expect(mockPrisma.order.findFirst).toHaveBeenCalledWith({
+        where: { paymentId: 'pay-1', buyerId: 'user-buyer' },
+        select: { id: true },
+      });
       expect(result.id).toBe('pay-1');
-      expect(result.status).toBe('pending');
       expect(mockMercadoPago.getPaymentStatus).toHaveBeenCalledWith('pay-1');
+    });
+
+    it('rejects as NotFound when the caller is not the buyer on that order (R-06)', async () => {
+      // The old code proxied any paymentId straight to MP, letting an
+      // authenticated user read another buyer's payment status.
+      mockPrisma.order.findFirst.mockResolvedValue(null);
+
+      await expect(service.getPaymentStatus('pay-1', 'nosy-user')).rejects.toThrow(
+        /não encontrado/i,
+      );
+      expect(mockMercadoPago.getPaymentStatus).not.toHaveBeenCalled();
+    });
+
+    it('rejects obviously malformed paymentIds without hitting the DB', async () => {
+      await expect(service.getPaymentStatus('', 'user-1')).rejects.toThrow(
+        /inválido/,
+      );
+      await expect(
+        service.getPaymentStatus('x'.repeat(200), 'user-1'),
+      ).rejects.toThrow(/inválido/);
+      expect(mockPrisma.order.findFirst).not.toHaveBeenCalled();
     });
   });
 

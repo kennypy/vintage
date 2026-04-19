@@ -190,25 +190,35 @@ describe('DisputesService', () => {
       },
     };
 
+    const makeTx = (resolvedDispute: unknown, claimCount = 1) => ({
+      dispute: {
+        updateMany: jest.fn().mockResolvedValue({ count: claimCount }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue(resolvedDispute),
+      },
+      order: { update: jest.fn().mockResolvedValue({}) },
+      wallet: {
+        upsert: jest.fn().mockResolvedValue({ id: 'wallet-1' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    });
+
     it('should resolve with refund: create wallet transaction for buyer', async () => {
       mockPrisma.dispute.findUnique.mockResolvedValue(mockDispute);
-
       const resolvedDispute = { ...mockDispute, status: 'RESOLVED', resolution: 'Reembolso aprovado' };
-      const mockTx = {
-        dispute: { update: jest.fn().mockResolvedValue(resolvedDispute) },
-        order: { update: jest.fn().mockResolvedValue({}) },
-        wallet: {
-          upsert: jest.fn().mockResolvedValue({ id: 'wallet-1', userId: 'buyer-1' }),
-          update: jest.fn().mockResolvedValue({}),
-        },
-        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
-        orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      };
+      const mockTx = makeTx(resolvedDispute);
       mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
 
       const result = await service.resolve('dispute-1', 'Reembolso aprovado', true);
 
       expect(result).toEqual(resolvedDispute);
+      // Conditional claim: updateMany gates the status transition.
+      expect(mockTx.dispute.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'dispute-1', status: 'OPEN' },
+        }),
+      );
       expect(mockTx.order.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: 'REFUNDED' } }),
       );
@@ -222,18 +232,8 @@ describe('DisputesService', () => {
 
     it('should resolve without refund: complete order and credit seller', async () => {
       mockPrisma.dispute.findUnique.mockResolvedValue(mockDispute);
-
       const resolvedDispute = { ...mockDispute, status: 'RESOLVED', resolution: 'Em favor do vendedor' };
-      const mockTx = {
-        dispute: { update: jest.fn().mockResolvedValue(resolvedDispute) },
-        order: { update: jest.fn().mockResolvedValue({}) },
-        wallet: {
-          upsert: jest.fn().mockResolvedValue({ id: 'wallet-2', userId: 'seller-1' }),
-          update: jest.fn().mockResolvedValue({}),
-        },
-        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
-        orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      };
+      const mockTx = makeTx(resolvedDispute);
       mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
 
       const result = await service.resolve('dispute-1', 'Em favor do vendedor', false);
@@ -252,6 +252,22 @@ describe('DisputesService', () => {
           },
         }),
       );
+    });
+
+    it('R-01: race loser (dispute.updateMany returns count=0) throws Conflict and never credits wallet', async () => {
+      mockPrisma.dispute.findUnique.mockResolvedValue(mockDispute);
+      const mockTx = makeTx(null, 0); // claim count = 0 → concurrent admin already claimed
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await expect(
+        service.resolve('dispute-1', 'Reembolso aprovado', true),
+      ).rejects.toThrow(/já está sendo resolvida|já foi resolvida/i);
+
+      // Critical: the loser of the race must NOT credit the buyer or
+      // touch seller escrow.
+      expect(mockTx.wallet.update).not.toHaveBeenCalled();
+      expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
+      expect(mockTx.order.update).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException if dispute not found', async () => {

@@ -21,6 +21,7 @@ import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { DisputesService } from './disputes.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
+import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
 
 @ApiTags('disputes')
 @ApiBearerAuth()
@@ -67,7 +68,7 @@ export class DisputesController {
   @ApiResponse({ status: 200, description: 'Disputa resolvida' })
   resolve(
     @Param('id') id: string,
-    @Body() body: { resolution: string; refund: boolean },
+    @Body() body: ResolveDisputeDto,
   ) {
     return this.disputesService.resolve(id, body.resolution, body.refund);
   }

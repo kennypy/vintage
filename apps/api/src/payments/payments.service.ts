@@ -64,6 +64,22 @@ export class PaymentsService {
     if (order.status !== 'PENDING') {
       throw new BadRequestException('Pedido já foi pago ou não está pendente.');
     }
+    // Dual-payment guard (red-team finding R-04, pen-test track 4).
+    // Previously the service overwrote `order.paymentId` on every
+    // create{Pix,Card,Boleto} call, orphaning the previous Mercado
+    // Pago payment. A buyer who generated a PIX QR then switched to
+    // a card (or vice-versa) could end up paying BOTH — MP processes
+    // them independently, the webhook for the card flips the order
+    // to PAID, and the PIX webhook arrives later with a paymentId that
+    // no longer matches `order.paymentId`, so our handler silently
+    // records it as a no-op. The buyer is charged twice with no
+    // automatic refund. We refuse the second create-payment call
+    // when the order already has an active paymentId pending.
+    if (order.paymentId) {
+      throw new BadRequestException(
+        'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
+      );
+    }
     return order;
   }
 
@@ -467,7 +483,30 @@ export class PaymentsService {
     });
   }
 
-  async getPaymentStatus(paymentId: string) {
+  /**
+   * Look up a payment's status.
+   *
+   * Caller MUST own the order the payment is tied to. Pre-fix (red-team
+   * R-06, pen-test track 4), the endpoint accepted any paymentId and
+   * proxied straight to Mercado Pago, so any authenticated user who
+   * could guess or enumerate a paymentId could read the payer's
+   * transaction amount, status, and status_detail for someone else's
+   * order. We map paymentId → Order → buyerId and refuse if the
+   * caller isn't the buyer. Returning 404 on either "no order for
+   * this paymentId" OR "order exists but you don't own it" keeps the
+   * endpoint from doubling as an ownership oracle.
+   */
+  async getPaymentStatus(paymentId: string, userId: string) {
+    if (!paymentId || typeof paymentId !== 'string' || paymentId.length > 128) {
+      throw new BadRequestException('paymentId inválido.');
+    }
+    const order = await this.prisma.order.findFirst({
+      where: { paymentId, buyerId: userId },
+      select: { id: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Pagamento não encontrado.');
+    }
     return this.mercadoPago.getPaymentStatus(paymentId);
   }
 

@@ -25,6 +25,7 @@ const mockPrisma = {
     create: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     findMany: jest.fn(),
     count: jest.fn(),
   },
@@ -278,11 +279,16 @@ describe('PayoutsService', () => {
     it('refunds the wallet atomically and marks the row FAILED', async () => {
       setupTx(1);
       mockMp.sendPixPayout.mockRejectedValue(new Error('MP 500'));
-      // Second $transaction is the refund flow.
+      // Second $transaction is the refund flow. failAndRefund now
+      // conditional-updates the payoutRequest (race guard) BEFORE
+      // crediting the wallet (R-03), so the refund tx exposes
+      // updateMany instead of update.
       const refundTx = {
         wallet: { update: jest.fn().mockResolvedValue({}) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
-        payoutRequest: { update: jest.fn().mockResolvedValue({}) },
+        payoutRequest: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
       };
       mockPrisma.$transaction
         .mockImplementationOnce(async (cb: unknown) => {
@@ -311,11 +317,50 @@ describe('PayoutsService', () => {
           data: expect.objectContaining({ type: 'REFUND', amountBrl: 100 }),
         }),
       );
-      expect(refundTx.payoutRequest.update).toHaveBeenCalledWith(
+      expect(refundTx.payoutRequest.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'pr-1',
+            status: { in: ['PENDING', 'PROCESSING'] },
+          }),
           data: expect.objectContaining({ status: 'FAILED' }),
         }),
       );
+    });
+
+    it('R-03: MP-fail path is race-safe — if an admin already claimed FAILED, failAndRefund does NOT double-credit', async () => {
+      setupTx(1);
+      mockMp.sendPixPayout.mockRejectedValue(new Error('MP 500'));
+      const refundTx = {
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        payoutRequest: {
+          // Admin already claimed FAILED → updateMany returns count=0.
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+      };
+      mockPrisma.$transaction
+        .mockImplementationOnce(async (cb: unknown) => {
+          const tx = {
+            wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+            walletTransaction: { create: jest.fn().mockResolvedValue({ id: 'ledger-1' }) },
+            payoutRequest: { create: jest.fn().mockResolvedValue({ id: 'pr-1' }) },
+          };
+          return typeof cb === 'function' ? (cb as (t: typeof tx) => unknown)(tx) : undefined;
+        })
+        .mockImplementationOnce(async (cb: unknown) =>
+          typeof cb === 'function' ? (cb as (t: typeof refundTx) => unknown)(refundTx) : undefined,
+        );
+
+      await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
+        /devolvido/,
+      );
+
+      // The conditional claim fired but came back empty.
+      expect(refundTx.payoutRequest.updateMany).toHaveBeenCalled();
+      // Critical: no double credit, no duplicate ledger row.
+      expect(refundTx.wallet.update).not.toHaveBeenCalled();
+      expect(refundTx.walletTransaction.create).not.toHaveBeenCalled();
     });
   });
 
@@ -337,7 +382,7 @@ describe('PayoutsService', () => {
       );
     });
 
-    it('promotes PROCESSING → COMPLETED', async () => {
+    it('promotes PROCESSING → COMPLETED via conditional updateMany (race-safe)', async () => {
       mockPrisma.payoutRequest.findUnique.mockResolvedValue({
         id: 'pr-1',
         userId: 'user-1',
@@ -345,18 +390,21 @@ describe('PayoutsService', () => {
         amountBrl: 100,
         walletTransactionId: 'ledger-1',
       });
-      mockPrisma.payoutRequest.update.mockResolvedValue({});
+      mockPrisma.payoutRequest.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.adminUpdateStatus('pr-1', 'COMPLETED');
 
       expect(result).toEqual({ ok: true, status: 'COMPLETED' });
-      expect(mockPrisma.payoutRequest.update).toHaveBeenCalledWith({
-        where: { id: 'pr-1' },
+      expect(mockPrisma.payoutRequest.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'pr-1',
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
         data: expect.objectContaining({ status: 'COMPLETED' }),
       });
     });
 
-    it('FAILED → refunds the wallet and marks status', async () => {
+    it('FAILED → refunds wallet exactly once, after a winning updateMany claim', async () => {
       mockPrisma.payoutRequest.findUnique.mockResolvedValue({
         id: 'pr-1',
         userId: 'user-1',
@@ -364,12 +412,15 @@ describe('PayoutsService', () => {
         amountBrl: 100,
         walletTransactionId: 'ledger-1',
       });
+      mockPrisma.payoutRequest.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.wallet.findUnique.mockResolvedValue({ id: 'w1' });
 
       const refundTx = {
         wallet: { update: jest.fn().mockResolvedValue({}) },
-        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
-        payoutRequest: { update: jest.fn().mockResolvedValue({}) },
+        walletTransaction: {
+          create: jest.fn().mockResolvedValue({}),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: unknown) =>
         typeof cb === 'function' ? (cb as (t: typeof refundTx) => unknown)(refundTx) : undefined,
@@ -378,17 +429,71 @@ describe('PayoutsService', () => {
       const result = await service.adminUpdateStatus('pr-1', 'FAILED', 'banco recusou');
 
       expect(result).toEqual({ ok: true, status: 'FAILED' });
+      // Status transition is the updateMany above.
+      expect(mockPrisma.payoutRequest.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pr-1', status: { in: ['PENDING', 'PROCESSING'] } },
+          data: expect.objectContaining({ status: 'FAILED', failureReason: 'banco recusou' }),
+        }),
+      );
+      // Refund is separate tx on the wallet.
       expect(refundTx.wallet.update).toHaveBeenCalledWith({
         where: { id: 'w1' },
         data: { balanceBrl: { increment: 100 } },
       });
-      expect(refundTx.payoutRequest.update).toHaveBeenCalledWith({
-        where: { id: 'pr-1' },
-        data: expect.objectContaining({
-          status: 'FAILED',
-          failureReason: 'banco recusou',
-        }),
+    });
+
+    it('R-02: race loser (updateMany count=0) returns alreadyTerminal and does NOT refund', async () => {
+      mockPrisma.payoutRequest.findUnique.mockResolvedValue({
+        id: 'pr-1',
+        userId: 'user-1',
+        status: 'PROCESSING',
+        amountBrl: 100,
+        walletTransactionId: 'ledger-1',
       });
+      // Another admin just won the race.
+      mockPrisma.payoutRequest.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.adminUpdateStatus('pr-1', 'FAILED', 'banco recusou');
+
+      expect(result).toEqual({
+        ok: true,
+        status: 'FAILED',
+        alreadyTerminal: true,
+      });
+      // Critical: no wallet touch.
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.wallet.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('R-03: refund helper is idempotent — if a REFUND walletTransaction already exists for this payout, we do NOT credit again', async () => {
+      mockPrisma.payoutRequest.findUnique.mockResolvedValue({
+        id: 'pr-1',
+        userId: 'user-1',
+        status: 'PROCESSING',
+        amountBrl: 100,
+        walletTransactionId: 'ledger-1',
+      });
+      mockPrisma.payoutRequest.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.wallet.findUnique.mockResolvedValue({ id: 'w1' });
+
+      const refundTx = {
+        wallet: { update: jest.fn().mockResolvedValue({}) },
+        walletTransaction: {
+          // Simulate: a prior MP-fail path already wrote the REFUND row.
+          findFirst: jest.fn().mockResolvedValue({ id: 'existing-refund' }),
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation(async (cb: unknown) =>
+        typeof cb === 'function' ? (cb as (t: typeof refundTx) => unknown)(refundTx) : undefined,
+      );
+
+      await service.adminUpdateStatus('pr-1', 'FAILED', 'banco recusou');
+
+      // Critical: no second credit, no second ledger row.
+      expect(refundTx.wallet.update).not.toHaveBeenCalled();
+      expect(refundTx.walletTransaction.create).not.toHaveBeenCalled();
     });
   });
 

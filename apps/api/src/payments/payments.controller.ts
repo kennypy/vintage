@@ -20,6 +20,7 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { PaymentsService } from './payments.service';
+import { CreateBoletoDto, CreateCardDto, CreatePixDto } from './dto/create-payment.dto';
 
 @ApiTags('payments')
 @Controller('payments')
@@ -33,7 +34,7 @@ export class PaymentsController {
   @ApiResponse({ status: 201, description: 'Pagamento PIX criado' })
   createPix(
     @CurrentUser() user: AuthUser,
-    @Body() body: { orderId: string },
+    @Body() body: CreatePixDto,
   ) {
     return this.paymentsService.createPixPayment(body.orderId, user.id);
   }
@@ -45,7 +46,7 @@ export class PaymentsController {
   @ApiResponse({ status: 201, description: 'Pagamento com cartão criado' })
   createCard(
     @CurrentUser() user: AuthUser,
-    @Body() body: { orderId: string; installments: number },
+    @Body() body: CreateCardDto,
   ) {
     return this.paymentsService.createCardPayment(
       body.orderId,
@@ -61,7 +62,7 @@ export class PaymentsController {
   @ApiResponse({ status: 201, description: 'Boleto gerado' })
   createBoleto(
     @CurrentUser() user: AuthUser,
-    @Body() body: { orderId: string },
+    @Body() body: CreateBoletoDto,
   ) {
     return this.paymentsService.createBoletoPayment(body.orderId, user.id);
   }
@@ -91,7 +92,7 @@ export class PaymentsController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Consultar status do pagamento' })
   @ApiResponse({ status: 200, description: 'Status do pagamento' })
-  getStatus(@CurrentUser() _user: AuthUser, @Param('id') id: string) {
-    return this.paymentsService.getPaymentStatus(id);
+  getStatus(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.paymentsService.getPaymentStatus(id, user.id);
   }
 }
