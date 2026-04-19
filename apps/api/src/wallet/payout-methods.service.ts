@@ -6,6 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import {
   isValidPixKey,
   normalisePixKey,
@@ -31,7 +32,10 @@ export interface PayoutMethodView {
 
 @Injectable()
 export class PayoutMethodsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private auditLog: AuditLogService,
+  ) {}
 
   /**
    * List the user's saved payout methods. Never returns the raw PIX key —
@@ -115,11 +119,13 @@ export class PayoutMethodsService {
    * race the promotion step.
    */
   async delete(userId: string, methodId: string): Promise<{ success: true }> {
+    let deletedType: string | null = null;
     await this.prisma.$transaction(async (tx) => {
       const method = await tx.payoutMethod.findUnique({ where: { id: methodId } });
       if (!method || method.userId !== userId) {
         throw new NotFoundException('Chave PIX não encontrada.');
       }
+      deletedType = method.type;
       await tx.payoutMethod.delete({ where: { id: methodId } });
 
       // If we just removed the default, promote the most recent remaining
@@ -136,6 +142,18 @@ export class PayoutMethodsService {
           });
         }
       }
+    });
+
+    // Deletion of a PIX key is a payout-surface change worth auditing —
+    // a compromised session that removes a legitimate key to re-add its
+    // own is a textbook account-drain prep. Never log the key itself
+    // (the whole point of the vault), only the type + the deleted row id.
+    await this.auditLog.record({
+      actorId: userId,
+      action: 'payout_method.delete',
+      targetType: 'payout_method',
+      targetId: methodId,
+      metadata: { type: deletedType ?? 'unknown' },
     });
 
     return { success: true };

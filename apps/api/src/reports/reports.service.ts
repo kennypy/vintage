@@ -71,6 +71,34 @@ export class ReportsService {
       );
     }
 
+    // Per-target DoS guard (pen-test deferred follow-up). The per-
+    // reporter dedup above bounds a single attacker; the per-target
+    // bucket bounds a COORDINATED attack across many reporters — 20
+    // distinct reports on the same listing / user / message / review
+    // in 24 h is the ceiling for organic outrage and the floor for
+    // a brigading attempt. Above it, we refuse further reports on
+    // this target with a generic "already under review" message;
+    // the pending queue is already what admins need to triage.
+    const PER_TARGET_REPORT_CAP = 20;
+    const targetReportCount = await this.prisma.report.count({
+      where: {
+        targetType: dto.targetType,
+        targetId: dto.targetId,
+        createdAt: { gte: since },
+      },
+    });
+    if (targetReportCount >= PER_TARGET_REPORT_CAP) {
+      // Neutral message — never tell the reporter they hit a cap
+      // because doing so reveals exactly what the brigading budget
+      // is. "Under review" is true AND uninformative.
+      return {
+        id: null,
+        throttled: true,
+        message:
+          'Este conteúdo já está sob revisão da nossa equipe. Obrigado pela denúncia.',
+      };
+    }
+
     const report = await this.prisma.report.create({
       data: {
         reporterId,

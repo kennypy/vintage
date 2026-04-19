@@ -20,6 +20,7 @@ const mockPrisma = {
     create: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
+    count: jest.fn().mockResolvedValue(0),
   },
 };
 
@@ -67,6 +68,7 @@ describe('ReportsService', () => {
         description: 'Produto falso',
       });
 
+      if ('throttled' in result) throw new Error('expected success branch');
       expect(result.reporterId).toBe('reporter-1');
       expect(result.targetType).toBe('listing');
       expect(result.targetId).toBe('listing-1');
@@ -100,6 +102,7 @@ describe('ReportsService', () => {
         reason: 'harassment' as any,
       });
 
+      if ('throttled' in result) throw new Error('expected success branch');
       expect(result.reporterId).toBe('reporter-1');
       expect(result.targetType).toBe('user');
       expect(result.targetId).toBe('user-1');

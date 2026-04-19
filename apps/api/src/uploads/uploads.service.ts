@@ -253,10 +253,13 @@ export class UploadsService {
     const { suggestions, moderation } =
       await this.imageAnalysisService.analyze(file);
 
-    // 5a. SafeSearch gate. classifyModeration returns 'CLEAN' when
-    // moderation is null (Vision disabled / outage) — fail-open is
-    // acceptable for launch; tighten to REJECT-on-null once Vision
-    // is confirmed stable for our traffic.
+    // 5a. SafeSearch gate. classifyModeration returns 'FLAG' when
+    // moderation is null (Vision disabled / outage) — fail-REVIEW
+    // rather than fail-open, so a Vision outage can't silently
+    // disable moderation for the duration. FLAG uploads still land
+    // (no user-facing latency from a vendor hiccup) but get queued
+    // in ListingImageFlag for admin sign-off before they surface
+    // to buyers. REJECT still refuses outright.
     const decision = classifyModeration(moderation);
     if (decision === 'REJECT') {
       this.logger.warn(

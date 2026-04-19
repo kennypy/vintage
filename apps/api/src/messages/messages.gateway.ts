@@ -13,9 +13,23 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from './messages.service';
 
-/** Strip HTML tags from a string to prevent XSS in broadcast messages. */
+/**
+ * HTML-escape a message body. Chat bodies are rendered as plain text
+ * by both clients (React text node on web, Text on mobile), so escaping
+ * is defence in depth for the case a future surface — admin mod queue,
+ * export PDF, notification email — accidentally pipes the body into
+ * innerHTML / dangerouslySetInnerHTML / a markdown renderer. The
+ * previous `strip <…>` implementation was naive (malformed tags,
+ * `javascript:` URLs, unicode tag tricks slipped through); full
+ * escape removes the class of concern at the source.
+ */
 function sanitizeHtml(input: string): string {
-  return input.replace(/<[^>]*>/g, '');
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /** Max body length accepted at the gateway layer. The HTTP path uses
@@ -182,13 +196,16 @@ export class MessagesGateway
       }
     }
 
-    // Broadcast online status (never expose socket IDs)
-    this.server.emit('userOnline', { userId });
+    // Only the first concurrent socket broadcasts presence — the
+    // subsequent ones are the same user opening another tab / device.
+    if (existing.length === 1) {
+      await this.emitPresenceToPartners(userId, 'userOnline');
+    }
 
     this.logger.log(`Cliente conectado: ${client.id} (usuário: ${userId})`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const userId = this.socketToUser.get(client.id);
     this.socketToUser.delete(client.id);
     this.rateLimits.delete(client.id);
@@ -200,14 +217,53 @@ export class MessagesGateway
         this.userSockets.delete(userId);
         // Clean up tracked conversations to prevent memory leak
         this.userConversations.delete(userId);
-        // User is fully offline
-        this.server.emit('userOffline', { userId });
+        // User is fully offline — tell only their conversation
+        // partners, not the whole population.
+        await this.emitPresenceToPartners(userId, 'userOffline');
       } else {
         this.userSockets.set(userId, filtered);
       }
     }
 
     this.logger.log(`Cliente desconectado: ${client.id}`);
+  }
+
+  /**
+   * Emit `userOnline` / `userOffline` ONLY to users who share a
+   * conversation with `userId`. The previous implementation fanned
+   * the event out to `this.server.emit(...)` — every connected socket
+   * learned when every user logged in, a presence leak that also
+   * scaled poorly. Conversation partners is the business-correct
+   * audience: if you can't message someone, you don't need to know
+   * they're online.
+   */
+  private async emitPresenceToPartners(
+    userId: string,
+    event: 'userOnline' | 'userOffline',
+  ): Promise<void> {
+    try {
+      const conversations = await this.prisma.conversation.findMany({
+        where: {
+          OR: [{ participant1Id: userId }, { participant2Id: userId }],
+        },
+        select: { participant1Id: true, participant2Id: true },
+      });
+      const partners = new Set<string>();
+      for (const c of conversations) {
+        partners.add(
+          c.participant1Id === userId ? c.participant2Id : c.participant1Id,
+        );
+      }
+      for (const partnerId of partners) {
+        this.server.to(`user:${partnerId}`).emit(event, { userId });
+      }
+    } catch (err) {
+      // Presence is best-effort — never let a DB hiccup block the
+      // connect / disconnect path.
+      this.logger.warn(
+        `Falha ao emitir presença (${event}) para ${userId}: ${String(err).slice(0, 200)}`,
+      );
+    }
   }
 
   /**

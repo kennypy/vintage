@@ -926,7 +926,13 @@ model NotaFiscal {
   pdfUrl           String?
   status           NFeStatus   @default(PENDING)
   sellerCnpj       String?
-  buyerCpf         String?
+  // CPF at rest on the NF-e row. The XML itself still carries the
+  // plaintext CPF (required by Receita Federal for the fiscal
+  // record), but the convenience column here is AES-256-GCM
+  // ciphertext from CpfVaultService. Apps decrypt on demand via the
+  // service — the same posture as User.cpfEncrypted, keeping the
+  // DB-dump blast radius identical across both surfaces.
+  buyerCpfEncrypted String?    @db.Text
   originState      String      @db.VarChar(2)
   destinationState String      @db.VarChar(2)
   icmsBrl          Decimal     @db.Decimal(10, 2)

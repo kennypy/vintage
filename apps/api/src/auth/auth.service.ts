@@ -409,6 +409,15 @@ export class AuthService {
           tokenVersion: { increment: 1 },
         },
       }),
+      // Revoke every live refresh-token row for consistency with the
+      // tokenVersion bump — the refresh chain is DB-backed, so a stale
+      // row would otherwise keep minting valid access tokens (the new
+      // ones get the current tokenVersion, defeating the pre-
+      // verification invalidation).
+      this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
     ]);
     return { success: true, email: user.email };
   }
@@ -1336,6 +1345,15 @@ export class AuthService {
       where: { userId, usedAt: null },
       data: { usedAt: new Date() },
     });
+    // Eagerly revoke every live refresh token. JwtStrategy would
+    // reject the stale access tokens on their next request anyway
+    // (tokenVersion bump), but refresh rows are DB-backed and stay
+    // usable against the old `ver` claim until their own expiry —
+    // flipping revokedAt closes that window immediately.
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return { success: true, message: 'Senha alterada com sucesso.' };
   }
 
@@ -1471,6 +1489,14 @@ export class AuthService {
         where: { userId: user.id, usedAt: null, id: { not: record.id } },
         data: { usedAt: new Date() },
       });
+      // Revoke every live refresh-token row. A password reset is
+      // the textbook "kick the attacker out" flow; leaving live
+      // refresh rows means the attacker can still mint fresh
+      // access tokens even after the reset.
+      await tx.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
     return { success: true, message: 'Senha redefinida com sucesso.' };
   }
@@ -1587,6 +1613,12 @@ export class AuthService {
       await tx.passwordResetToken.updateMany({
         where: { userId: user.id, usedAt: null },
         data: { usedAt: new Date() },
+      });
+      // Revoke every live refresh-token row — email change invalidates
+      // prior session context by convention, same as password change.
+      await tx.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
       });
     });
 
