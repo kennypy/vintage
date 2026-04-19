@@ -70,10 +70,14 @@ export class OrdersController {
   }
 
   @Patch(':id/deliver')
-  @ApiOperation({ summary: 'Marcar pedido como entregue (comprador ou rastreio)' })
+  @ApiOperation({
+    summary: 'Marcar pedido como entregue (comprador ou vendedor)',
+    description:
+      'Only the order\'s buyer or seller may flip DELIVERED. Auto-delivery from the carrier tracking poller uses a separate internal path.',
+  })
   @ApiResponse({ status: 200, description: 'Pedido marcado como entregue' })
-  deliver(@CurrentUser() _user: AuthUser, @Param('id') id: string) {
-    return this.ordersService.markDelivered(id);
+  deliver(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.markDelivered(id, user.id);
   }
 
   @Patch(':id/cancel')

@@ -14,8 +14,32 @@ import {
   ApiQuery,
   ApiResponse,
 } from '@nestjs/swagger';
+import { IsInt, IsString, Length, Min } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ShippingService } from './shipping.service';
+
+class GenerateShippingLabelDto {
+  @IsString()
+  @Length(1, 64)
+  orderId!: string;
+
+  @IsString()
+  @Length(1, 32)
+  carrier!: string;
+
+  @IsString()
+  @Length(1, 512)
+  originAddress!: string;
+
+  @IsString()
+  @Length(1, 512)
+  destinationAddress!: string;
+
+  @IsInt()
+  @Min(1)
+  weightG!: number;
+}
 
 @ApiTags('shipping')
 @Controller('shipping')
@@ -49,17 +73,15 @@ export class ShippingController {
   @Post('label')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Gerar etiqueta de envio (vendedor)' })
+  @ApiOperation({
+    summary: 'Gerar etiqueta de envio (vendedor)',
+    description:
+      'Only the seller of orderId can generate a label. Previously the endpoint accepted any authenticated user, allowing a bystander to burn the real seller\'s carrier credits / generate spurious tracking codes.',
+  })
   @ApiResponse({ status: 201, description: 'Etiqueta gerada com sucesso' })
   generateLabel(
-    @Body()
-    body: {
-      orderId: string;
-      carrier: string;
-      originAddress: string;
-      destinationAddress: string;
-      weightG: number;
-    },
+    @Body() body: GenerateShippingLabelDto,
+    @CurrentUser() user: AuthUser,
   ) {
     return this.shippingService.generateShippingLabel(
       body.orderId,
@@ -67,6 +89,7 @@ export class ShippingController {
       body.originAddress,
       body.destinationAddress,
       body.weightG,
+      user.id,
     );
   }
 

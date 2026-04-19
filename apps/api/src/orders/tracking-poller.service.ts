@@ -104,8 +104,10 @@ export class TrackingPollerService {
         // Re-reads status inside a tx to guard against a concurrent
         // buyer-initiated markDelivered — throws BadRequestException
         // if another path already moved it past SHIPPED, which we
-        // catch and log without counting as an error.
-        await this.orders.markDelivered(order.id);
+        // catch and log without counting as an error. System path —
+        // userId null so the buyer-or-seller gate is skipped (the
+        // carrier event itself is the authority here).
+        await this.orders.markDeliveredInternal(order.id, null);
         flipped += 1;
         this.logger.log(
           `Order ${order.id} auto-marked DELIVERED from carrier event (${order.carrier ?? 'unknown'} / ${order.trackingCode})`,

@@ -53,7 +53,13 @@ describe('TrackingPollerService', () => {
   const mockPrisma = {
     order: { findMany: jest.fn() },
   };
-  const mockOrders = { markDelivered: jest.fn() };
+  // The poller now calls markDeliveredInternal(orderId, null) — the
+  // "null" userId signals a system caller and skips the buyer/seller
+  // ownership gate that the HTTP endpoint requires.
+  const mockOrders = {
+    markDelivered: jest.fn(),
+    markDeliveredInternal: jest.fn(),
+  };
   const mockShipping = { getTrackingStatus: jest.fn() };
   const mockCronLock = { acquire: jest.fn().mockResolvedValue(true) };
 
@@ -92,7 +98,7 @@ describe('TrackingPollerService', () => {
     await service.pollInFlightShipments();
 
     expect(mockShipping.getTrackingStatus).not.toHaveBeenCalled();
-    expect(mockOrders.markDelivered).not.toHaveBeenCalled();
+    expect(mockOrders.markDeliveredInternal).not.toHaveBeenCalled();
   });
 
   it('flips an order to DELIVERED when the carrier reports BDE', async () => {
@@ -107,7 +113,7 @@ describe('TrackingPollerService', () => {
     await service.pollInFlightShipments();
 
     expect(mockShipping.getTrackingStatus).toHaveBeenCalledWith('BR12345');
-    expect(mockOrders.markDelivered).toHaveBeenCalledWith('order-1');
+    expect(mockOrders.markDeliveredInternal).toHaveBeenCalledWith('order-1', null);
   });
 
   it('does NOT flip an order whose events never include a delivery', async () => {
@@ -120,7 +126,7 @@ describe('TrackingPollerService', () => {
 
     await service.pollInFlightShipments();
 
-    expect(mockOrders.markDelivered).not.toHaveBeenCalled();
+    expect(mockOrders.markDeliveredInternal).not.toHaveBeenCalled();
   });
 
   it('continues polling other orders when one carrier call throws', async () => {
@@ -139,7 +145,7 @@ describe('TrackingPollerService', () => {
     // The first order throws, but the loop doesn't exit — the second
     // order still gets checked and flipped.
     expect(mockShipping.getTrackingStatus).toHaveBeenCalledTimes(2);
-    expect(mockOrders.markDelivered).toHaveBeenCalledWith('order-2');
+    expect(mockOrders.markDeliveredInternal).toHaveBeenCalledWith('order-2', null);
   });
 
   it('swallows markDelivered failures (already past SHIPPED)', async () => {
@@ -149,7 +155,7 @@ describe('TrackingPollerService', () => {
     mockShipping.getTrackingStatus.mockResolvedValue([
       { status: 'ENTREGUE', description: 'Entregue', location: '', timestamp: '' },
     ]);
-    mockOrders.markDelivered.mockRejectedValueOnce(
+    mockOrders.markDeliveredInternal.mockRejectedValueOnce(
       new Error('Pedido precisa estar enviado para marcar como entregue'),
     );
 
