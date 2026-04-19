@@ -84,6 +84,38 @@ export class IdentityService {
       'http://localhost:3001'
     ).replace(/\/$/, '');
 
+    // SSRF guard: WEBHOOK_BASE_URL is what we hand to Caf as the callback
+    // destination. An attacker who can poison this env (compromised
+    // ops account, leaked secrets manager) could redirect Caf's
+    // verification webhooks at an internal service to mint fake
+    // approvals. Validate the URL shape at boot so the deployment
+    // refuses to start with a tainted value rather than failing at
+    // verification time. Localhost / private IPs are allowed in
+    // development for local tunneling (ngrok/cloudflared bypass).
+    const nodeEnv = config.get<string>('NODE_ENV', 'development');
+    if (nodeEnv === 'production') {
+      try {
+        const parsed = new URL(this.webhookBaseUrl);
+        if (parsed.protocol !== 'https:') {
+          throw new Error(`WEBHOOK_BASE_URL must be https in production (got ${parsed.protocol}).`);
+        }
+        if (
+          parsed.hostname === 'localhost' ||
+          parsed.hostname === '127.0.0.1' ||
+          parsed.hostname.endsWith('.local') ||
+          parsed.hostname.endsWith('.internal')
+        ) {
+          throw new Error(`WEBHOOK_BASE_URL must not point at a private host in production (got ${parsed.hostname}).`);
+        }
+      } catch (err) {
+        if (err instanceof Error) throw err;
+        throw new Error(
+          `WEBHOOK_BASE_URL is not a valid URL: ${this.webhookBaseUrl}`,
+          { cause: err },
+        );
+      }
+    }
+
     if (!this.enforceEnabled) {
       this.logger.warn(
         'IDENTITY_VERIFICATION_ENABLED=false — verifyCpf will short-circuit with CONFIG_ERROR. Flip to true when the Serpro contract is active.',
