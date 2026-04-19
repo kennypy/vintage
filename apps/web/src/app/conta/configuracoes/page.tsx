@@ -236,6 +236,21 @@ export default function ConfiguracoesPage() {
           dentro de Notificações.
         </p>
       </section>
+
+      <section className="bg-white border border-red-200 rounded-xl p-6">
+        <h2 className="text-base font-semibold text-red-900 mb-2">Zona perigosa</h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Exclusão permanente da sua conta. Seus dados pessoais são
+          anonimizados imediatamente e removidos em definitivo após 30 dias,
+          conforme a LGPD.
+        </p>
+        <Link
+          href="/conta/deletar-conta"
+          className="inline-block px-5 py-2 border border-red-300 text-red-700 text-sm font-medium rounded-lg hover:bg-red-50"
+        >
+          Excluir minha conta
+        </Link>
+      </section>
     </div>
   );
 }

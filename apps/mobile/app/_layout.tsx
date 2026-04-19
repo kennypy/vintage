@@ -130,6 +130,7 @@ function AppShell() {
         <Stack.Screen name="conta/ajuda" options={{ title: 'Ajuda' }} />
         <Stack.Screen name="conta/alterar-senha" options={{ title: 'Alterar senha' }} />
         <Stack.Screen name="conta/seguranca" options={{ title: 'Segurança' }} />
+        <Stack.Screen name="conta/deletar-conta" options={{ title: 'Excluir conta' }} />
         <Stack.Screen name="(auth)/forgot-password" options={{ title: 'Esqueci a senha' }} />
         <Stack.Screen name="(auth)/reset-password" options={{ title: 'Nova senha' }} />
         <Stack.Screen name="listing/edit/[id]" options={{ title: 'Editar anúncio' }} />
