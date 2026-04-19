@@ -5,15 +5,32 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildAllowedImageHosts,
+  validateImageUrl,
+} from '../common/validators/image-url.validator';
 
 @Injectable()
 export class AuthenticityService {
+  private readonly allowedImageHosts: string[];
+
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
-  ) {}
+    private config: ConfigService,
+  ) {
+    // Pen-test follow-up P-12: proof URLs are written straight to the
+    // database and later surfaced in the admin review UI; without
+    // validation, a seller could submit any URL — perfect for
+    // data-exfil on admin browsers (beaconed image loads) or phishing
+    // links disguised as images. Reuse the same allowlist we use for
+    // listing photos so a single ops flip of ALLOWED_IMAGE_HOSTS
+    // keeps both surfaces in sync.
+    this.allowedImageHosts = buildAllowedImageHosts(this.config);
+  }
 
   /**
    * Seller submits an authenticity request for a listing.
@@ -26,6 +43,11 @@ export class AuthenticityService {
     }
     if (proofImageUrls.length > 5) {
       throw new BadRequestException('Máximo de 5 fotos de comprovante');
+    }
+
+    // Validate every proof URL before we touch the DB.
+    for (const u of proofImageUrls) {
+      validateImageUrl(u, this.allowedImageHosts);
     }
 
     const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });

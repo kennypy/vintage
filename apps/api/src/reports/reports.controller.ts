@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../common/guards/admin.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -26,6 +27,14 @@ export class ReportsController {
   @Post('reports')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  // P-11 follow-up: 20 reports per 24 hours per caller. Reports
+  // themselves are already deduped per (reporter, targetType, targetId)
+  // within 24 h by the service layer, but a griefer could rotate
+  // targetIds to flood the admin queue with 1-per-listing reports.
+  // 20/day is generous for a genuine power-user who spots a spate of
+  // counterfeit listings in one session and tight enough that a
+  // scripted flood is bounded.
+  @Throttle({ default: { limit: 20, ttl: 24 * 60 * 60 * 1000 } })
   @ApiOperation({ summary: 'Registrar denúncia' })
   createReport(@Body() dto: CreateReportDto, @CurrentUser() user: AuthUser) {
     return this.reportsService.createReport(user.id, dto);

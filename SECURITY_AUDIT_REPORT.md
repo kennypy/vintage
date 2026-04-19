@@ -82,6 +82,8 @@ These are env / config items the code now requires; setting them is part of goin
 8. **`DATABASE_URL`** — must include `?sslmode=require` (or stricter) in production. Boot fails otherwise.
 9. **`DATABASE_POOL_MAX`** × api_instances must stay below your Postgres `max_connections` (Supabase free = 60).
 10. **Privacy-audit log forwarding** — admin email-substring searches now emit `[privacy-audit]` log lines; ensure they're shipped to your SIEM / alerting pipeline so a compromised admin can't silently bulk-enumerate.
+11. **Swagger `/docs` must 404 in production.** Code gates the mount on `NODE_ENV !== 'production'` (see `apps/api/src/main.ts`); the pre-launch smoke test is `curl -sS -o /dev/null -w "%{http_code}\n" https://api.vintage.br/docs` → expect `404`. Any other response means `NODE_ENV` is wrong in Fly and the OpenAPI schema (including every route + DTO shape) is being served publicly.
+12. **`ALLOWED_IMAGE_HOSTS`** — comma-separated allowlist of hostnames that may appear in listing photos + authenticity proof URLs. Auto-includes the configured `S3_BUCKET`+`S3_REGION` virtual-hosted and path-style hostnames. Add your CDN host here when you put one in front of S3; if you leave it blank in prod the service falls back to defaults that include `picsum.photos` (dev placeholder), which is wrong for a production deploy.
 
 ---
 
