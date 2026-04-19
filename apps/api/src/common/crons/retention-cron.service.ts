@@ -31,6 +31,7 @@ export class RetentionCronService {
   private readonly listingImageFlagDays: number;
   private readonly fraudFlagDays: number;
   private readonly cpfVerificationLogDays: number;
+  private readonly cafSessionDays: number;
   private readonly orphanImageDays: number;
 
   private readonly s3: S3Client | null;
@@ -50,6 +51,7 @@ export class RetentionCronService {
       'RETENTION_CPF_VERIFICATION_LOG_DAYS',
       365,
     );
+    this.cafSessionDays = this.readDays('RETENTION_CAF_SESSION_DAYS', 365);
     this.orphanImageDays = this.readDays('ORPHAN_IMAGE_SWEEP_DAYS', 30);
 
     // S3 client mirrors the one in UploadsService — duplicated
@@ -141,6 +143,18 @@ export class RetentionCronService {
       (cutoff) =>
         this.prisma.cpfVerificationLog.deleteMany({
           where: { attemptedAt: { lt: cutoff } },
+        }),
+    );
+
+    // CafVerificationSession — only purge terminal sessions.
+    // A PENDING session older than a year is almost certainly
+    // abandoned but we keep it for fraud-trail continuity.
+    await this.purgeTable(
+      'CafVerificationSession',
+      this.cafSessionDays,
+      (cutoff) =>
+        this.prisma.cafVerificationSession.deleteMany({
+          where: { createdAt: { lt: cutoff }, status: { not: 'PENDING' } },
         }),
     );
   }

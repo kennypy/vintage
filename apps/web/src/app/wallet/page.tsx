@@ -169,7 +169,18 @@ export default function WalletPage() {
       setPayoutAmount('');
       await refreshAll();
     } catch (err) {
-      setPayoutError(err instanceof Error && err.message ? err.message : 'Erro ao solicitar saque.');
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Erro ao solicitar saque.';
+      // Identity gate: the API responds with this exact phrase from
+      // PayoutsService. Route the user to the verification screen
+      // instead of showing a terminal error. Keep generic errors as-is.
+      if (/Verificação de identidade pendente/.test(msg)) {
+        router.push('/conta/verificacao');
+        return;
+      }
+      setPayoutError(msg);
     } finally {
       setPayoutLoading(false);
     }

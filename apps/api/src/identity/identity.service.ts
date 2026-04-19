@@ -13,6 +13,11 @@ import {
   SerproResult,
   SerproVerifyResponse,
 } from './serpro.client';
+import {
+  CafClient,
+  CafWebhookPayload,
+  CafWebhookDecision,
+} from './caf.client';
 
 export interface VerifyIdentityResult {
   status: SerproResult;
@@ -48,10 +53,13 @@ const RESULT_MESSAGES: Record<SerproResult, string> = {
 export class IdentityService {
   private readonly logger = new Logger(IdentityService.name);
   private readonly enforceEnabled: boolean;
+  private readonly documentEnabled: boolean;
+  private readonly webhookBaseUrl: string;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly serpro: SerproClient,
+    private readonly caf: CafClient,
     config: ConfigService,
   ) {
     const raw = config
@@ -59,9 +67,31 @@ export class IdentityService {
       .toLowerCase();
     this.enforceEnabled = raw === 'true' || raw === '1' || raw === 'yes';
 
+    // Track C is independently gated — the Serpro contract can land
+    // before Caf's does, so the two flags are separate.
+    const docRaw = config
+      .get<string>('IDENTITY_DOCUMENT_ENABLED', 'false')
+      .toLowerCase();
+    this.documentEnabled =
+      docRaw === 'true' || docRaw === '1' || docRaw === 'yes';
+
+    // Public origin of our API — Caf posts its webhook here.
+    // Derive from WEBHOOK_BASE_URL, falling back to the CORS origin
+    // config only as a last resort for local dev.
+    this.webhookBaseUrl = (
+      config.get<string>('WEBHOOK_BASE_URL', '') ||
+      config.get<string>('API_PUBLIC_URL', '') ||
+      'http://localhost:3001'
+    ).replace(/\/$/, '');
+
     if (!this.enforceEnabled) {
       this.logger.warn(
         'IDENTITY_VERIFICATION_ENABLED=false — verifyCpf will short-circuit with CONFIG_ERROR. Flip to true when the Serpro contract is active.',
+      );
+    }
+    if (!this.documentEnabled) {
+      this.logger.warn(
+        'IDENTITY_DOCUMENT_ENABLED=false — Caf document+liveness escalation disabled. Flip when the Caf contract is active.',
       );
     }
   }
@@ -178,6 +208,190 @@ export class IdentityService {
     };
   }
 
+  // --- Track C: document + liveness via Caf ---
+
+  /**
+   * Open a new Caf document + liveness session for this user.
+   * Returns the redirect URL the client should open (WebView on
+   * mobile, new tab on web). When Caf finishes processing, their
+   * webhook lands at /webhooks/caf and we flip the flag on
+   * APPROVED.
+   *
+   * Short-circuits to CONFIG_ERROR when the feature flag is off or
+   * Caf isn't configured — the caller surfaces a "try again later"
+   * message without burning a Caf session.
+   */
+  async createDocumentSession(
+    userId: string,
+  ): Promise<{ redirectUrl: string | null; reason?: string }> {
+    if (!this.documentEnabled || !this.caf.isConfigured) {
+      return {
+        redirectUrl: null,
+        reason:
+          'Verificação por documento indisponível no momento. Nossa equipe foi notificada.',
+      };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { cpf: true, name: true, cpfIdentityVerified: true },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    if (user.cpfIdentityVerified) {
+      // Already verified via Serpro — no need to escalate. Idempotent
+      // short-circuit instead of refusing, so the UI doesn't need
+      // to check state before calling.
+      return { redirectUrl: null, reason: 'Identidade já verificada.' };
+    }
+    if (!user.cpf) {
+      throw new BadRequestException(
+        'Adicione um CPF antes de solicitar verificação por documento.',
+      );
+    }
+
+    const session = await this.caf.createSession({
+      userId,
+      cpf: user.cpf,
+      name: user.name,
+      callbackUrl: `${this.webhookBaseUrl}/webhooks/caf`,
+    });
+    if (!session) {
+      return {
+        redirectUrl: null,
+        reason:
+          'Não foi possível iniciar a verificação por documento agora. Tente novamente em alguns minutos.',
+      };
+    }
+
+    await this.prisma.cafVerificationSession.create({
+      data: {
+        userId,
+        externalSessionId: session.sessionId,
+        status: 'PENDING',
+        redirectUrl: session.redirectUrl,
+      },
+    });
+
+    return { redirectUrl: session.redirectUrl };
+  }
+
+  /**
+   * Inbound webhook from Caf. Called by CafWebhookController AFTER
+   * the signature has been verified against CAF_WEBHOOK_SECRET.
+   *
+   * Dedupe contract mirrors the Mercado Pago flow (f663e72):
+   * (provider='caf', externalEventId=<session id || event id>) in
+   * ProcessedWebhook. A retry lands on the P2002 branch and
+   * short-circuits WITHOUT re-running side effects.
+   */
+  async handleCafWebhook(payload: CafWebhookPayload): Promise<{
+    received: true;
+    duplicate?: boolean;
+  }> {
+    if (!payload.sessionId || !payload.status) {
+      throw new BadRequestException('Payload inválido.');
+    }
+
+    // Prefer the delivery-level eventId for dedup when Caf sends it,
+    // fall back to sessionId (a status-change webhook per session
+    // should only fire once for each status, so sessionId is stable
+    // enough). Same pattern as the MP handler.
+    const dedupKey = payload.eventId ?? payload.sessionId;
+
+    try {
+      await this.prisma.processedWebhook.create({
+        data: {
+          provider: 'caf',
+          externalEventId: dedupKey,
+          action: payload.status,
+        },
+      });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'P2002') {
+        this.logger.log(
+          `Caf webhook duplicate — already processed caf:${dedupKey}`,
+        );
+        return { received: true, duplicate: true };
+      }
+      throw err;
+    }
+
+    const session = await this.prisma.cafVerificationSession.findUnique({
+      where: { externalSessionId: payload.sessionId },
+    });
+    if (!session) {
+      // We got a webhook for a session we don't own. Could be a
+      // Caf-side bug or a cross-tenant mix-up. Log loudly and
+      // return 200 — we've already recorded the ProcessedWebhook
+      // row, so a retry would also no-op.
+      this.logger.warn(
+        `Caf webhook references unknown session ${payload.sessionId}`,
+      );
+      return { received: true };
+    }
+
+    const nextStatus = normaliseCafStatus(payload.status);
+    const cpfHash = await this.hashUserCpf(session.userId);
+
+    if (nextStatus === 'APPROVED') {
+      await this.prisma.$transaction([
+        this.prisma.cafVerificationSession.update({
+          where: { id: session.id },
+          data: { status: 'APPROVED', completedAt: new Date() },
+        }),
+        this.prisma.user.update({
+          where: { id: session.userId },
+          data: { cpfIdentityVerified: true },
+        }),
+        this.prisma.cpfVerificationLog.create({
+          data: {
+            userId: session.userId,
+            cpfHash,
+            provider: 'CAF',
+            result: 'VERIFIED',
+          },
+        }),
+      ]);
+      this.logger.log(
+        `User ${session.userId} cpfIdentityVerified via Caf (session ${session.externalSessionId})`,
+      );
+    } else {
+      // REJECTED / EXPIRED — record the outcome but don't flip
+      // the flag. Log row uses the Serpro-compatible taxonomy so
+      // the same dashboards work.
+      await this.prisma.$transaction([
+        this.prisma.cafVerificationSession.update({
+          where: { id: session.id },
+          data: { status: nextStatus, completedAt: new Date() },
+        }),
+        this.prisma.cpfVerificationLog.create({
+          data: {
+            userId: session.userId,
+            cpfHash,
+            provider: 'CAF',
+            result: nextStatus === 'EXPIRED' ? 'PROVIDER_ERROR' : 'NAME_MISMATCH',
+          },
+        }),
+      ]);
+    }
+
+    return { received: true };
+  }
+
+  private async hashUserCpf(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { cpf: true },
+    });
+    if (!user?.cpf) {
+      // Defensive fallback — should never hit; session row
+      // implies a CPF existed at session creation time.
+      return 'UNKNOWN_CPF';
+    }
+    return this.hashCpf(user.cpf);
+  }
+
   private hashCpf(cpf: string): string {
     return crypto
       .createHash('sha256')
@@ -204,3 +418,19 @@ export class IdentityService {
     }
   }
 }
+
+/** Narrow the Caf webhook's claimed status to our stored enum. Caf
+ *  sometimes emits lowercase; normalise defensively so a casing
+ *  change on their side doesn't quietly skip approval. */
+function normaliseCafStatus(
+  raw: CafWebhookDecision | string,
+): 'APPROVED' | 'REJECTED' | 'EXPIRED' {
+  const v = String(raw).toUpperCase();
+  if (v === 'APPROVED') return 'APPROVED';
+  if (v === 'EXPIRED') return 'EXPIRED';
+  // Anything we don't explicitly recognise (REJECTED, MANUAL_REVIEW,
+  // etc.) falls into REJECTED — never auto-flip the flag on an
+  // unrecognised signal.
+  return 'REJECTED';
+}
+

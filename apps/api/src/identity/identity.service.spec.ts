@@ -4,6 +4,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { IdentityService } from './identity.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SerproClient } from './serpro.client';
+import { CafClient } from './caf.client';
 
 jest.mock('@vintage/shared', () => ({
   isValidCPF: jest.fn().mockReturnValue(true),
@@ -17,6 +18,14 @@ const mockPrisma = {
   cpfVerificationLog: {
     create: jest.fn().mockResolvedValue({}),
   },
+  cafVerificationSession: {
+    create: jest.fn().mockResolvedValue({}),
+    update: jest.fn().mockResolvedValue({}),
+    findUnique: jest.fn(),
+  },
+  processedWebhook: {
+    create: jest.fn().mockResolvedValue({}),
+  },
   $transaction: jest.fn(),
 };
 
@@ -24,22 +33,31 @@ const mockSerpro = {
   verify: jest.fn(),
 };
 
-function makeService(enforce: boolean) {
+const mockCaf = {
+  isConfigured: true,
+  createSession: jest.fn(),
+};
+
+function makeService(
+  enforce: boolean,
+  documentEnabled = false,
+): Promise<IdentityService> {
   const module = Test.createTestingModule({
     providers: [
       IdentityService,
       { provide: PrismaService, useValue: mockPrisma },
       { provide: SerproClient, useValue: mockSerpro },
+      { provide: CafClient, useValue: mockCaf },
       {
         provide: ConfigService,
         useValue: {
-          get: jest.fn((k: string, def?: string) =>
-            k === 'IDENTITY_VERIFICATION_ENABLED'
-              ? enforce
-                ? 'true'
-                : 'false'
-              : def ?? '',
-          ),
+          get: jest.fn((k: string, def?: string) => {
+            if (k === 'IDENTITY_VERIFICATION_ENABLED')
+              return enforce ? 'true' : 'false';
+            if (k === 'IDENTITY_DOCUMENT_ENABLED')
+              return documentEnabled ? 'true' : 'false';
+            return def ?? '';
+          }),
         },
       },
     ],
@@ -212,6 +230,174 @@ describe('IdentityService', () => {
       const call = mockPrisma.cpfVerificationLog.create.mock.calls[0][0];
       expect(call.data.cpfHash).toHaveLength(64); // SHA256 hex
       expect(call.data.cpfHash).not.toContain('52998224725');
+    });
+  });
+
+  // Track C — Caf document + liveness
+  describe('createDocumentSession', () => {
+    it('returns a reason + null url when IDENTITY_DOCUMENT_ENABLED=false', async () => {
+      const svc = await makeService(true, false);
+      const result = await svc.createDocumentSession('u1');
+      expect(result.redirectUrl).toBeNull();
+      expect(result.reason).toMatch(/indisponível/);
+      expect(mockCaf.createSession).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits when the user is already verified', async () => {
+      const svc = await makeService(true, true);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        cpf: '52998224725',
+        name: 'Jane',
+        cpfIdentityVerified: true,
+      });
+      const result = await svc.createDocumentSession('u1');
+      expect(result.redirectUrl).toBeNull();
+      expect(result.reason).toMatch(/já verificada/);
+      expect(mockCaf.createSession).not.toHaveBeenCalled();
+    });
+
+    it('creates a CafVerificationSession row and returns the redirect URL on success', async () => {
+      const svc = await makeService(true, true);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        cpf: '52998224725',
+        name: 'Jane',
+        cpfIdentityVerified: false,
+      });
+      mockCaf.createSession.mockResolvedValue({
+        sessionId: 'sess-1',
+        redirectUrl: 'https://caf.example/session/sess-1',
+      });
+
+      const result = await svc.createDocumentSession('u1');
+
+      expect(result.redirectUrl).toBe('https://caf.example/session/sess-1');
+      expect(mockPrisma.cafVerificationSession.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'u1',
+            externalSessionId: 'sess-1',
+            status: 'PENDING',
+            redirectUrl: 'https://caf.example/session/sess-1',
+          }),
+        }),
+      );
+    });
+
+    it('returns a reason when Caf returns no session (provider error)', async () => {
+      const svc = await makeService(true, true);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        cpf: '52998224725',
+        name: 'Jane',
+        cpfIdentityVerified: false,
+      });
+      mockCaf.createSession.mockResolvedValue(null);
+
+      const result = await svc.createDocumentSession('u1');
+      expect(result.redirectUrl).toBeNull();
+      expect(result.reason).toMatch(/Tente novamente/);
+      expect(mockPrisma.cafVerificationSession.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleCafWebhook', () => {
+    beforeEach(() => {
+      mockPrisma.processedWebhook.create.mockResolvedValue({});
+      mockPrisma.$transaction.mockImplementation((ops: Promise<unknown>[]) =>
+        Promise.all(ops),
+      );
+    });
+
+    it('returns duplicate when the eventId was already processed (P2002)', async () => {
+      const svc = await makeService(true, true);
+      const p2002 = Object.assign(new Error('unique'), { code: 'P2002' });
+      mockPrisma.processedWebhook.create.mockRejectedValueOnce(p2002);
+
+      const result = await svc.handleCafWebhook({
+        eventId: 'evt-abc',
+        sessionId: 'sess-1',
+        status: 'APPROVED',
+      });
+
+      expect(result).toEqual({ received: true, duplicate: true });
+      expect(mockPrisma.cafVerificationSession.update).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('flips cpfIdentityVerified=true + marks session APPROVED on APPROVED webhook', async () => {
+      const svc = await makeService(true, true);
+      mockPrisma.cafVerificationSession.findUnique.mockResolvedValue({
+        id: 'csess-1',
+        userId: 'u1',
+        externalSessionId: 'sess-1',
+        status: 'PENDING',
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({ cpf: '52998224725' });
+
+      await svc.handleCafWebhook({
+        eventId: 'evt-abc',
+        sessionId: 'sess-1',
+        status: 'APPROVED',
+      });
+
+      expect(mockPrisma.cafVerificationSession.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'csess-1' },
+          data: expect.objectContaining({ status: 'APPROVED' }),
+        }),
+      );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'u1' },
+          data: { cpfIdentityVerified: true },
+        }),
+      );
+      expect(mockPrisma.cpfVerificationLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'u1',
+            provider: 'CAF',
+            result: 'VERIFIED',
+          }),
+        }),
+      );
+    });
+
+    it.each(['REJECTED', 'EXPIRED', 'something_unexpected'])(
+      'records non-APPROVED (%s) WITHOUT flipping the identity flag',
+      async (raw) => {
+        const svc = await makeService(true, true);
+        mockPrisma.cafVerificationSession.findUnique.mockResolvedValue({
+          id: 'csess-1',
+          userId: 'u1',
+          externalSessionId: 'sess-1',
+          status: 'PENDING',
+        });
+        mockPrisma.user.findUnique.mockResolvedValue({ cpf: '52998224725' });
+
+        await svc.handleCafWebhook({
+          sessionId: 'sess-1',
+          status: raw as 'REJECTED' | 'EXPIRED' | 'APPROVED',
+        });
+
+        // User row never touched — flag stays at whatever it was.
+        expect(mockPrisma.user.update).not.toHaveBeenCalled();
+        // Session row marked non-PENDING.
+        expect(mockPrisma.cafVerificationSession.update).toHaveBeenCalled();
+      },
+    );
+
+    it('returns received:true and logs loudly when the session id is unknown', async () => {
+      const svc = await makeService(true, true);
+      mockPrisma.cafVerificationSession.findUnique.mockResolvedValue(null);
+
+      const result = await svc.handleCafWebhook({
+        eventId: 'evt-abc',
+        sessionId: 'ghost',
+        status: 'APPROVED',
+      });
+
+      expect(result).toEqual({ received: true });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -111,6 +111,7 @@ model User {
   fraudFlags             FraudFlag[]         @relation("FraudFlagSubject")
   fraudFlagReviews       FraudFlag[]         @relation("FraudFlagReviewer")
   cpfVerificationLogs    CpfVerificationLog[]
+  cafVerificationSessions CafVerificationSession[]
 
   @@index([email])
   @@index([cpf])
@@ -668,6 +669,32 @@ model CpfVerificationLog {
   @@index([userId, attemptedAt])
   @@index([cpfHash])
   @@index([attemptedAt])
+}
+
+// --- Caf document + liveness verification sessions ---
+//
+// Track C of the KYC plan. When Serpro (Track B) returns
+// NAME_MISMATCH, CPF_SUSPENDED, or the user disputes an outcome,
+// we escalate to Caf's document + liveness flow. Caf is async:
+// we create a session via their API, they return a redirect URL
+// that hosts the selfie + doc capture, and they webhook us when
+// the user completes. This table maps the external session id
+// back to our userId when the webhook arrives.
+model CafVerificationSession {
+  id                String    @id @default(cuid())
+  userId            String
+  externalSessionId String    @unique
+  status            String    @default("PENDING") @db.VarChar(16)
+  // 'PENDING' until the webhook fires; then 'APPROVED' /
+  // 'REJECTED' / 'EXPIRED'. Terminal states set completedAt.
+  redirectUrl       String    @db.Text
+  createdAt         DateTime  @default(now())
+  completedAt       DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
 
 // --- Fraud signals ---
