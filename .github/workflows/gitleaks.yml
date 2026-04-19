@@ -13,6 +13,11 @@ on:
 
 permissions:
   contents: read
+  # gitleaks-action hits /repos/:owner/:repo/pulls/:num/commits to
+  # enumerate the commits it should scan on PR events. Without
+  # pull-requests: read the action 403s with "Resource not accessible
+  # by integration". Read-only is enough — the action never writes.
+  pull-requests: read
 
 jobs:
   gitleaks:
