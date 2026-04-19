@@ -51,11 +51,18 @@ export default function VerificacaoPage() {
 
   const verified = status?.cpfIdentityVerified === true;
 
+  // Track-C escalation: exposed after a Serpro attempt returned
+  // NAME_MISMATCH / CPF_SUSPENDED. Doc+liveness can disambiguate
+  // name/DOB mismatches a first-line API can't.
+  const [showDocEscalation, setShowDocEscalation] = useState(false);
+  const [docSubmitting, setDocSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!birthDate) return;
     setSubmitting(true);
     setNotice(null);
+    setShowDocEscalation(false);
     try {
       const result = await apiPost<VerifyResponse>(
         '/users/me/verify-identity',
@@ -65,10 +72,15 @@ export default function VerificacaoPage() {
         setStatus({ ...status, cpfIdentityVerified: true });
         setNotice({ kind: 'success', text: result.message });
       } else if (result.status === 'CONFIG_ERROR') {
-        // Distinguishable from user-error so ops can triage separately.
         setNotice({ kind: 'info', text: result.message });
       } else {
         setNotice({ kind: 'error', text: result.message });
+        if (
+          result.status === 'NAME_MISMATCH' ||
+          result.status === 'CPF_SUSPENDED'
+        ) {
+          setShowDocEscalation(true);
+        }
       }
     } catch (err) {
       setNotice({
@@ -80,6 +92,37 @@ export default function VerificacaoPage() {
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDocEscalation = async () => {
+    setDocSubmitting(true);
+    try {
+      const result = await apiPost<{ redirectUrl: string | null; reason?: string }>(
+        '/users/me/verify-identity-document',
+      );
+      if (result.redirectUrl) {
+        window.open(result.redirectUrl, '_blank', 'noopener,noreferrer');
+        setNotice({
+          kind: 'info',
+          text: 'Abrimos o fluxo de verificação por documento em uma nova aba. Volte aqui depois de concluir.',
+        });
+        setShowDocEscalation(false);
+      } else {
+        setNotice({
+          kind: 'error',
+          text:
+            result.reason ??
+            'Não foi possível iniciar a verificação por documento.',
+        });
+      }
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Falha ao iniciar verificação.',
+      });
+    } finally {
+      setDocSubmitting(false);
     }
   };
 
@@ -152,6 +195,26 @@ export default function VerificacaoPage() {
             {submitting ? 'Verificando…' : 'Verificar identidade'}
           </button>
         </form>
+      )}
+
+      {!verified && showDocEscalation && (
+        <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-gray-900 mb-2">
+            Os dados não conferiram. Quer verificar por documento?
+          </h2>
+          <p className="text-sm text-gray-600 mb-3">
+            Enviamos você a um fluxo seguro do nosso parceiro (selfie +
+            RG/CNH). O resultado chega automaticamente aqui.
+          </p>
+          <button
+            type="button"
+            onClick={handleDocEscalation}
+            disabled={docSubmitting}
+            className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-800 disabled:opacity-50"
+          >
+            {docSubmitting ? 'Abrindo…' : 'Verificar por documento'}
+          </button>
+        </div>
       )}
 
       {verified && (

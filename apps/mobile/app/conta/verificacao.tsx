@@ -54,6 +54,9 @@ export default function VerificacaoScreen() {
   const [loading, setLoading] = useState(true);
   const [birthDate, setBirthDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Track-C escalation state — mirrors the web page.
+  const [showDocEscalation, setShowDocEscalation] = useState(false);
+  const [docSubmitting, setDocSubmitting] = useState(false);
 
   useEffect(() => {
     apiFetch<SecurityStatus>('/auth/security-status')
@@ -73,6 +76,7 @@ export default function VerificacaoScreen() {
       return;
     }
     setSubmitting(true);
+    setShowDocEscalation(false);
     try {
       const result = await apiFetch<VerifyResponse>('/users/me/verify-identity', {
         method: 'POST',
@@ -83,6 +87,12 @@ export default function VerificacaoScreen() {
         Alert.alert('Tudo certo', result.message);
       } else {
         Alert.alert('Não foi possível verificar', result.message);
+        if (
+          result.status === 'NAME_MISMATCH' ||
+          result.status === 'CPF_SUSPENDED'
+        ) {
+          setShowDocEscalation(true);
+        }
       }
     } catch (err) {
       const msg =
@@ -92,6 +102,39 @@ export default function VerificacaoScreen() {
       Alert.alert('Erro', msg);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDocEscalation = async () => {
+    setDocSubmitting(true);
+    try {
+      const result = await apiFetch<{
+        redirectUrl: string | null;
+        reason?: string;
+      }>('/users/me/verify-identity-document', { method: 'POST' });
+      if (result.redirectUrl) {
+        // Mobile route: open the Caf hosted flow in an in-app
+        // WebView. On approval the Caf webhook flips the server
+        // flag; the user can return here and refresh to see it.
+        router.push({
+          pathname: '/conta/verificacao-documento',
+          params: { url: result.redirectUrl },
+        });
+      } else {
+        Alert.alert(
+          'Indisponível',
+          result.reason ?? 'Não foi possível iniciar a verificação por documento.',
+        );
+      }
+    } catch (err) {
+      Alert.alert(
+        'Erro',
+        err instanceof Error
+          ? err.message
+          : 'Falha ao iniciar verificação.',
+      );
+    } finally {
+      setDocSubmitting(false);
     }
   };
 
@@ -179,6 +222,31 @@ export default function VerificacaoScreen() {
                 <Text style={styles.primaryBtnText}>Verificar identidade</Text>
               )}
             </TouchableOpacity>
+            {showDocEscalation && (
+              <>
+                <Text style={[styles.hint, { color: theme.textTertiary, marginTop: 8 }]}>
+                  Os dados não conferiram. Você pode verificar por
+                  documento (selfie + RG/CNH) — é mais lento mas
+                  resolve mismatches de nome e data.
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryBtn,
+                    docSubmitting && { opacity: 0.5 },
+                  ]}
+                  onPress={handleDocEscalation}
+                  disabled={docSubmitting}
+                >
+                  {docSubmitting ? (
+                    <ActivityIndicator color={colors.primary[600]} />
+                  ) : (
+                    <Text style={styles.secondaryBtnText}>
+                      Verificar por documento
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (
           <View style={[styles.successCard]}>
@@ -250,6 +318,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  secondaryBtn: {
+    borderWidth: 1,
+    borderColor: colors.primary[200],
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: '#fff',
+  },
+  secondaryBtnText: { color: colors.primary[700], fontWeight: '600', fontSize: 14 },
   successCard: {
     backgroundColor: '#ecfdf5',
     borderColor: '#6ee7b7',

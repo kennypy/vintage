@@ -43,4 +43,24 @@ export class IdentityController {
   ) {
     return this.identity.verifyCpf(user.id, dto.birthDate);
   }
+
+  // Track C — document + liveness via Caf. Escalation path when
+  // Serpro returns NAME_MISMATCH / CPF_SUSPENDED, or when a user
+  // disputes the outcome of the Tier-2 check.
+  @Post('verify-identity-document')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  // Tighter rate limit than the Serpro call (1/hour per user) —
+  // each Caf session costs ~R$5-10, and a user only ever needs one
+  // at a time.
+  @Throttle({ default: { limit: 1, ttl: 60 * 60 * 1000 } })
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Iniciar verificação por documento + liveness (Caf)',
+    description:
+      'Retorna um redirectUrl que o cliente (WebView no mobile, nova aba no web) deve abrir para capturar selfie + RG/CNH. Caf envia o resultado via webhook; na aprovação, cpfIdentityVerified é marcado como true.',
+  })
+  async verifyIdentityDocument(@CurrentUser() user: AuthUser) {
+    return this.identity.createDocumentSession(user.id);
+  }
 }

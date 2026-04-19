@@ -18,6 +18,7 @@ const mockPrisma = {
   listingImageFlag: { deleteMany: jest.fn() },
   fraudFlag: { deleteMany: jest.fn() },
   cpfVerificationLog: { deleteMany: jest.fn() },
+  cafVerificationSession: { deleteMany: jest.fn() },
   orderListingSnapshot: { count: jest.fn() },
   listing: {
     findMany: jest.fn(),
@@ -68,6 +69,7 @@ describe('RetentionCronService', () => {
       mockPrisma.listingImageFlag.deleteMany.mockResolvedValue({ count: 0 });
       mockPrisma.fraudFlag.deleteMany.mockResolvedValue({ count: 0 });
       mockPrisma.cpfVerificationLog.deleteMany.mockResolvedValue({ count: 0 });
+      mockPrisma.cafVerificationSession.deleteMany.mockResolvedValue({ count: 0 });
     });
 
     it('returns silently when cron-lock is held', async () => {
