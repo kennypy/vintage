@@ -84,12 +84,10 @@ describe('UsersService', () => {
   });
 
   describe('getProfile', () => {
-    it('should return user data', async () => {
+    it('should return public profile data', async () => {
       const userData = {
         id: 'user-1',
-        email: 'maria@example.com',
         name: 'Maria Silva',
-        phone: null,
         avatarUrl: null,
         bio: null,
         verified: false,
@@ -105,11 +103,45 @@ describe('UsersService', () => {
       const result = await service.getProfile('user-1');
 
       expect(result).toEqual(userData);
-      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 'user-1' },
-        }),
-      );
+    });
+
+    it('NEVER selects email or phone on the public profile (DAST D-04)', async () => {
+      // /users/:id has no auth guard — anyone on the internet can
+      // hit it with a user id (trivially harvested from listings /
+      // reviews / follower lists). Pre-fix, the projection included
+      // email and phone; the test locks them out of the select so
+      // a future well-meaning refactor can't re-expose them.
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        name: 'Maria Silva',
+        avatarUrl: null,
+        bio: null,
+        verified: false,
+        vacationMode: false,
+        ratingAvg: 0,
+        ratingCount: 0,
+        followerCount: 0,
+        followingCount: 0,
+        createdAt: new Date(),
+      });
+
+      await service.getProfile('user-1');
+
+      const selectArg =
+        mockPrisma.user.findUnique.mock.calls[0][0].select;
+      expect(selectArg).not.toHaveProperty('email');
+      expect(selectArg).not.toHaveProperty('phone');
+      expect(selectArg).not.toHaveProperty('cpf');
+      expect(selectArg).not.toHaveProperty('passwordHash');
+      // Sanity: we DO still return the storefront fields.
+      expect(selectArg).toMatchObject({
+        id: true,
+        name: true,
+        avatarUrl: true,
+        bio: true,
+        ratingAvg: true,
+        ratingCount: true,
+      });
     });
 
     it('should throw NotFoundException if user does not exist', async () => {

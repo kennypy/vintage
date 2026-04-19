@@ -80,13 +80,20 @@ export class UsersService {
   }
 
   async getProfile(userId: string) {
+    // Public profile — no auth guard. Only fields a stranger visiting
+    // a seller's storefront legitimately needs. Critically this must
+    // NOT return email or phone; pen-test track 2 (finding D-04) found
+    // that the previous projection exposed both to unauthenticated
+    // callers, letting anyone with a user id (trivially harvested
+    // from listings / reviews / follower lists) doxx the owner and
+    // enumerate every registered email + phone for spam / credential
+    // stuffing / LGPD-actionable contact harvest. /users/me remains
+    // the authenticated path for the owner's own contact info.
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
-        email: true,
         name: true,
-        phone: true,
         avatarUrl: true,
         bio: true,
         verified: true,

@@ -117,27 +117,42 @@ import { IdentityModule } from './identity/identity.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    // NestJS v11 middleware path-matching: paths in `exclude()` and
+    // `forRoutes()` are interpreted RELATIVE to the global prefix set
+    // by `app.setGlobalPrefix('api/v1')` in main.ts. A DAST probe
+    // during pen-test track 2 found that the previous exclude list
+    // carried the `api/v1/` prefix and therefore never matched — so
+    // every CSRF-excluded endpoint (Mercado Pago webhooks, register,
+    // login, 2FA confirm, partner API, tracking, ads) was being
+    // rejected with 403 "Token CSRF ausente". That meant:
+    //   * Mercado Pago could not deliver a single payment webhook
+    //     (payments were stuck PENDING forever);
+    //   * nobody could register or log in (we blocked them before
+    //     they ever saw a CSRF token);
+    //   * mobile SDKs hitting /tracking/event / /ads/serve all 403'd.
+    // This was the DAST finding D-03 — pre-launch showstopper.
     consumer
       .apply(CsrfMiddleware)
       .exclude(
-        { path: 'api/v1/payments/webhook', method: RequestMethod.POST },
-        { path: 'api/v1/auth/register', method: RequestMethod.POST },
-        { path: 'api/v1/auth/login', method: RequestMethod.POST },
-        { path: 'api/v1/auth/2fa/confirm-login', method: RequestMethod.POST },
+        { path: 'payments/webhook', method: RequestMethod.POST },
+        { path: 'auth/register', method: RequestMethod.POST },
+        { path: 'auth/login', method: RequestMethod.POST },
+        { path: 'auth/2fa/confirm-login', method: RequestMethod.POST },
         // SMS-code resend is called with only a tempToken (same pre-auth
         // security model as /auth/2fa/confirm-login), so CSRF is not
         // applicable — the tempToken is the anti-forgery factor.
-        { path: 'api/v1/auth/2fa/sms/login-resend', method: RequestMethod.POST },
-        { path: 'api/v1/auth/apple/callback', method: RequestMethod.POST },
-        // Partner API endpoints use X-Partner-Key; CSRF middleware already
-        // skips routes where X-API-Key is present. Explicit exclusion for clarity.
-        { path: 'api/v1/partner/*path', method: RequestMethod.ALL },
-        // Tracking events may originate from SDKs without CSRF tokens
-        { path: 'api/v1/tracking/event', method: RequestMethod.POST },
-        // Ad serving / click endpoints are called from mobile SDKs
-        { path: 'api/v1/ads/serve', method: RequestMethod.POST },
-        { path: 'api/v1/ads/click', method: RequestMethod.POST },
+        { path: 'auth/2fa/sms/login-resend', method: RequestMethod.POST },
+        { path: 'auth/apple/callback', method: RequestMethod.POST },
+        // Partner API endpoints use X-Partner-Key (authenticated
+        // separately by AdPartnerAuthGuard). CSRF makes no sense for
+        // them — they're server-to-server.
+        { path: 'partner/*path', method: RequestMethod.ALL },
+        // Tracking + ad endpoints are called from mobile SDKs without
+        // a browser cookie context, so CSRF is inapplicable.
+        { path: 'tracking/event', method: RequestMethod.POST },
+        { path: 'ads/serve', method: RequestMethod.POST },
+        { path: 'ads/click', method: RequestMethod.POST },
       )
-      .forRoutes({ path: '*', method: RequestMethod.ALL });
+      .forRoutes({ path: '*path', method: RequestMethod.ALL });
   }
 }
