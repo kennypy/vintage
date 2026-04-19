@@ -66,9 +66,13 @@ export class PayoutsService {
     // transfer 30 seconds later.
     const caller = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { cpf: true, cpfIdentityVerified: true },
+      // We only need to know IF a CPF is present — never need the
+      // plaintext value here — so we look at `cpfEncrypted` (non-null
+      // indicates the user has completed the setCpf step). No
+      // decryption required; that's a deliberate minimisation.
+      select: { cpfEncrypted: true, cpfIdentityVerified: true },
     });
-    if (!caller?.cpf) {
+    if (!caller?.cpfEncrypted) {
       throw new BadRequestException(
         'Adicione um CPF antes de solicitar saques. Vá em Conta → CPF.',
       );

@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
 import { isValidCPF } from '@vintage/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 import {
   SerproClient,
   SerproResult,
@@ -60,6 +61,7 @@ export class IdentityService {
     private readonly prisma: PrismaService,
     private readonly serpro: SerproClient,
     private readonly caf: CafClient,
+    private readonly cpfVault: CpfVaultService,
     config: ConfigService,
   ) {
     const raw = config
@@ -157,16 +159,26 @@ export class IdentityService {
       );
     }
 
-    const user = await this.prisma.user.findUnique({
+    const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, cpf: true, name: true, cpfIdentityVerified: true },
+      select: { id: true, cpfEncrypted: true, name: true, cpfIdentityVerified: true },
     });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
-    if (!user.cpf) {
+    if (!row) throw new NotFoundException('Usuário não encontrado.');
+    if (!row.cpfEncrypted) {
       throw new BadRequestException(
         'Adicione um CPF antes de solicitar verificação de identidade.',
       );
     }
+    // Decrypt at the call boundary — this service needs the raw CPF
+    // to call Serpro / Caf. The decrypted value must never leave this
+    // method (see NO_LOG below) because these APIs are our vendor-
+    // side PII surface.
+    const user = {
+      id: row.id,
+      name: row.name,
+      cpfIdentityVerified: row.cpfIdentityVerified,
+      cpf: this.cpfVault.decrypt(row.cpfEncrypted),
+    };
     if (!isValidCPF(user.cpf)) {
       // Defence in depth — setCpf already validates, but a hand-
       // edited DB row could slip through. Refuse to spend a Serpro
@@ -264,27 +276,28 @@ export class IdentityService {
       };
     }
 
-    const user = await this.prisma.user.findUnique({
+    const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { cpf: true, name: true, cpfIdentityVerified: true },
+      select: { cpfEncrypted: true, name: true, cpfIdentityVerified: true },
     });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
-    if (user.cpfIdentityVerified) {
+    if (!row) throw new NotFoundException('Usuário não encontrado.');
+    if (row.cpfIdentityVerified) {
       // Already verified via Serpro — no need to escalate. Idempotent
       // short-circuit instead of refusing, so the UI doesn't need
       // to check state before calling.
       return { redirectUrl: null, reason: 'Identidade já verificada.' };
     }
-    if (!user.cpf) {
+    if (!row.cpfEncrypted) {
       throw new BadRequestException(
         'Adicione um CPF antes de solicitar verificação por documento.',
       );
     }
+    const cpf = this.cpfVault.decrypt(row.cpfEncrypted);
 
     const session = await this.caf.createSession({
       userId,
-      cpf: user.cpf,
-      name: user.name,
+      cpf,
+      name: row.name,
       callbackUrl: `${this.webhookBaseUrl}/webhooks/caf`,
     });
     if (!session) {
@@ -414,14 +427,14 @@ export class IdentityService {
   private async hashUserCpf(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { cpf: true },
+      select: { cpfEncrypted: true },
     });
-    if (!user?.cpf) {
+    if (!user?.cpfEncrypted) {
       // Defensive fallback — should never hit; session row
       // implies a CPF existed at session creation time.
       return 'UNKNOWN_CPF';
     }
-    return this.hashCpf(user.cpf);
+    return this.hashCpf(this.cpfVault.decrypt(user.cpfEncrypted));
   }
 
   private hashCpf(cpf: string): string {

@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -38,6 +39,7 @@ export class UsersService {
     private emailService: EmailService,
     private listings: ListingsService,
     private auditLog: AuditLogService,
+    private cpfVault: CpfVaultService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -56,7 +58,9 @@ export class UsersService {
         // these. We expose them on /users/me so the client can tell whether
         // the user needs to add a CPF (OAuth signup leaves this null) and
         // whether Receita Federal verification has run.
-        cpf: true,
+        // The DB holds only ciphertext (cpfEncrypted); we decrypt below
+        // before the response leaves the service.
+        cpfEncrypted: true,
         cpfChecksumValid: true,
         cpfIdentityVerified: true,
         socialProvider: true,
@@ -73,9 +77,11 @@ export class UsersService {
 
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
-    const { wallet, _count, ...rest } = user;
+    const { wallet, _count, cpfEncrypted, ...rest } = user;
+    const cpf = cpfEncrypted ? this.cpfVault.decrypt(cpfEncrypted) : null;
     return {
       ...rest,
+      cpf,
       walletBalance: Number(wallet?.balanceBrl ?? 0),
       listingCount: _count.listings,
     };
@@ -179,11 +185,19 @@ export class UsersService {
 
     try {
       const result = await this.prisma.user.updateMany({
-        where: { id: userId, cpf: null },
+        // Set-once: refuse if either the encrypted ciphertext OR the
+        // lookup hash is already populated. Both should move together
+        // — defensive double-null ensures a partially-written row
+        // (shouldn't exist, but let's be explicit) can't be claimed.
+        where: { id: userId, cpfEncrypted: null, cpfLookupHash: null },
         // Modulo-11 passed (isValidCPF check above). Identity KYC
         // (cpfIdentityVerified) stays default false until the Serpro
         // / Caf flow confirms the CPF + name at Receita.
-        data: { cpf: cleanCpf, cpfChecksumValid: true },
+        data: {
+          cpfEncrypted: this.cpfVault.encrypt(cleanCpf),
+          cpfLookupHash: this.cpfVault.lookupHash(cleanCpf),
+          cpfChecksumValid: true,
+        },
       });
       if (result.count === 0) {
         // Covers: user doesn't exist, user already has a CPF, or a
@@ -569,7 +583,8 @@ export class UsersService {
           bannedReason: 'Conta excluída pelo usuário',
           email: anonymizedEmail,
           name: 'Usuário excluído',
-          cpf: null,
+          cpfEncrypted: null,
+          cpfLookupHash: null,
           cnpj: null,
           phone: null,
           avatarUrl: null,

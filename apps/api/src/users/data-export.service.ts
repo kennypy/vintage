@@ -3,6 +3,7 @@ import * as archiver from 'archiver';
 import { Readable, PassThrough } from 'node:stream';
 import * as crypto from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 /**
  * LGPD Art. 18(V) — portability. Produces a machine-readable
@@ -41,20 +42,27 @@ import { PrismaService } from '../prisma/prisma.service';
 export class DataExportService {
   private readonly logger = new Logger(DataExportService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cpfVault: CpfVaultService,
+  ) {}
 
   /**
    * Build a ZIP stream of the user's data. Returns a Readable the
    * caller pipes to the HTTP response.
    */
   async buildExport(userId: string): Promise<Readable> {
-    const user = await this.prisma.user.findUnique({
+    const rawUser = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
         email: true,
         name: true,
-        cpf: true,
+        // CPF is stored as AES-256-GCM ciphertext at rest; we decrypt
+        // it below specifically for this LGPD data-portability export
+        // because the OWNER is entitled to see their own CPF. The
+        // decrypted value is held only inside the buildExport scope.
+        cpfEncrypted: true,
         cnpj: true,
         phone: true,
         bio: true,
@@ -87,9 +95,17 @@ export class DataExportService {
         },
       },
     });
-    if (!user) {
+    if (!rawUser) {
       throw new Error(`user ${userId} not found`);
     }
+    // Substitute the decrypted CPF in place of the ciphertext for the
+    // export payload. The ciphertext itself is never surfaced — it's
+    // opaque and useless outside our infrastructure.
+    const { cpfEncrypted, ...userRest } = rawUser;
+    const user = {
+      ...userRest,
+      cpf: cpfEncrypted ? this.cpfVault.decrypt(cpfEncrypted) : null,
+    };
 
     const [
       addresses,
@@ -104,6 +120,7 @@ export class DataExportService {
       reviewsWritten,
       reviewsReceived,
       fraudFlags,
+      consentRecords,
     ] = await Promise.all([
       this.prisma.address.findMany({ where: { userId } }),
       this.prisma.listing.findMany({
@@ -155,6 +172,17 @@ export class DataExportService {
       this.prisma.review.findMany({ where: { reviewerId: userId } }),
       this.prisma.review.findMany({ where: { reviewedId: userId } }),
       this.prisma.fraudFlag.findMany({ where: { userId } }),
+      // LGPD Art. 18(V) completeness: every consent grant / revocation
+      // tied to this user. Pre-fix the export was silent about this,
+      // meaning a user couldn't audit their own consent history. The
+      // ipHash column stays on the row — it's an HMAC of the caller's
+      // IP at consent time, not a raw IP, so it reveals nothing new
+      // about the subject but DOES let them correlate consents with
+      // device/session events they already hold.
+      this.prisma.consentRecord.findMany({
+        where: { userId },
+        orderBy: { grantedAt: 'asc' },
+      }),
     ]);
 
     const payload = {
@@ -178,6 +206,7 @@ export class DataExportService {
         received: reviewsReceived,
       },
       'fraud-flags.json': fraudFlags,
+      'consent-records.json': consentRecords,
     };
 
     // Hash every file content so the receipt proves exactly what
@@ -209,6 +238,7 @@ export class DataExportService {
         reviewsWritten: reviewsWritten.length,
         reviewsReceived: reviewsReceived.length,
         fraudFlags: fraudFlags.length,
+        consentRecords: consentRecords.length,
       },
       note:
         'Hash cobre os arquivos JSON exportados, concatenados na forma "nome:conteúdo\\n". ' +

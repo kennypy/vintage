@@ -16,7 +16,14 @@ model User {
   id                 String    @id @default(cuid())
   email              String    @unique
   passwordHash       String
-  cpf                String?   @unique
+  // CPF at rest: never plaintext. cpfEncrypted is AES-256-GCM
+  // ciphertext produced by CpfVaultService; cpfLookupHash is an
+  // HMAC-SHA256 index for collision checks at registration. Both are
+  // written together atomically; neither is meaningful alone
+  // (cpfLookupHash is not reversible without the HMAC key).
+  // See `apps/api/src/common/services/cpf-vault.service.ts`.
+  cpfEncrypted       String?
+  cpfLookupHash      String?   @unique
   cnpj               String?   @unique
   cnpjVerified       Boolean   @default(false)
   name               String
@@ -123,7 +130,10 @@ model User {
   cafVerificationSessions CafVerificationSession[]
 
   @@index([email])
-  @@index([cpf])
+  // cpfLookupHash is already @unique (which implies an index) — no
+  // separate @@index needed. Dropped the old @@index([cpf]) here
+  // when cpf was removed from the row in the cpf-encryption-at-rest
+  // migration.
   @@index([socialProvider, socialProviderId])
   @@index([deletedAt])
 }

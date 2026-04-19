@@ -19,6 +19,7 @@ import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RedisService } from '../common/services/redis.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { isValidCPF } from '@vintage/shared';
 import { RegisterDto } from './dto/register.dto';
@@ -123,6 +124,7 @@ export class AuthService {
     private notificationsService: NotificationsService,
     private redis: RedisService,
     private analytics: AnalyticsService,
+    private cpfVault: CpfVaultService,
   ) {}
 
   // ── 2FA brute-force helpers ───────────────────────────────────────────
@@ -181,12 +183,13 @@ export class AuthService {
       throw new ConflictException('CPF inválido');
     }
 
-    // Check uniqueness — but allow recycling an unverified-and-stale
-    // record so an attacker can't permanently squat on someone else's
-    // email by registering it first. CPF collision is always a hard
-    // failure (CPFs identify a real person; reuse is fraud).
-    const existingByCpf = await this.prisma.user.findFirst({
-      where: { cpf: cleanCpf },
+    // CPF at rest is always ciphertext (see CpfVaultService). Collision
+    // check is against the lookup-hash column, which is an HMAC keyed
+    // by a dedicated CPF_LOOKUP_KEY — indexable without exposing the
+    // decryption key.
+    const cpfLookupHash = this.cpfVault.lookupHash(cleanCpf);
+    const existingByCpf = await this.prisma.user.findUnique({
+      where: { cpfLookupHash },
     });
     if (existingByCpf) {
       throw new ConflictException('Email ou CPF já cadastrado');
@@ -213,12 +216,14 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    // Create user + wallet
+    // Create user + wallet. CPF goes in encrypted; the lookup hash
+    // (HMAC-SHA256) handles the collision check + future lookups.
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
         passwordHash,
-        cpf: cleanCpf,
+        cpfEncrypted: this.cpfVault.encrypt(cleanCpf),
+        cpfLookupHash,
         name: dto.name,
         phone: dto.phone ?? null,
         // Modulo-11 passed (checked above by isValidCPF). Identity
@@ -1816,10 +1821,23 @@ export class AuthService {
     ctx: TokenIssueContext = {},
   ) {
     const tokens = await this.generateTokens(userId, ctx);
-    const user = await this.prisma.user.findUnique({
+    const row = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, email: true, cpf: true, avatarUrl: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        cpfEncrypted: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
     });
-    return { ...tokens, user };
+    // Decrypt CPF at the service boundary — the mobile + web clients
+    // expect the `cpf` field on the login/register response, not an
+    // encrypted blob. CPF only leaves the server when the owner of
+    // the account is reading it.
+    const { cpfEncrypted, ...rest } = row ?? {};
+    const cpf = cpfEncrypted ? this.cpfVault.decrypt(cpfEncrypted) : null;
+    return { ...tokens, user: row ? { ...rest, cpf } : null };
   }
 }

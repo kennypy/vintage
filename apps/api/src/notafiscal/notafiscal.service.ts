@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { NFeClient } from './nfe.client';
 import { Decimal } from '@prisma/client/runtime/client';
 
@@ -67,6 +68,7 @@ export class NotaFiscalService {
   constructor(
     private prisma: PrismaService,
     private readonly nfeClient: NFeClient,
+    private readonly cpfVault: CpfVaultService,
   ) {}
 
   async generateNFe(orderId: string, userId: string): Promise<NFeData> {
@@ -74,7 +76,7 @@ export class NotaFiscalService {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
-        buyer: { select: { id: true, cpf: true } },
+        buyer: { select: { id: true, cpfEncrypted: true } },
         seller: {
           select: {
             id: true,
@@ -133,14 +135,23 @@ export class NotaFiscalService {
       destinationState,
     );
 
-    // Delegate to NF-e client
+    // Decrypt buyer CPF at the call boundary — NF-e requires the
+    // raw CPF on the fiscal document by Brazilian law. The plaintext
+    // is held in this function scope only; it's passed straight into
+    // the NF-e client and the resulting `buyerCpf` column on the
+    // NotaFiscal row (which IS the fiscal record, so plaintext there
+    // is the documented tax-compliance requirement, not a leak).
+    const buyerCpf = order.buyer.cpfEncrypted
+      ? this.cpfVault.decrypt(order.buyer.cpfEncrypted)
+      : '';
+
     const response = await this.nfeClient.generateNFe(
       {
         orderId,
         itemDescription: `Vintage.br - Pedido ${orderId}`,
         itemPriceBrl: Number(order.itemPriceBrl),
         sellerCnpj: order.seller.cnpj || '',
-        buyerCpf: order.buyer.cpf || '',
+        buyerCpf,
         originState,
         destinationState,
       },
@@ -161,7 +172,7 @@ export class NotaFiscalService {
         pdfUrl: response.pdfUrl,
         status: this.mapStatusToEnum(response.status),
         sellerCnpj: order.seller.cnpj || null,
-        buyerCpf: order.buyer.cpf || null,
+        buyerCpf: buyerCpf || null,
         originState,
         destinationState,
         icmsBrl: new Decimal(taxBreakdown.icms.toFixed(2)),

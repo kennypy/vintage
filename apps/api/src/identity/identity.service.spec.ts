@@ -5,6 +5,7 @@ import { IdentityService } from './identity.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SerproClient } from './serpro.client';
 import { CafClient } from './caf.client';
+import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 jest.mock('@vintage/shared', () => ({
   isValidCPF: jest.fn().mockReturnValue(true),
@@ -44,6 +45,7 @@ function makeService(
 ): Promise<IdentityService> {
   const module = Test.createTestingModule({
     providers: [
+        { provide: CpfVaultService, useValue: { encrypt: jest.fn((v) => 'ENC(' + v + ')'), decrypt: jest.fn((v) => typeof v === 'string' ? v.replace(/^ENC\(|\)$/g, '') : v), lookupHash: jest.fn((v) => 'HASH(' + v + ')') } },
       IdentityService,
       { provide: PrismaService, useValue: mockPrisma },
       { provide: SerproClient, useValue: mockSerpro },
@@ -79,7 +81,7 @@ describe('IdentityService', () => {
       const svc = await makeService(false);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -97,7 +99,7 @@ describe('IdentityService', () => {
       const svc = await makeService(true);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -133,7 +135,7 @@ describe('IdentityService', () => {
       const svc = await makeService(true);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: true,
       });
@@ -151,7 +153,7 @@ describe('IdentityService', () => {
     beforeEach(() => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -219,7 +221,7 @@ describe('IdentityService', () => {
       const svc = await makeService(true);
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'u1',
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -246,7 +248,7 @@ describe('IdentityService', () => {
     it('short-circuits when the user is already verified', async () => {
       const svc = await makeService(true, true);
       mockPrisma.user.findUnique.mockResolvedValue({
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: true,
       });
@@ -259,7 +261,7 @@ describe('IdentityService', () => {
     it('creates a CafVerificationSession row and returns the redirect URL on success', async () => {
       const svc = await makeService(true, true);
       mockPrisma.user.findUnique.mockResolvedValue({
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -286,7 +288,7 @@ describe('IdentityService', () => {
     it('returns a reason when Caf returns no session (provider error)', async () => {
       const svc = await makeService(true, true);
       mockPrisma.user.findUnique.mockResolvedValue({
-        cpf: '52998224725',
+        cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
         name: 'Jane',
         cpfIdentityVerified: false,
       });
@@ -331,7 +333,7 @@ describe('IdentityService', () => {
         externalSessionId: 'sess-1',
         status: 'PENDING',
       });
-      mockPrisma.user.findUnique.mockResolvedValue({ cpf: '52998224725' });
+      mockPrisma.user.findUnique.mockResolvedValue({ cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)' });
 
       await svc.handleCafWebhook({
         eventId: 'evt-abc',
@@ -372,7 +374,7 @@ describe('IdentityService', () => {
           externalSessionId: 'sess-1',
           status: 'PENDING',
         });
-        mockPrisma.user.findUnique.mockResolvedValue({ cpf: '52998224725' });
+        mockPrisma.user.findUnique.mockResolvedValue({ cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)' });
 
         await svc.handleCafWebhook({
           sessionId: 'sess-1',
