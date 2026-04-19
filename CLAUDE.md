@@ -120,6 +120,11 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - Keep the README in Portuguese (BR) to match the project locale
 - The README should always reflect the current state of the project — not aspirational features
 
+### Env Var Source of Truth
+- `apps/api/.env.example`, `apps/web/.env.example`, `apps/mobile/.env.example` are the CANONICAL lists. Any new env var MUST be added to the appropriate file in the same PR
+- `DEPLOYMENT.md` §6 (Fly secrets) is the deployment-time mirror; it must stay in sync with `apps/api/.env.example`. When in doubt, trust `.env.example`
+- Feature-flag envs are grouped in `.env.example` with their flip checklist inline (e.g. `CAPTCHA_ENFORCE`, `IDENTITY_VERIFICATION_ENABLED`, `IDENTITY_DOCUMENT_ENABLED`, `MERCADOPAGO_PAYOUT_ENABLED`). Flipping any of them has a user-facing consequence — read the comment before setting
+
 ### Mobile–Web Feature Parity
 - **Every feature, improvement, or bug fix added to the mobile app (`apps/mobile/`) MUST also be implemented in the web app (`apps/web/`), and vice-versa.**
 - When adding a new screen or feature to one platform, create the equivalent page/component on the other platform in the same PR.

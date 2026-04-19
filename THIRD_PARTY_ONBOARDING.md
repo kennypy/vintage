@@ -437,7 +437,80 @@ via Log Shipping.
 
 ---
 
-## 13. Checklist final — antes do lançamento
+## 13. Identidade + KYC (Tracks B e C)
+
+### 13.1 Serpro Datavalid (Track B — primária)
+- **Registro**: https://www.loja.serpro.gov.br/datavalid — CNPJ
+  obrigatório. Onboarding oficial leva 6–12 semanas; iniciar
+  IMEDIATAMENTE, em paralelo ao registro do CNPJ.
+- **Produto**: Datavalid CPF — consulta autoritativa à Receita.
+  Retorna situação cadastral + match de nome + match de DOB.
+  Preço: R$0.06–0.25/consulta.
+- **Env**:
+  ```
+  SERPRO_BASE_URL=<URL do contrato>
+  SERPRO_TOKEN_PATH=/token
+  SERPRO_VALIDATE_PATH=/datavalid/v3/validate
+  SERPRO_CLIENT_ID=...
+  SERPRO_CLIENT_SECRET=...
+  IDENTITY_VERIFICATION_ENABLED=false   # true quando contrato ativo
+  ```
+- **Compliance**: Brazil→Brazil, sem transferência internacional.
+  Incluir DPA no RIPD §4.2.
+
+### 13.2 Caf (Track C — documento + liveness)
+- **Registro**: https://combateafraude.com — 2–4 semanas.
+- **Produto**: Selfie + RG/CNH com liveness. Escalonamento quando
+  Serpro retorna NAME_MISMATCH / CPF_SUSPENDED. R$5–10/sessão.
+- **Env**:
+  ```
+  CAF_BASE_URL=<URL do contrato>
+  CAF_CREATE_SESSION_PATH=/v1/verifications
+  CAF_API_KEY=...
+  CAF_WEBHOOK_SECRET=...                # HMAC-SHA256, obrigatório
+  WEBHOOK_BASE_URL=https://api.vintage.br
+  IDENTITY_DOCUMENT_ENABLED=false       # true quando contrato ativo
+  ```
+- **Webhook**: Caf → `POST /webhooks/caf` (público, HMAC-verified,
+  dedup via `ProcessedWebhook`). Em dev, expor via ngrok/cloudflared.
+- **Compliance**: BR-HQ, ISO 27001 + SOC 2 Type II. RIPD §4.2 com
+  base legal "legítimo interesse" + LIA (biometria = dado sensível).
+
+### 13.3 Google Vision (moderação de imagens)
+- Já integrado (`GOOGLE_VISION_API_KEY`) para autofill de listings.
+  Commit 09cada2 adicionou `SAFE_SEARCH_DETECTION` à mesma chamada —
+  sem custo adicional. Rejeita VERY_LIKELY; sinaliza LIKELY para o
+  admin em `/admin/image-flags`.
+- **Compliance**: Google Cloud EUA — transferência internacional
+  requer TIA no RIPD §4.2.
+
+### 13.4 Cloudflare Turnstile (captcha)
+- **Registro**: https://dash.cloudflare.com → Turnstile. Grátis até
+  1M verificações/mês.
+- **Env**:
+  ```
+  TURNSTILE_SECRET_KEY=...              # backend
+  CAPTCHA_ENFORCE=false                 # true quando mobile >=95% adoção
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY=...    # web
+  EXPO_PUBLIC_TURNSTILE_SITE_KEY=...    # mobile (WebView)
+  ```
+
+### 13.5 PostHog (analytics)
+- **Registro**: https://app.posthog.com → EU region (LGPD).
+  Grátis até 1M eventos/mês.
+- **Env**:
+  ```
+  POSTHOG_API_KEY=phc_...               # backend
+  POSTHOG_HOST=https://eu.i.posthog.com
+  NEXT_PUBLIC_POSTHOG_KEY=phc_...       # web
+  NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com
+  EXPO_PUBLIC_POSTHOG_KEY=phc_...       # mobile
+  EXPO_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com
+  ```
+
+---
+
+## 14. Checklist final — antes do lançamento
 
 - [ ] Mercado Pago em produção e webhook recebendo.
 - [ ] Correios + Jadlog respondendo cálculos reais.
@@ -451,3 +524,14 @@ via Log Shipping.
 - [ ] Política de privacidade aprovada pelo jurídico.
 - [ ] 3 usuários beta completaram uma compra real.
 - [ ] `npm audit --production` sem HIGH/CRITICAL.
+- [ ] Serpro Datavalid: contrato, credenciais, smoke em staging.
+- [ ] Caf: contrato, webhook secret, `/webhooks/caf` alcançável,
+      smoke end-to-end.
+- [ ] Google Vision: API key + teste de upload normal + borderline
+      (ListingImageFlag criado).
+- [ ] Turnstile: chaves nas 3 plataformas, `CAPTCHA_ENFORCE=false`
+      até adoção mobile atingir limiar.
+- [ ] PostHog: API keys nas 3 plataformas, evento `user_registered`
+      no dashboard.
+- [ ] Deep linking: `APPLE_TEAM_ID` + `ANDROID_CERT_SHA256` no host
+      web; `/.well-known/*` retornando JSON válido.

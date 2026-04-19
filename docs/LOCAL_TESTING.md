@@ -48,8 +48,24 @@ things you **must** set:
 Everything else can stay at its example default. Features whose env
 vars are blank degrade gracefully to no-ops (Vision, PostHog,
 Turnstile, Twilio, Firebase, NF-e, Mercado Pago, Google OAuth, Apple
-OAuth) — you'll see a warning at startup per missing integration and
-the feature will silently skip.
+OAuth, **Serpro Datavalid**, **Caf**) — you'll see a warning at
+startup per missing integration and the feature will silently skip.
+
+**Feature flags worth knowing about** (all default off — flip only
+when you're ready to test the flow end-to-end):
+
+- `CAPTCHA_ENFORCE` — on, all register/forgot-password/SMS-resend
+  calls require a Turnstile `captchaToken`. Mobile + web already
+  send it; only flip on after provisioning `TURNSTILE_SECRET_KEY`.
+- `IDENTITY_VERIFICATION_ENABLED` — on, `/users/me/verify-identity`
+  calls Serpro. Requires `SERPRO_CLIENT_ID` + `SERPRO_CLIENT_SECRET`.
+- `IDENTITY_DOCUMENT_ENABLED` — on, `/users/me/verify-identity-
+  document` opens a Caf session. Requires `CAF_API_KEY`,
+  `CAF_WEBHOOK_SECRET`, `WEBHOOK_BASE_URL` (dev tip: use a
+  cloudflared/ngrok tunnel so Caf's webhook can reach you).
+- `MERCADOPAGO_PAYOUT_ENABLED` — on, payouts actually call MP.
+  Leave off until the Marketplace contract is active; ops
+  processes PIX out-of-band in the meantime.
 
 **Cloudflare R2** (optional, for image upload testing):
 

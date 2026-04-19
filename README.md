@@ -13,7 +13,7 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 |--------|-----------|-----------|
 | Mobile (P1) | React Native (Expo) | App iOS + Android — plataforma principal |
 | Web (P2) | Next.js 14 + Tailwind CSS | Site secundário |
-| API | NestJS + Prisma + PostgreSQL | Backend com 25+ módulos |
+| API | NestJS + Prisma + PostgreSQL | Backend com 30+ módulos |
 | Shared | TypeScript package | Tipos, constantes, validação CPF/CEP |
 | Infra | Docker Compose | Postgres 16, Redis 7, Meilisearch |
 | CI | GitHub Actions | Lint, type-check, test, build |
@@ -29,7 +29,7 @@ vintage/
 │   ├── web/              # Next.js 14 + Tailwind CSS
 │   │   └── src/          # 8 páginas (home, listings, sell, auth, profile) + componentes + testes
 │   └── api/              # NestJS backend
-│       ├── prisma/       # Schema (25+ models) + seed
+│       ├── prisma/       # Schema (35+ models) + seed
 │       └── src/          # 25+ módulos + 310 testes unitários
 ├── packages/
 │   └── shared/           # Types, constants, CPF/CEP validation
@@ -54,23 +54,30 @@ vintage/
 | **Search** | full-text search | Meilisearch: filtros, ordenação, atributos pesquisáveis |
 | **Payments** | PIX, cartão, boleto, webhook | QR code PIX, parcelamento 12x, boleto |
 | **Shipping** | rates, labels, tracking, drop-off | Correios PAC/SEDEX, Jadlog, Kangu, Pegaki — QR code sem impressora |
-| **Disputes** | open, resolve | Janela de 2 dias, reembolso ou liberação |
+| **Disputes** | open, resolve | Janela de 5 dias após entrega, reembolso ou liberação de escrow (OrderListingSnapshot congela evidência) |
 | **Bundles** | create, checkout | Pacotes com frete combinado, múltiplos itens |
 | **Promotions** | megafone, bump, spotlight | Boost grátis 7 dias, impulsionar R$4,90, destaque R$29,90 |
 | **Reports** | file, list | Denúncia de anúncios e usuários (Prisma-backed) |
-| **Nota Fiscal** | generate, preview tax | NF-e mock, cálculo ICMS/ISS |
-| **Uploads** | presigned URLs, file upload, video upload | S3 com criptografia AES256, validação MIME, vídeos até 100MB |
+| **Nota Fiscal** | generate, preview tax | NF-e mock, cálculo ICMS/ISS, gated em `cpfIdentityVerified` do vendedor |
+| **Uploads** | presigned URLs, file upload, video upload | S3 com criptografia AES256, validação MIME, vídeos até 100MB, moderação Google Vision SafeSearch (rejeita VERY_LIKELY, sinaliza LIKELY) |
 | **Authenticity** | submit, review (admin), status | Badge "Autêntico" com fotos de comprovação, aprovação manual |
 | **Seller Insights** | dashboard | Sellability Score, tempo médio de venda por categoria, tendências de demanda |
 | **Impact** | user impact, platform stats, order impact | CO₂ e água economizados, selos gamificados (Primeiros Passos → Campeã do Círculo) |
 | **Email** | transactional emails | Boas-vindas, confirmação de pedido, envio, pagamento |
 | **Push** | device tokens, send | Push notifications via Expo (iOS + Android) |
+| **Fraud** | admin list/resolve flags | Rule engine (FraudRule) — regras de velocidade (contas novas) e drain pós-cadastro de payout, auto-sinalização de usuários para revisão |
+| **Moderation** | reports, image-flags, fraud-flags | Triagem admin — denúncias, imagens sinalizadas pelo SafeSearch, fraude |
+| **Identity** | verify-identity (Serpro), verify-identity-document (Caf) | Track B (CPF+nome+DOB na Receita) e Track C (documento + liveness) — libera `cpfIdentityVerified`, que gate saques e NF-e |
+| **Analytics** | server-side events | PostHog EU region — user_registered, listing_created, order_created, order_paid, order_delivered, dispute_opened |
+| **Tracking Poller** | cron (hourly) | Auto-promote SHIPPED → DELIVERED quando carriers (Correios, Jadlog, Kangu, Pegaki) reportam entrega via webhook/poll |
 
 ## Database
 
-30+ modelos Prisma: User, Listing, ListingImage, ListingVideo, Category, Brand, Order, Offer, Bundle, BundleItem, Wallet, WalletTransaction, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Promotion, SavedSearch, PriceSuggestion, PriceDropAlert, Report, DeviceToken, LoginEvent, AuthenticityRequest.
+35+ modelos Prisma. Core: User, Listing, ListingImage, ListingVideo, Category, Brand, Order, OrderListingSnapshot, Offer, Bundle, BundleItem, Wallet, WalletTransaction, PayoutMethod, PayoutRequest, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Coupon, Promotion, SavedSearch, PriceDropAlert, Report, DeviceToken, LoginEvent, AuthenticityRequest, NotaFiscal, PaymentFlag.
 
-**Seed**: 10 categorias com 55 subcategorias + 55 marcas brasileiras e internacionais.
+Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch moderation queue), FraudRule + FraudFlag (velocity/drain signals), CpfVerificationLog (KYC audit, SHA256 hashes only), CafVerificationSession (document+liveness sessions), DeletionAuditLog (LGPD), Consent.
+
+**Seed**: 10 categorias com 55 subcategorias + 55 marcas brasileiras e internacionais + 2 FraudRule rows (NEW_ACCOUNT_VELOCITY, PAYOUT_DRAIN). Admin promotion via `npm run admin:promote -- <email>` (seed.ts refuses to run with NODE_ENV=production).
 
 ## Como rodar
 
@@ -124,7 +131,21 @@ npm run dev
 - Moeda: BRL (R$) formato 1.234,56
 - CEP: formato XXXXX-XXX com autocomplete via ViaCEP
 - Tamanhos: PP, P, M, G, GG, XG, XXG + numéricos
-- CPF: validação Módulo 11
+- CPF: validação Módulo 11 no cadastro (`cpfChecksumValid`), verificação completa na Receita Federal via Serpro (`cpfIdentityVerified`, gate para saques e NF-e)
+
+## Segurança e compliance
+
+- **LGPD Art. 18**: exportação de dados via `POST /users/me/export` (ZIP com JSON + imagens + receipt SHA256)
+- **KYC em 3 camadas**: Modulo-11 (grátis) → Serpro CPF+nome+DOB na Receita → Caf documento + liveness (conflito)
+- **Fraud signals**: `FraudRule` tunable em produção; regras NEW_ACCOUNT_VELOCITY + PAYOUT_DRAIN seeded
+- **Moderação de imagens**: Google Vision SafeSearch — rejeita VERY_LIKELY, sinaliza LIKELY para admin
+- **Captcha**: Cloudflare Turnstile em register / forgot-password / SMS-resend (web + mobile WebView), gated em `CAPTCHA_ENFORCE`
+- **Webhooks**: HMAC-SHA256 obrigatório + dedup via `ProcessedWebhook` (MP, Caf)
+- **Snapshots de disputa**: `OrderListingSnapshot` congela o anúncio no momento da compra — evidência para disputa não depende do live Listing
+- **Retenção LGPD**: crons diárias purgam `LoginEvent` 90d, `ProcessedWebhook` 30d, `ListingImageFlag`/`FraudFlag`/`CpfVerificationLog`/`CafVerificationSession` 365d, S3 orphan sweep 30d após soft-delete do anúncio
+- **Deep links**: Universal Links (iOS) + Android App Links via `/.well-known/apple-app-site-association` e `/.well-known/assetlinks.json` no host web
+
+Detalhes em `CLAUDE.md` §Security Standards e `docs/privacy/ripd.md`.
 - Marcas brasileiras: Farm, Animale, Osklen, Colcci, Reserva, Havaianas, Melissa, Arezzo, etc.
 
 ## Scripts
