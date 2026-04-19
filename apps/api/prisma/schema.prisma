@@ -24,7 +24,18 @@ model User {
   avatarUrl          String?
   bio                String?
   verified           Boolean   @default(false)
-  cpfVerified        Boolean   @default(false)
+  // Modulo-11 checksum validation — cheap, no vendor call. Set to true
+  // at registration when the CPF digits produce a valid check digit.
+  // Used to be named `cpfVerified`; renamed because "verified" was
+  // misleading — a valid-check-digit CPF is NOT a verified identity.
+  cpfChecksumValid   Boolean   @default(false)
+  // True only after a Tier-2 / Tier-3 KYC provider (Serpro / Serasa /
+  // idwall / Unico / Mercado Pago's own KYC callback) confirms that
+  // (a) the CPF is ATIVO at Receita Federal, AND (b) the full name
+  // on the account matches the CPF holder. Defaults false for every
+  // new user until the KYC flow completes. Gates payout (see
+  // payouts.service.ts) and NF-e issuance (nfe.client.ts).
+  cpfIdentityVerified Boolean  @default(false)
   twoFaEnabled       Boolean   @default(false)
   // Monotonically-incremented every time we need to globally invalidate
   // existing sessions for this user (email change, password change, admin

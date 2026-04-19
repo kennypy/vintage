@@ -109,7 +109,8 @@ describe('AuthService - Social Login', () => {
         email: 'maria@gmail.com',
         socialProvider: 'google',
         socialProviderId: 'google-123',
-        cpfVerified: true,
+        cpfChecksumValid: true,
+        cpfIdentityVerified: false,
         avatarUrl: null,
         isBanned: false,
         deletedAt: null,
@@ -166,7 +167,10 @@ describe('AuthService - Social Login', () => {
           name: 'Maria Silva',
           socialProvider: 'google',
           socialProviderId: 'google-123',
-          cpfVerified: false,
+          // auth.service.ts writes `cpfChecksumValid: false` on
+          // first OAuth signup. cpfIdentityVerified is not passed
+          // and defaults to false in the schema.
+          cpfChecksumValid: false,
           wallet: { create: {} },
         }),
       });
@@ -176,7 +180,7 @@ describe('AuthService - Social Login', () => {
       );
     });
 
-    it('should flag social login user without CPF as cpfVerified false', async () => {
+    it('surfaces cpfVerified=false on the wire for a brand-new OAuth signup (no CPF yet)', async () => {
       mockPrisma.user.findUnique
         .mockResolvedValueOnce(null) // check if user exists
         .mockResolvedValueOnce({ tokenVersion: 0 }) // Wave 3B: generateTokens ver read
@@ -200,7 +204,7 @@ describe('AuthService - Social Login', () => {
       expect(result.cpfVerified).toBe(false);
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          cpfVerified: false,
+          cpfChecksumValid: false,
           socialProvider: 'apple',
           socialProviderId: 'apple-123',
         }),
@@ -213,7 +217,8 @@ describe('AuthService - Social Login', () => {
         email: 'maria@gmail.com',
         socialProvider: null,
         socialProviderId: null,
-        cpfVerified: true,
+        cpfChecksumValid: true,
+        cpfIdentityVerified: false,
         avatarUrl: null,
         isBanned: false,
         deletedAt: null,

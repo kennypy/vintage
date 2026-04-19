@@ -319,15 +319,18 @@ describe('UsersService', () => {
       );
     });
 
-    it('persists the CPF as digits-only and leaves cpfVerified=false', async () => {
+    it('persists the CPF as digits-only and marks checksum valid — identity still unverified', async () => {
       mockPrisma.user.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.setCpf('user-1', VALID_CPF_FORMATTED);
 
       expect(result).toEqual({ success: true });
+      // Modulo-11 passed; the row gets cpfChecksumValid=true. The
+      // separate cpfIdentityVerified column stays at its default
+      // (false) — only a Track-B KYC provider can flip that.
       expect(mockPrisma.user.updateMany).toHaveBeenCalledWith({
         where: { id: 'user-1', cpf: null },
-        data: { cpf: VALID_CPF_PLAIN, cpfVerified: false },
+        data: { cpf: VALID_CPF_PLAIN, cpfChecksumValid: true },
       });
     });
   });

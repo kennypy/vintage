@@ -132,7 +132,10 @@ export class AuthService {
         cpf: cleanCpf,
         name: dto.name,
         phone: dto.phone ?? null,
-        cpfVerified: true,
+        // Modulo-11 passed (checked above by isValidCPF). Identity
+        // verification (Receita + name match) is a separate gate set
+        // later by the KYC provider — see cpfIdentityVerified.
+        cpfChecksumValid: true,
         acceptedTosAt: new Date(),
         acceptedTosVersion: dto.tosVersion,
         wallet: { create: {} },
@@ -711,7 +714,8 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        cpfVerified: true,
+        cpfChecksumValid: true,
+        cpfIdentityVerified: true,
         twoFaEnabled: true,
         twoFaMethod: true,
         twoFaPhone: true,
@@ -728,14 +732,25 @@ export class AuthService {
     });
 
     return {
-      cpfVerified: user.cpfVerified,
+      // New fields surfaced for clients that want the full picture.
+      cpfChecksumValid: user.cpfChecksumValid,
+      cpfIdentityVerified: user.cpfIdentityVerified,
+      // Back-compat alias for existing mobile + web releases that
+      // consume `cpfVerified`. Points at the checksum bit so the
+      // pre-split UX (a "CPF ok" check on the profile) still works.
+      // Post Track-B, clients should migrate to cpfIdentityVerified.
+      cpfVerified: user.cpfChecksumValid,
       twoFaEnabled: user.twoFaEnabled,
       twoFaMethod: user.twoFaMethod,
       twoFaPhoneHint:
         user.twoFaEnabled && user.twoFaMethod === 'SMS' && user.twoFaPhone
           ? this.maskPhone(user.twoFaPhone)
           : null,
-      isContaProtegida: user.cpfVerified && user.twoFaEnabled,
+      // Conta Protegida is the stricter trust badge — only users who
+      // have BOTH passed full KYC and enabled 2FA. Before the split
+      // this read the checksum bit, which any checksum-valid CPF
+      // satisfied; post-Track-B it correctly requires real identity.
+      isContaProtegida: user.cpfIdentityVerified && user.twoFaEnabled,
       recentLogins,
     };
   }
@@ -784,7 +799,10 @@ export class AuthService {
       }
 
       const tokens = await this.generateTokensWithUser(existingUser.id);
-      return { ...tokens, cpfVerified: existingUser.cpfVerified };
+      // Wire field stays `cpfVerified` for client back-compat — points
+      // at the checksum bit. Clients that want the stricter post-KYC
+      // signal should read cpfIdentityVerified from /auth/security-status.
+      return { ...tokens, cpfVerified: existingUser.cpfChecksumValid };
     }
 
     // Create new user without CPF (required on first purchase).
@@ -801,7 +819,11 @@ export class AuthService {
         avatarUrl: profile.avatarUrl ?? null,
         socialProvider: provider,
         socialProviderId: profile.providerId,
-        cpfVerified: false,
+        // OAuth signup has no CPF yet — user is prompted to add
+        // one before their first purchase. cpfChecksumValid stays
+        // false until setCpf runs. cpfIdentityVerified independently
+        // stays false until KYC.
+        cpfChecksumValid: false,
         acceptedTosAt: new Date(),
         acceptedTosVersion: currentTosVersion,
         wallet: { create: {} },

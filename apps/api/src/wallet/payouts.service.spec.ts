@@ -48,7 +48,7 @@ describe('PayoutsService', () => {
     // Default: caller has verified CPF.
     mockPrisma.user.findUnique.mockResolvedValue({
       cpf: '52998224725',
-      cpfVerified: true,
+      cpfIdentityVerified: true,
     });
     mockPayoutMethods.getOwnedOrThrow.mockResolvedValue({
       id: 'method-1',
@@ -113,7 +113,7 @@ describe('PayoutsService', () => {
     });
 
     it('rejects users without a CPF (OAuth that never linked)', async () => {
-      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: null, cpfVerified: false });
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: null, cpfIdentityVerified: false });
 
       await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
         /Adicione um CPF/,
@@ -122,10 +122,10 @@ describe('PayoutsService', () => {
     });
 
     it('rejects users whose CPF is linked but NOT verified (Wave 3C tightening)', async () => {
-      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: '52998224725', cpfVerified: false });
+      mockPrisma.user.findUnique.mockResolvedValueOnce({ cpf: '52998224725', cpfIdentityVerified: false });
 
       await expect(service.requestPayout('user-1', 100, 'method-1')).rejects.toThrow(
-        /CPF não verificado/,
+        /Verificação de identidade pendente/,
       );
       expect(mockPayoutMethods.getOwnedOrThrow).not.toHaveBeenCalled();
       expect(mockMp.sendPixPayout).not.toHaveBeenCalled();

@@ -55,7 +55,8 @@ export class UsersService {
         // the user needs to add a CPF (OAuth signup leaves this null) and
         // whether Receita Federal verification has run.
         cpf: true,
-        cpfVerified: true,
+        cpfChecksumValid: true,
+        cpfIdentityVerified: true,
         socialProvider: true,
         vacationMode: true,
         ratingAvg: true,
@@ -170,7 +171,10 @@ export class UsersService {
     try {
       const result = await this.prisma.user.updateMany({
         where: { id: userId, cpf: null },
-        data: { cpf: cleanCpf, cpfVerified: false },
+        // Modulo-11 passed (isValidCPF check above). Identity KYC
+        // (cpfIdentityVerified) stays default false until the Serpro
+        // / Caf flow confirms the CPF + name at Receita.
+        data: { cpf: cleanCpf, cpfChecksumValid: true },
       });
       if (result.count === 0) {
         // Covers: user doesn't exist, user already has a CPF, or a
