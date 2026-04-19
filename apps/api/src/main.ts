@@ -3,7 +3,15 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
+// `cookie-parser` is a pure-CJS module that exports the middleware as
+// `module.exports`. Under our tsconfig (esModuleInterop=false) a default
+// import compiles to `cookie_parser_1.default(...)` at runtime, and
+// cookie-parser doesn't ship a `.default` alias — so the prod build
+// booted by `node dist/src/main.js` threw `default is not a function`
+// and the API never came up. (DAST finding D-01 from pen-test track 2.)
+// `import = require` emits a plain `require()` call and works on every
+// Node + TS combo we ship.
+import cookieParser = require('cookie-parser');
 import { execSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
