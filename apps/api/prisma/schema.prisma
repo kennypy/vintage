@@ -74,10 +74,17 @@ model User {
   ratingCount        Int       @default(0)
   followerCount      Int       @default(0)
   followingCount     Int       @default(0)
+  // Email-ownership proof. Null means the user has not yet clicked the
+  // link in the verification email we send at registration. Login paths
+  // refuse password logins on unverified accounts (see auth.service.ts
+  // login() + the EmailVerificationToken model below). Social-login
+  // paths set this eagerly because Google / Apple vouch for the email.
+  emailVerifiedAt    DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   // Relations
+  emailVerificationTokens EmailVerificationToken[]
   listings          Listing[]
   ordersBuyer       Order[]             @relation("OrderBuyer")
   ordersSeller      Order[]             @relation("OrderSeller")
@@ -1369,6 +1376,24 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+// One row per outstanding email-verification link. Same shape as
+// PasswordResetToken / EmailChangeToken: tokenHash is SHA-256 of the
+// raw token (never store raw), single-use via usedAt, time-bounded
+// via expiresAt.
+model EmailVerificationToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }
 
 // Email-change confirmation token. Sent to the NEW email address; redeeming

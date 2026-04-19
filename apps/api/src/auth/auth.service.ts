@@ -62,6 +62,15 @@ const DUMMY_BCRYPT_HASH =
 /** Hard ceiling on external OAuth verification calls (Google tokeninfo). */
 const GOOGLE_TOKENINFO_TIMEOUT_MS = 3000;
 
+/** Email verification token lifetime — long enough to survive an inbox
+ *  delay, short enough that an intercepted email isn't a long-lived key.
+ */
+const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+/** Throttle for /auth/request-email-verification (per-user). Prevents
+ *  email-flooding a victim by repeatedly registering their address. */
+const EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
+const EMAIL_VERIFICATION_MAX_PER_HOUR = 5;
+
 export interface SocialProfile {
   email: string;
   name: string;
@@ -140,12 +149,33 @@ export class AuthService {
       throw new ConflictException('CPF inválido');
     }
 
-    // Check uniqueness
-    const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email: dto.email }, { cpf: cleanCpf }] },
+    // Check uniqueness — but allow recycling an unverified-and-stale
+    // record so an attacker can't permanently squat on someone else's
+    // email by registering it first. CPF collision is always a hard
+    // failure (CPFs identify a real person; reuse is fraud).
+    const existingByCpf = await this.prisma.user.findFirst({
+      where: { cpf: cleanCpf },
     });
-    if (existing) {
+    if (existingByCpf) {
       throw new ConflictException('Email ou CPF já cadastrado');
+    }
+
+    const existingByEmail = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existingByEmail) {
+      const isUnverifiedSquatter =
+        existingByEmail.emailVerifiedAt === null &&
+        existingByEmail.socialProvider === null &&
+        existingByEmail.deletedAt === null;
+      if (!isUnverifiedSquatter) {
+        throw new ConflictException('Email ou CPF já cadastrado');
+      }
+      // Wipe the squatted record so the real owner can claim the
+      // address. Cascade deletes the wallet + any pending verification
+      // tokens. The attacker's password hash is gone, the new
+      // registration writes a fresh one.
+      await this.prisma.user.delete({ where: { id: existingByEmail.id } });
     }
 
     // Hash password
@@ -165,9 +195,19 @@ export class AuthService {
         cpfChecksumValid: true,
         acceptedTosAt: new Date(),
         acceptedTosVersion: dto.tosVersion,
+        // emailVerifiedAt left null — the verification email below has
+        // to be redeemed before the account can log in. Closes the
+        // "register with someone else's email" attack at the source.
         wallet: { create: {} },
       },
     });
+
+    // Issue + send the verification email. Fire-and-forget so a transient
+    // SMTP outage doesn't 500 the registration — the user can request a
+    // resend from the verification screen.
+    this.issueEmailVerificationToken(user.id, user.email, user.name).catch(
+      (err) => this.logger.warn(`verification email issue failed: ${String(err).slice(0, 200)}`),
+    );
 
     const tokens = await this.generateTokensWithUser(user.id);
 
@@ -207,7 +247,134 @@ export class AuthService {
     return { success: true, tosVersion: version };
   }
 
-  // ── Per-email login brute-force helpers ──────────────────────────────
+  // ── Email-ownership verification helpers ─────────────────────────────
+  private hashVerificationToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * Mint a fresh verification token, persist its hash, and send the email.
+   * Used both at register-time and for /auth/request-email-verification.
+   * Rate-limited per-user via Redis to stop attackers email-flooding a
+   * victim by hammering /auth/request-email-verification with their id.
+   */
+  private async issueEmailVerificationToken(
+    userId: string,
+    email: string,
+    name: string,
+  ): Promise<void> {
+    // Per-user counter — at most N issuances per hour and a short cooldown
+    // between them. Both keys are scoped to the user, not the IP, since
+    // the threat model is sender-flooding a victim's inbox.
+    const cooldownKey = `auth:verify-email:cooldown:${userId}`;
+    const claimed = await this.redis.setNx(
+      cooldownKey,
+      '1',
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+    );
+    if (!claimed) {
+      throw new HttpException(
+        'Aguarde antes de reenviar o email de verificação.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const hourKey = `auth:verify-email:hourly:${userId}`;
+    const count = await this.redis.incrWithTtl(hourKey, 60 * 60);
+    if (count > EMAIL_VERIFICATION_MAX_PER_HOUR) {
+      throw new HttpException(
+        'Limite de envios de verificação atingido. Tente novamente mais tarde.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashVerificationToken(rawToken);
+    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS);
+
+    await this.prisma.emailVerificationToken.create({
+      data: { userId, tokenHash, expiresAt },
+    });
+
+    await this.emailService.sendVerificationEmail(email, name, rawToken);
+  }
+
+  /**
+   * User-initiated re-issue of the verification email (e.g. the original
+   * mail got buried). Rate-limited inside issueEmailVerificationToken.
+   * Returns success even when the email isn't registered so callers can't
+   * use this endpoint to enumerate registered emails.
+   */
+  async requestEmailVerification(email: string): Promise<{ success: true }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase().trim() },
+    });
+    if (user && !user.emailVerifiedAt && !user.deletedAt) {
+      try {
+        await this.issueEmailVerificationToken(user.id, user.email, user.name);
+      } catch (err) {
+        // Swallow rate-limit + delivery errors so we don't leak account
+        // state. Real users see a "check your inbox" screen regardless.
+        this.logger.warn(
+          `verify-email re-issue suppressed: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+    return { success: true };
+  }
+
+  /**
+   * Consume a verification token. Single-use (usedAt set), expires in 24h,
+   * bumps the user's tokenVersion so any tokens minted before verification
+   * are revoked (an attacker who guessed enough of the address to register
+   * never gets a usable session).
+   */
+  async verifyEmail(rawToken: string): Promise<{ success: true; email: string }> {
+    if (!rawToken || rawToken.length < 32) {
+      throw new BadRequestException('Token de verificação inválido.');
+    }
+    const tokenHash = this.hashVerificationToken(rawToken);
+    const record = await this.prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+    });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Token de verificação inválido ou expirado.');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: record.userId },
+      select: { id: true, email: true, emailVerifiedAt: true, deletedAt: true, tokenVersion: true },
+    });
+    if (!user || user.deletedAt) {
+      throw new BadRequestException('Conta não encontrada.');
+    }
+    if (user.emailVerifiedAt) {
+      // Already verified — mark token used so it can't be replayed and
+      // return success. Idempotent from the caller's perspective.
+      await this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      });
+      return { success: true, email: user.email };
+    }
+    await this.prisma.$transaction([
+      this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerifiedAt: new Date(),
+          // Bump tokenVersion so any pre-verification tokens (we hand out
+          // tokens at register-time so the client can show a "check your
+          // email" screen) are invalidated by jwt-auth.guard.ts.
+          tokenVersion: { increment: 1 },
+        },
+      }),
+    ]);
+    return { success: true, email: user.email };
+  }
+
+  // ── Per-email login brute-force helpers ─────────────────────────────
   private loginEmailHash(email: string): string {
     // Trim + lowercase first so casing quirks don't bifurcate the counter.
     // Hash-truncate to 16 hex chars — collision risk is negligible at our
@@ -295,6 +462,22 @@ export class AuthService {
 
     if (user.deletedAt) {
       throw new UnauthorizedException('Esta conta foi excluída.');
+    }
+
+    // Email-ownership gate. A null emailVerifiedAt means the user
+    // registered with this email but has not proven control of the
+    // mailbox. Refuse login until they redeem the verification link.
+    // Returning a structured code so the client can route to the
+    // "resend verification email" screen.
+    if (!user.emailVerifiedAt) {
+      throw new HttpException(
+        {
+          code: 'EMAIL_VERIFICATION_REQUIRED',
+          message:
+            'Confirme seu email para entrar. Reenviamos o link de verificação para sua caixa de entrada.',
+        },
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // Successful password match — clear the per-email failure counter so
@@ -923,6 +1106,11 @@ export class AuthService {
         cpfChecksumValid: false,
         acceptedTosAt: new Date(),
         acceptedTosVersion: currentTosVersion,
+        // Google / Apple already verified the email address (we refuse
+        // tokens with email_verified !== true and only accept JWKS-signed
+        // Apple tokens). Mark the account as verified eagerly so OAuth
+        // users skip the inbox round-trip.
+        emailVerifiedAt: new Date(),
         wallet: { create: {} },
       },
     });

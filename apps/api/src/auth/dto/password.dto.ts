@@ -27,6 +27,26 @@ export class ResetPasswordDto {
   newPassword!: string;
 }
 
+export class RequestEmailVerificationDto {
+  @ApiProperty({ example: 'maria@example.com' })
+  @IsEmail({}, { message: 'Email inválido' })
+  email!: string;
+
+  // Cloudflare Turnstile token — see LoginDto for the ValidationPipe note.
+  @ApiProperty({ description: 'Cloudflare Turnstile token', required: false })
+  @IsOptional()
+  @IsString()
+  captchaToken?: string;
+}
+
+export class VerifyEmailDto {
+  @ApiProperty({ description: 'Token recebido por email', example: 'a1b2c3...' })
+  @IsString()
+  @MinLength(32)
+  @MaxLength(256)
+  token!: string;
+}
+
 export class ChangePasswordDto {
   @ApiProperty({ description: 'Senha atual' })
   @IsString()

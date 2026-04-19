@@ -233,6 +233,38 @@ export async function disableTwoFa(token: string): Promise<{ success: boolean; m
   });
 }
 
+/**
+ * Ask the API to resend the email-verification link for an address that
+ * has registered but not yet verified. Always returns success (the API
+ * masks whether the email is registered) — caller should show a generic
+ * "check your inbox" message.
+ */
+export async function requestEmailVerification(
+  email: string,
+  captchaToken?: string | null,
+): Promise<{ success: true }> {
+  return apiFetch<{ success: true }>('/auth/request-email-verification', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ email, captchaToken: captchaToken ?? null }),
+  });
+}
+
+/**
+ * Redeem a verification token. Primarily used by the deep-linked web
+ * page; exposed here for completeness + potential in-app deep-link
+ * handling post-launch.
+ */
+export async function verifyEmail(
+  token: string,
+): Promise<{ success: true; email: string }> {
+  return apiFetch<{ success: true; email: string }>('/auth/verify-email', {
+    method: 'POST',
+    authenticated: false,
+    body: JSON.stringify({ token }),
+  });
+}
+
 export async function forgotPassword(
   email: string,
   captchaToken?: string | null,

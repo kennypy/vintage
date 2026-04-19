@@ -37,10 +37,17 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
   loginEvent: {
     create: jest.fn(),
   },
+  emailVerificationToken: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  $transaction: jest.fn().mockImplementation((ops: unknown[]) => Promise.all(ops)),
   passwordResetToken: {
     updateMany: jest.fn(),
   },
@@ -123,17 +130,18 @@ describe('AuthService', () => {
 
     it('should create user with hashed password, create wallet, and return tokens', async () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
-      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.findFirst.mockResolvedValue(null); // CPF uniqueness
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
       mockPrisma.user.create.mockResolvedValue({ id: 'user-1', email: 'test@example.com', name: 'Maria Silva' });
-      // generateTokens now reads tokenVersion to embed it in the JWT
-      // payload (Wave 3B) — then generateTokensWithUser reads the user
-      // again for the response body.
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'user-1', name: 'Maria Silva', email: 'test@example.com',
-        cpf: '52998224725', avatarUrl: null, createdAt: new Date(),
-        tokenVersion: 0,
-      });
+      // Email-uniqueness lookup goes first; subsequent findUnique calls
+      // are generateTokens (tokenVersion read) and generateTokensWithUser.
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null) // email uniqueness — no existing record
+        .mockResolvedValue({
+          id: 'user-1', name: 'Maria Silva', email: 'test@example.com',
+          cpf: '52998224725', avatarUrl: null, createdAt: new Date(),
+          tokenVersion: 0,
+        });
       mockJwtService.sign
         .mockReturnValueOnce('access-token')
         .mockReturnValueOnce('refresh-token');
@@ -158,7 +166,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('should reject duplicate email or CPF', async () => {
+    it('should reject duplicate CPF', async () => {
       (isValidCPF as jest.Mock).mockReturnValue(true);
       mockPrisma.user.findFirst.mockResolvedValue({ id: 'existing-user' });
 
@@ -168,6 +176,64 @@ describe('AuthService', () => {
       await expect(service.register(registerDto)).rejects.toThrow(
         'Email ou CPF já cadastrado',
       );
+    });
+
+    it('should reject duplicate email when the existing record is verified', async () => {
+      (isValidCPF as jest.Mock).mockReturnValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue(null); // CPF clear
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: 'existing-user',
+        email: 'test@example.com',
+        emailVerifiedAt: new Date(),
+        socialProvider: null,
+        deletedAt: null,
+      });
+
+      await expect(service.register(registerDto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('overwrites an unverified squatter so the real owner can claim the email', async () => {
+      // Anti-squatting: an account that was created but never verified
+      // is not yet "owned" by anyone. Wiping it lets the real email
+      // owner register normally instead of being permanently locked
+      // out by an attacker who registered first.
+      (isValidCPF as jest.Mock).mockReturnValue(true);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({
+          id: 'squatter-1',
+          email: 'test@example.com',
+          emailVerifiedAt: null,
+          socialProvider: null,
+          deletedAt: null,
+        })
+        .mockResolvedValue({
+          id: 'real-user-1',
+          name: 'Maria Silva',
+          email: 'test@example.com',
+          cpf: '52998224725',
+          avatarUrl: null,
+          createdAt: new Date(),
+          tokenVersion: 0,
+        });
+      mockPrisma.user.delete.mockResolvedValue({ id: 'squatter-1' });
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hash');
+      mockPrisma.user.create.mockResolvedValue({
+        id: 'real-user-1',
+        email: 'test@example.com',
+        name: 'Maria Silva',
+      });
+      mockJwtService.sign
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
+      await service.register(registerDto);
+
+      expect(mockPrisma.user.delete).toHaveBeenCalledWith({ where: { id: 'squatter-1' } });
+      expect(mockPrisma.user.create).toHaveBeenCalled();
     });
 
     it('should reject invalid CPF', async () => {
@@ -202,6 +268,9 @@ describe('AuthService', () => {
         twoFaEnabled: false,
         acceptedTosAt: new Date(),
         acceptedTosVersion: '1.0.0',
+        // Email-ownership gate: login refuses unverified accounts.
+        // Set a non-null timestamp so this test exercises the happy path.
+        emailVerifiedAt: new Date(),
       };
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);

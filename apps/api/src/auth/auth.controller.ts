@@ -14,7 +14,13 @@ import {
   SetupSmsDto,
   LinkSocialDto,
 } from './dto/two-fa.dto';
-import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
+import {
+  ChangePasswordDto,
+  ForgotPasswordDto,
+  RequestEmailVerificationDto,
+  ResetPasswordDto,
+  VerifyEmailDto,
+} from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CaptchaGuard } from './captcha.guard';
@@ -286,6 +292,25 @@ export class AuthController {
   @ApiOperation({ summary: 'Redefinir senha com token recebido por email' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Post('request-email-verification')
+  @Throttle(PASSWORD_THROTTLE)
+  @UseGuards(CaptchaGuard)
+  @ApiOperation({
+    summary: 'Reenviar email de verificação',
+    description:
+      'Always returns success regardless of whether the email is registered. The actual issuance is rate-limited per-user inside AuthService (1 per minute, 5 per hour) so this endpoint cannot be used to flood a victim\'s inbox.',
+  })
+  requestEmailVerification(@Body() dto: RequestEmailVerificationDto) {
+    return this.authService.requestEmailVerification(dto.email);
+  }
+
+  @Post('verify-email')
+  @Throttle(PASSWORD_THROTTLE)
+  @ApiOperation({ summary: 'Confirmar email com token recebido' })
+  verifyEmail(@Body() dto: VerifyEmailDto) {
+    return this.authService.verifyEmail(dto.token);
   }
 
   @Post('change-password')
