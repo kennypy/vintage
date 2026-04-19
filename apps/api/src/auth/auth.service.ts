@@ -72,6 +72,18 @@ const EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = 60;
 const EMAIL_VERIFICATION_MAX_PER_HOUR = 5;
 
 /**
+ * Password-reset email throttle (pen-test track 3, finding A-04). The
+ * controller-level @Throttle is per-IP only; an attacker rotating
+ * residential proxies could happily flood a victim's inbox with reset
+ * emails (5 per IP × N IPs) and inflate the PasswordResetToken table
+ * indefinitely. These are per-USER (sha256(email)) Redis counters that
+ * survive IP rotation. Numbers match the email-verification pair so
+ * the UX is uniform.
+ */
+const PASSWORD_RESET_COOLDOWN_SECONDS = 60;
+const PASSWORD_RESET_MAX_PER_HOUR = 5;
+
+/**
  * Refresh-token rotation (P-07). Every successful /auth/refresh mints a
  * new row and marks the presented row `usedAt = now`. If a caller ever
  * presents a row whose `usedAt` is already set, we treat that as a theft
@@ -643,7 +655,11 @@ export class AuthService {
     await this.assertNotLocked(payload.sub);
 
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user || !user.twoFaEnabled) {
+    // Re-check delete/ban state on 2FA confirm. The tempToken is issued
+    // before the second factor lands, so an admin who soft-deletes or
+    // bans a user IN THAT 5-minute window must still kick them out
+    // before tokens are minted. Pen-test track 3 finding A-06.
+    if (!user || !user.twoFaEnabled || user.deletedAt || user.isBanned) {
       throw new UnauthorizedException(UNIFORM_ERROR);
     }
 
@@ -1315,12 +1331,47 @@ export class AuthService {
   /**
    * Issue a password-reset token and email it. Always returns a neutral success
    * message (even when the email is unknown) to prevent user enumeration.
+   *
+   * Per-user throttle (A-04, pen-test track 3): the controller-level
+   * @Throttle keys on IP, so an attacker rotating proxies could flood
+   * a victim's inbox + the PasswordResetToken table. The cooldown +
+   * hourly cap below are keyed on sha256(email) and survive IP
+   * rotation. Failures stay silent — we still return the neutral
+   * response so the throttle isn't an enumeration oracle.
    */
-  async forgotPassword(email: string) {
+  async forgotPassword(emailRaw: string) {
     const neutralResponse = {
       success: true,
       message: 'Se este email estiver cadastrado, enviaremos instruções em instantes.',
     };
+    // Normalise BEFORE both the DB lookup and the throttle key. Login
+    // already lowercases on its hash key; reset must too, otherwise
+    // an attacker can rotate Victim@/VICTIM@/victim@ to multiply the
+    // throttle bucket. The User.email column itself is stored as-is,
+    // and Prisma's findUnique is case-sensitive — so DB lookups still
+    // honour whatever casing the user registered with. The actual
+    // collision risk is enumeration via throttle bucket, not DB miss.
+    const email = (emailRaw ?? '').trim().toLowerCase();
+    if (!email) return neutralResponse;
+    // Throttle BEFORE the DB read so the cost of the lookup itself
+    // can't be amplified by a flood.
+    const userKeyHash = this.passwordResetKey(email);
+    const cooldownKey = `auth:pwreset:cooldown:${userKeyHash}`;
+    const cooled = await this.redis.setNx(
+      cooldownKey,
+      '1',
+      PASSWORD_RESET_COOLDOWN_SECONDS,
+    );
+    if (!cooled) {
+      // Silently swallow — neutral response stays (no enumeration).
+      return neutralResponse;
+    }
+    const hourKey = `auth:pwreset:hourly:${userKeyHash}`;
+    const count = await this.redis.incrWithTtl(hourKey, 60 * 60);
+    if (count > PASSWORD_RESET_MAX_PER_HOUR) {
+      return neutralResponse;
+    }
+
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || user.deletedAt || user.isBanned) {
       return neutralResponse;
@@ -1338,10 +1389,30 @@ export class AuthService {
     return neutralResponse;
   }
 
+  /** Hash-truncated email key for the password-reset throttle. Same shape
+   *  as loginEmailHash so the keyspace is uniform. */
+  private passwordResetKey(email: string): string {
+    return crypto
+      .createHash('sha256')
+      .update(email)
+      .digest('hex')
+      .slice(0, 16);
+  }
+
   /**
    * Redeem a password-reset token and set a new password. Tokens are single-use
    * and expire after 1 hour. We compare by sha256 hash so the DB never stores
    * the raw token.
+   *
+   * Race semantics (pen-test track 3, finding A-01): two concurrent
+   * resets presenting the same token used to BOTH succeed — the read
+   * lived outside the $transaction and both writers fell through to
+   * unconditional updates. The result was a two-bump tokenVersion, two
+   * bcrypt-set passwords (last writer wins), and a phishing-friendly
+   * race window where an attacker who intercepted the email could
+   * out-race the legitimate user. Now the token is claimed via a
+   * conditional updateMany INSIDE the transaction; only the winning
+   * writer ever reaches the password update.
    */
   async resetPassword(rawToken: string, newPassword: string) {
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -1355,25 +1426,41 @@ export class AuthService {
     if (!user || user.deletedAt) {
       throw new BadRequestException('Link de redefinição inválido');
     }
+    // bcrypt outside the tx so the cost (≈150ms) doesn't hold the
+    // serializable lock; the claim below decides whether we actually use it.
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await this.prisma.$transaction([
-      this.prisma.user.update({
+    await this.prisma.$transaction(async (tx) => {
+      // Atomic single-use claim. The where-clause re-checks usedAt /
+      // expiresAt INSIDE the tx so a concurrent writer that also
+      // passed the outer findUnique check (line above) loses cleanly:
+      // updateMany returns count=0 and we throw. No password gets set
+      // and no tokenVersion bump.
+      const claim = await tx.passwordResetToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { usedAt: new Date() },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('Link de redefinição inválido ou expirado');
+      }
+      await tx.user.update({
         where: { id: user.id },
-        // Same tokenVersion bump as changePassword — password reset
-        // is specifically used to kick out an attacker who knows the
+        // Same tokenVersion bump as changePassword — password reset is
+        // specifically used to kick out an attacker who knows the
         // previous password, so every outstanding session MUST die.
         data: { passwordHash, tokenVersion: { increment: 1 } },
-      }),
-      this.prisma.passwordResetToken.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      }),
-      // Invalidate any other outstanding tokens for this user
-      this.prisma.passwordResetToken.updateMany({
+      });
+      // Invalidate any other outstanding tokens for this user so a
+      // duplicate reset link from the same flood can't be redeemed
+      // afterwards.
+      await tx.passwordResetToken.updateMany({
         where: { userId: user.id, usedAt: null, id: { not: record.id } },
         data: { usedAt: new Date() },
-      }),
-    ]);
+      });
+    });
     return { success: true, message: 'Senha redefinida com sucesso.' };
   }
 
@@ -1460,8 +1547,23 @@ export class AuthService {
     }
 
     const oldEmail = user.email;
-    await this.prisma.$transaction([
-      this.prisma.user.update({
+    // Same single-use-claim pattern as resetPassword (A-09 mirror of
+    // A-01). Two concurrent confirmations of the same link used to
+    // bump tokenVersion twice; the conditional updateMany makes only
+    // one writer reach the user.update + email-change row.
+    await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.emailChangeToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        data: { usedAt: new Date() },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('Link inválido ou expirado.');
+      }
+      await tx.user.update({
         where: { id: user.id },
         // tokenVersion bump invalidates every outstanding access +
         // refresh token minted against the previous email. An attacker
@@ -1469,17 +1571,13 @@ export class AuthService {
         // cannot keep using it once the owner confirms the change —
         // the next request hits JwtStrategy's ver check and gets a 401.
         data: { email: record.newEmail, tokenVersion: { increment: 1 } },
-      }),
-      this.prisma.emailChangeToken.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      }),
+      });
       // Invalidate any outstanding password-reset tokens — old email no longer owns the account
-      this.prisma.passwordResetToken.updateMany({
+      await tx.passwordResetToken.updateMany({
         where: { userId: user.id, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-    ]);
+      });
+    });
 
     // Notify the previous address so the user can react quickly if compromised
     this.emailService
@@ -1505,7 +1603,18 @@ export class AuthService {
       );
     }
 
-    if (setupKey !== envKey) {
+    // Constant-time compare. The naive !== leaks a per-byte timing
+    // signal that lets an attacker recover the setup key one byte at
+    // a time over enough requests (pen-test track 3 finding A-10).
+    // Bypassing length-mismatch fast-path with byteLength is required
+    // — timingSafeEqual throws on length mismatch, which is itself a
+    // length-disclosure; we collapse that to a generic 401.
+    const keyBuf = Buffer.from(setupKey ?? '', 'utf8');
+    const envBuf = Buffer.from(envKey, 'utf8');
+    const ok =
+      keyBuf.length === envBuf.length &&
+      crypto.timingSafeEqual(keyBuf, envBuf);
+    if (!ok) {
       throw new UnauthorizedException('Chave de setup inválida.');
     }
 
