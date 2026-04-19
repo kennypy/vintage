@@ -139,6 +139,17 @@ async function bootstrap() {
           formAction: ["'self'"],
           frameAncestors: ["'none'"],
           upgradeInsecureRequests: nodeEnv === 'production' ? [] : null,
+          // CSP violation telemetry. Without a report endpoint CSP
+          // is flying blind — a new deploy that tries to load from
+          // an un-allowlisted CDN, or an XSS probe trying to run
+          // inline script, goes unnoticed. `report-uri` is
+          // deprecated but still honoured by every current browser;
+          // the modern `report-to` directive would pair with a
+          // separate `Report-To` / `Reporting-Endpoints` header
+          // outside of helmet's CSP option. Start with report-uri
+          // for coverage breadth; graduate to report-to once we're
+          // scraping the endpoint's log lines routinely.
+          'report-uri': ['/api/v1/csp-report'],
         },
       },
       crossOriginEmbedderPolicy: true,
