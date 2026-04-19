@@ -26,7 +26,7 @@
     "expo-file-system": "~19.0.21",
     "expo-image": "^55.0.8",
     "expo-image-picker": "~17.0.10",
-    "expo-linking": "~8.0.11",
+    "expo-linking": "~55.0.13",
     "expo-local-authentication": "~17.0.8",
     "expo-navigation-bar": "~5.0.10",
     "expo-notifications": "~0.32.16",
