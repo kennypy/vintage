@@ -23,7 +23,7 @@ jobs:
   gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Scan the full history on PRs so a secret buried in an
           # earlier commit is still caught — gitleaks will otherwise
