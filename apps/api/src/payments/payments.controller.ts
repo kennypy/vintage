@@ -5,8 +5,11 @@ import {
   Param,
   Body,
   Headers,
+  Req,
   UseGuards,
+  type RawBodyRequest,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -71,10 +74,16 @@ export class PaymentsController {
   @ApiResponse({ status: 401, description: 'Assinatura inválida' })
   @ApiResponse({ status: 400, description: 'Payload inválido' })
   handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
     @Body() payload: Record<string, unknown>,
     @Headers('x-signature') signature?: string,
   ) {
-    return this.paymentsService.handleWebhook(payload, signature);
+    // HMAC verification MUST run on the exact bytes Mercado Pago signed.
+    // main.ts opted into rawBody capture so req.rawBody contains those
+    // bytes; passing the parsed JSON would let an attacker forge a
+    // payload whose stringified form happens to match a known signature.
+    const rawBody = req.rawBody;
+    return this.paymentsService.handleWebhook(rawBody, payload, signature);
   }
 
   @Get(':id')

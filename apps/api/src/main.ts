@@ -24,7 +24,13 @@ function runMigrations() {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true enables req.rawBody on routes that ask for it
+  // (@RawBodyRequest). Required for HMAC-SHA256 webhook signature
+  // verification — signatures are computed against the exact bytes
+  // the sender transmitted, and re-stringifying the parsed JSON would
+  // re-order keys / change spacing and break verification (or, worse,
+  // accept a forged payload whose stringified form happened to match).
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
   const nodeEnv = config.get<string>('NODE_ENV', 'development');

@@ -184,37 +184,37 @@ describe('PaymentsService', () => {
   });
 
   describe('handleWebhook', () => {
+    // rawBody is the bytes-on-the-wire used for HMAC verification; we
+    // fake it here by re-serialising the parsed payload since the spec
+    // exercises the service's branches, not the HTTP layer's rawBody
+    // capture (that lives in payments.controller).
+    const rawOf = (payload: unknown) => Buffer.from(JSON.stringify(payload));
+
     it('should return received: true for valid webhook', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
       mockMercadoPago.getPaymentStatus.mockResolvedValue({ status: 'approved' });
+      const body = { action: 'payment.updated', data: { id: 'pay-1' } };
 
-      const result = await service.handleWebhook(
-        { action: 'payment.updated', data: { id: 'pay-1' } },
-        'valid-sig',
-      );
+      const result = await service.handleWebhook(rawOf(body), body, 'valid-sig');
 
       expect(result).toEqual({ received: true });
     });
 
     it('should reject webhook with invalid signature', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(false);
+      const body = { action: 'payment.updated', data: { id: 'pay-1' } };
 
       await expect(
-        service.handleWebhook(
-          { action: 'payment.updated', data: { id: 'pay-1' } },
-          'bad-sig',
-        ),
+        service.handleWebhook(rawOf(body), body, 'bad-sig'),
       ).rejects.toThrow();
     });
 
     it('should process payment.updated action', async () => {
       mockMercadoPago.verifyWebhookSignature.mockReturnValue(true);
       mockMercadoPago.getPaymentStatus.mockResolvedValue({ id: 'pay-1', status: 'approved' });
+      const body = { action: 'payment.updated', data: { id: 'pay-1' } };
 
-      await service.handleWebhook(
-        { action: 'payment.updated', data: { id: 'pay-1' } },
-        'valid-sig',
-      );
+      await service.handleWebhook(rawOf(body), body, 'valid-sig');
 
       expect(mockMercadoPago.getPaymentStatus).toHaveBeenCalledWith('pay-1');
     });
