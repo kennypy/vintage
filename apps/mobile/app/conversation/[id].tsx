@@ -23,7 +23,15 @@ import { getToken } from '../../src/services/api';
 import { getMessages, sendMessage, Message } from '../../src/services/messages';
 import { getDemoMessages, addDemoMessage } from '../../src/services/demoStore';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
+// EXPO_PUBLIC_API_URL includes the REST prefix (e.g. `.../api/v1`). Socket.IO
+// treats the path segment of the URL as the namespace, so passing the full
+// value here makes the client ask for namespace `/api/v1/chat` instead of
+// `/chat` — the server rejects it and real-time messaging silently dies.
+// Strip a trailing `/api/v<n>` (and any trailing slash) before handing the
+// origin to `io()`; the `/chat` namespace is appended below.
+const SOCKET_ORIGIN = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001')
+  .replace(/\/+$/, '')
+  .replace(/\/api\/v\d+$/, '');
 
 const formatBrl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -71,7 +79,7 @@ export default function ConversationScreen() {
       const token = await getToken();
       if (!token || !id) return;
 
-      socket = io(`${API_BASE_URL}/chat`, {
+      socket = io(`${SOCKET_ORIGIN}/chat`, {
         auth: { token },
         transports: ['websocket'],
         reconnection: true,
