@@ -37,12 +37,15 @@ const securityHeaders = [
       "default-src 'self'",
       scriptSrc,
       "style-src 'self' 'unsafe-inline'",
-      // No `blob:` — we don't render any user-supplied blob/data URIs
-      // anywhere. Allowing blob: would let stored XSS pop an attacker-
-      // controlled image (which becomes a vector for phishing overlays
-      // when combined with a CSS exploit). Re-add behind a strict scope
-      // if a future feature legitimately needs it.
-      "img-src 'self' https:",
+      // `blob:` is required for file-upload previews — the sell page
+      // wraps user-selected File objects in URL.createObjectURL() before
+      // they're uploaded to S3. blob: URLs are same-origin by definition
+      // (browsers refuse cross-origin blob references), so the stored-XSS
+      // risk is limited to the attacker's existing XSS capability — they
+      // can already render arbitrary content once they have script
+      // execution; allowing blob: for images doesn't widen that surface
+      // meaningfully. Kept out of script-src where it genuinely would.
+      "img-src 'self' https: blob:",
       "font-src 'self' data:",
       connectSrc,
       "frame-ancestors 'none'",
