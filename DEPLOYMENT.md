@@ -196,6 +196,8 @@ simultâneas).
      MERCADOPAGO_PAYOUT_ENABLED="false" \
      CORREIOS_TOKEN="..." \
      JADLOG_TOKEN="..." \
+     KANGU_API_KEY="..." \
+     PEGAKI_API_KEY="..." \
      NFE_API_KEY="..." \
      RESEND_API_KEY="re_..." \
      EMAIL_FROM="Vintage.br <noreply@vintage.br>" \
