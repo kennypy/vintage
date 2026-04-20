@@ -87,6 +87,6 @@ export default [
     },
   },
   {
-    ignores: ['.next/', 'node_modules/', 'out/', '**/*.js'],
+    ignores: ['.next/', 'node_modules/', 'out/', '**/*.js', 'next.config.mjs'],
   },
 ];
