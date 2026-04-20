@@ -62,9 +62,21 @@ export class CpfVaultService {
   private parseKey(raw: string, name: string, nodeEnv: string): Buffer {
     if (raw) {
       if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
-        throw new Error(
-          `${name} must be exactly 64 hex characters (32 bytes). Run \`openssl rand -hex 32\` to generate.`,
+        // Malformed value (common on fresh dev checkouts where .env.example
+        // ships `CHANGE_ME_IN_PRODUCTION` placeholders). In prod we refuse
+        // to boot — wrong-shape crypto key is a config bug, not a warning.
+        // In dev, fall through to the ephemeral-key path with a loud log
+        // so the API can still start and the developer can test flows
+        // that don't care about CPF persistence.
+        if (nodeEnv === 'production') {
+          throw new Error(
+            `${name} must be exactly 64 hex characters (32 bytes). Run \`openssl rand -hex 32\` to generate.`,
+          );
+        }
+        this.logger.warn(
+          `${name} is set but not a valid 64-hex string — using ephemeral per-process key (dev only). Run \`openssl rand -hex 32\` and set it in .env to persist CPF values across restarts.`,
         );
+        return crypto.randomBytes(32);
       }
       return Buffer.from(raw, 'hex');
     }

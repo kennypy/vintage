@@ -892,4 +892,76 @@ export class UsersService {
 
     return { success: true, message: `Usuário ${user.name} promovido a administrador.` };
   }
+
+  // ── Notification preferences ──────────────────────────────────────────
+  //
+  // Stored flat on User (9 bool columns) rather than a separate table —
+  // the set is fixed, there's no history requirement, and every pref
+  // lookup happens in the same query as the user row anyway.
+  //
+  // Web's UI uses flat field names (orders, messages, ...); DB uses
+  // `notif`-prefixed names to avoid collision and keep them grouped at
+  // the end of the User row. The mapping is explicit below so a rename
+  // on either side doesn't silently drift.
+  async getNotificationPreferences(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        pushEnabled: true,
+        emailEnabled: true,
+        notifOrders: true,
+        notifMessages: true,
+        notifOffers: true,
+        notifFollowers: true,
+        notifPriceDrops: true,
+        notifPromotions: true,
+        notifNews: true,
+      },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    return {
+      pushEnabled: user.pushEnabled,
+      emailEnabled: user.emailEnabled,
+      orders: user.notifOrders,
+      messages: user.notifMessages,
+      offers: user.notifOffers,
+      followers: user.notifFollowers,
+      priceDrops: user.notifPriceDrops,
+      promotions: user.notifPromotions,
+      news: user.notifNews,
+    };
+  }
+
+  async updateNotificationPreferences(
+    userId: string,
+    patch: {
+      pushEnabled?: boolean;
+      emailEnabled?: boolean;
+      orders?: boolean;
+      messages?: boolean;
+      offers?: boolean;
+      followers?: boolean;
+      priceDrops?: boolean;
+      promotions?: boolean;
+      news?: boolean;
+    },
+  ) {
+    // Build the DB patch only with fields the client actually sent.
+    // Prisma treats undefined as "leave unchanged", so we could hand it
+    // `{ notifOrders: patch.orders }` directly — but being explicit keeps
+    // the column rename mapping in one place (grep-friendly).
+    const data: Record<string, boolean> = {};
+    if (patch.pushEnabled !== undefined) data.pushEnabled = patch.pushEnabled;
+    if (patch.emailEnabled !== undefined) data.emailEnabled = patch.emailEnabled;
+    if (patch.orders !== undefined) data.notifOrders = patch.orders;
+    if (patch.messages !== undefined) data.notifMessages = patch.messages;
+    if (patch.offers !== undefined) data.notifOffers = patch.offers;
+    if (patch.followers !== undefined) data.notifFollowers = patch.followers;
+    if (patch.priceDrops !== undefined) data.notifPriceDrops = patch.priceDrops;
+    if (patch.promotions !== undefined) data.notifPromotions = patch.promotions;
+    if (patch.news !== undefined) data.notifNews = patch.news;
+
+    await this.prisma.user.update({ where: { id: userId }, data });
+    return this.getNotificationPreferences(userId);
+  }
 }

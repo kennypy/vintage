@@ -13,6 +13,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 import { SetCpfDto } from './dto/set-cpf.dto';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('users')
@@ -261,5 +262,30 @@ export class UsersController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.usersService.toggleVacationMode(user.id, body.enabled, body.untilDate);
+  }
+
+  // --- Notification Preferences ---
+
+  @Get('users/me/notification-preferences')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Obter preferências de notificação do usuário' })
+  getNotificationPreferences(@CurrentUser() user: AuthUser) {
+    return this.usersService.getNotificationPreferences(user.id);
+  }
+
+  @Patch('users/me/notification-preferences')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Atualizar preferências de notificação',
+    description:
+      'Aceita atualização parcial (PATCH). E-mails transacionais — recibo de pedido, verificação, recuperação de senha, mudança de e-mail, código de exclusão de conta — ignoram emailEnabled por design, já que são necessários para uso do serviço.',
+  })
+  updateNotificationPreferences(
+    @Body() dto: UpdateNotificationPreferencesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.updateNotificationPreferences(user.id, dto);
   }
 }
