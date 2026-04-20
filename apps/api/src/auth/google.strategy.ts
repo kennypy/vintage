@@ -14,11 +14,19 @@ export interface GoogleProfile {
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
   constructor(config: ConfigService) {
     const nodeEnv = config.get<string>('NODE_ENV', 'development');
+    const isDev = nodeEnv !== 'production';
     // Dev-only fallback for API URL — production MUST set GOOGLE_CALLBACK_URL or API_URL.
-    const apiUrlFallback = nodeEnv !== 'production' ? 'http://localhost:3001' : '';
+    const apiUrlFallback = isDev ? 'http://localhost:3001' : '';
+    // Dev-only fallback for client credentials so the API boots on fresh
+    // local machines that haven't provisioned a Google OAuth app yet.
+    // Attempting the Google flow with these values will fail at Google —
+    // but email/password login is unaffected, which is what matters for
+    // local dev. Production uses an empty fallback so passport-google-oauth20
+    // throws and we fail fast instead of booting with bogus creds.
+    const credentialFallback = isDev ? 'dev-noop' : '';
     super({
-      clientID: config.get<string>('GOOGLE_CLIENT_ID', ''),
-      clientSecret: config.get<string>('GOOGLE_CLIENT_SECRET', ''),
+      clientID: config.get<string>('GOOGLE_CLIENT_ID') || credentialFallback,
+      clientSecret: config.get<string>('GOOGLE_CLIENT_SECRET') || credentialFallback,
       callbackURL: config.get<string>(
         'GOOGLE_CALLBACK_URL',
         `${config.get<string>('API_URL', apiUrlFallback)}/api/v1/auth/google/callback`,
