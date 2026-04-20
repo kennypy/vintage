@@ -84,6 +84,10 @@ Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch m
 ### Pré-requisitos
 - Node.js >= 20
 - Docker + Docker Compose
+- **Windows**: Git for Windows (vem com git-bash) **OU** WSL2. O repo já
+  normaliza line endings para LF via `.gitattributes`, então basta clonar
+  com qualquer Git recente. Os comandos `npm run ...` abaixo rodam em
+  PowerShell, cmd.exe, git-bash e WSL sem alteração.
 
 ### Setup
 
@@ -107,6 +111,10 @@ npx ts-node prisma/seed.ts
 cd ../..
 npm run dev
 ```
+
+> **Windows**: se `cd apps/api && ...` falhar no PowerShell antigo, rode
+> cada comando separadamente. `&&` funciona em PowerShell 7+ e cmd.exe
+> por padrão. Nenhum passo depende de bash.
 
 ### Acessos locais
 
@@ -157,11 +165,15 @@ npm run lint         # Lint em todos os pacotes
 npm run test         # Rodar testes
 npm run format       # Formatar código com Prettier
 
-./scripts/ci-parity.sh          # OBRIGATÓRIO antes de cada push —
-                                 # reproduz .github/workflows/ci.yml
-                                 # com caches limpos + pipefail em
-                                 # todos os passos. Ver CLAUDE.md.
+./scripts/ci-parity.sh          # OBRIGATÓRIO antes de cada push (Linux/macOS) —
+                                 # reproduz .github/workflows/ci.yml com caches
+                                 # limpos + pipefail em todos os passos. Ver CLAUDE.md.
 ./scripts/ci-parity.sh --fast   # iteração local (mantém node_modules)
+
+npm run ci:parity               # Windows / portátil — runner Node equivalente
+                                 # (scripts/ci-parity.mjs). Mesmos passos,
+                                 # mesma ordem, sem dependência de bash.
+npm run ci:parity:fast          # idem, --fast (mantém node_modules)
 ```
 
 ## Documentação

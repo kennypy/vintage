@@ -1,0 +1,50 @@
+# Normalize line endings on checkout so the repo behaves identically on
+# Linux, macOS, and Windows. Without this file, Git on Windows rewrites
+# every newline to CRLF, which breaks:
+#   - `#!/usr/bin/env bash` shebangs (become "bash\r", not found)
+#   - heredocs and awk/sed scripts that depend on exact byte boundaries
+#   - line-by-line reads in `scripts/ci-parity.sh`
+#
+# Policy: auto-detect text files and store them LF in the repo. Shell
+# scripts and other Unix-only formats are force-LF on checkout too, so a
+# Windows dev can still invoke them via git-bash or WSL without corruption.
+* text=auto eol=lf
+
+# Shell / Unix executables — MUST be LF even on Windows checkouts.
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile  text eol=lf
+*.dockerfile text eol=lf
+
+# Node / TypeScript / config — LF everywhere.
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.prisma    text eol=lf
+
+# Windows-only formats (keep CRLF so Windows tools don't choke).
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binary — never touched.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.zip       binary
+*.jar       binary
+*.keystore  binary
+*.jks       binary
+*.p8        binary
+*.p12       binary
