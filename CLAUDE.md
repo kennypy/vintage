@@ -30,9 +30,9 @@ packages/shared/ — Shared types, utils, validation
 
 ## Development Workflow
 
-### MANDATORY: Pre-Push Gate — `./scripts/ci-parity.sh`
+### MANDATORY: Pre-Push Gate — `./scripts/ci-parity.sh` (or `npm run ci:parity`)
 
-**Every `git push` MUST be preceded by a green run of `./scripts/ci-parity.sh`. One command. No exceptions.**
+**Every `git push` MUST be preceded by a green run of the pre-push gate. One command. No exceptions.**
 
 ```bash
 # Full run — mirrors .github/workflows/ci.yml exactly: nukes every cache,
@@ -44,6 +44,13 @@ packages/shared/ — Shared types, utils, validation
 # clears .turbo and apps/web/.next. CI does not have a fast mode;
 # NEVER trust --fast as the final pre-push gate.
 ./scripts/ci-parity.sh --fast
+
+# Windows / portable equivalent — same steps, same order, implemented in
+# Node so it runs without bash (PowerShell, cmd.exe, git-bash, WSL all OK).
+# The Node runner (scripts/ci-parity.mjs) and the .sh runner MUST stay in
+# sync: adding a step to one means adding it to the other in the same commit.
+npm run ci:parity         # full run
+npm run ci:parity:fast    # --fast
 ```
 
 Exit `0` = safe to push. Exit `1` = do not push; the failing step's last 40 log lines are printed to stderr and the full log is in `.ci-parity-logs/`.

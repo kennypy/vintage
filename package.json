@@ -15,7 +15,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "android": "expo run:android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "ci:parity": "node scripts/ci-parity.mjs",
+    "ci:parity:fast": "node scripts/ci-parity.mjs --fast"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",

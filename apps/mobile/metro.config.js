@@ -84,9 +84,13 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 
 // Block duplicate React copies that may exist inside nested node_modules
 // (e.g. a dependency that ships its own react copy).
+// `[/\\]` matches both POSIX `/` and Windows `\` — Metro passes the native
+// path separator in file paths when the bundler runs on Windows, so regexes
+// that only allow `/` silently match nothing there and duplicate copies
+// leak through. Keep the separator class escaped this way.
 config.resolver.blockList = [
-  /node_modules\/.*\/node_modules\/react\/.*/,
-  /node_modules\/.*\/node_modules\/react-native\/.*/,
+  /node_modules[/\\].*[/\\]node_modules[/\\]react[/\\].*/,
+  /node_modules[/\\].*[/\\]node_modules[/\\]react-native[/\\].*/,
 ];
 
 // Also register as extraNodeModules as a secondary safety net.

@@ -12,7 +12,7 @@ import helmet from 'helmet';
 // `import = require` emits a plain `require()` call and works on every
 // Node + TS combo we ship.
 import cookieParser = require('cookie-parser');
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
@@ -21,14 +21,28 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 const logger = new Logger('Bootstrap');
 
 function runMigrations() {
-  try {
-    const schemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma');
-    execSync(`npx prisma migrate deploy --schema="${schemaPath}"`, {
-      stdio: 'inherit',
-      timeout: 60_000,
-    });
-  } catch (e) {
-    logger.error(`prisma migrate deploy failed: ${String(e).slice(0, 300)}`);
+  // spawnSync with `shell: true` so Windows can resolve `npx` → `npx.cmd`
+  // via PATHEXT (Node won't find a bare `npx` on Win32 otherwise). The
+  // schemaPath is wrapped in double quotes because `path.join` emits
+  // backslash separators on Windows and the install path may contain
+  // spaces (e.g. `C:\Users\John Doe\...`). cmd.exe treats backslash as a
+  // literal inside double quotes, and posix shells never see a backslash
+  // path here, so the same quoted form is safe on every platform.
+  const schemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma');
+  const result = spawnSync(
+    `npx prisma migrate deploy --schema="${schemaPath}"`,
+    { stdio: 'inherit', timeout: 60_000, shell: true },
+  );
+  if (result.error) {
+    logger.error(
+      `prisma migrate deploy failed to spawn: ${String(result.error).slice(0, 300)}`,
+    );
+    return;
+  }
+  if (result.status !== 0) {
+    logger.error(
+      `prisma migrate deploy exited with code ${result.status ?? 'null'}`,
+    );
     // Non-fatal in development — server still starts, stale columns cause runtime errors
   }
 }
