@@ -48,4 +48,4 @@ EXPOSE 3001
 
 USER vintage
 
-CMD ["node", "apps/api/dist/main.js"]
+CMD ["node", "apps/api/dist/src/main.js"]

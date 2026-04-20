@@ -5,7 +5,7 @@ Vintage.br is a Vinted-style peer-to-peer secondhand fashion marketplace for Bra
 
 ## Tech Stack
 - **Mobile**: React Native (Expo) — PRIMARY platform
-- **Web**: Next.js 14+ (TypeScript) — secondary
+- **Web**: Next.js 15 (App Router, TypeScript) — secondary
 - **API**: NestJS (TypeScript) + Prisma ORM
 - **DB**: PostgreSQL + Redis
 - **Search**: Meilisearch
@@ -96,7 +96,7 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 | `Cannot find module '@prisma/client'` | Prisma not generated | Run `npx prisma generate` in `apps/api/` |
 | Unused variable error | ESLint strict mode | Prefix with `_` (e.g., `_id`, `_body`, `_req`) |
 | Import error for `.css` or assets | TypeScript strict | Ensure `next-env.d.ts` exists for web, proper tsconfig for each app |
-| `useContext` null error in Next.js build | React 19 + Next.js pages router conflict | Web app MUST use React 18.3.x + Next.js 14.x. Never upgrade to React 19. |
+| `useContext` null error in Next.js build | Historical React 19 + Next.js **pages router** conflict | Web migrated to the App Router (`apps/web/src/app/`) and is now on `next@15.5.x` + `react@19.1.x`. Do NOT bring back the old pages router for top-level pages. |
 | `peer dep` conflict on install | Mismatched ESLint / Next versions | Web uses standalone `eslint.config.mjs`, does NOT need `eslint-config-next` |
 | Stale `node_modules` after version change | npm didn't update hoisted deps | `rm -rf node_modules && npm ci` (NEVER delete `package-lock.json` — CI uses `npm ci` and needs a matching lockfile) |
 | "Definition for rule X was not found" on CI lint | Added `// eslint-disable-next-line X` for a rule the package's ESLint config doesn't register | Either register the plugin that provides the rule, or remove the suppression — the rule isn't firing anyway |
@@ -117,9 +117,9 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - Web and shared use echo placeholders until tests are added
 
 ### Pinned Versions (DO NOT CHANGE)
-- **Web app**: `next@14.2.x` + `react@18.3.1` + `react-dom@18.3.1` — React 19 breaks the Next.js pages router error pages
-- **Mobile app**: `react@18.3.1` (pinned by Expo)
-- **ESLint**: v9 flat config — do NOT add `eslint-config-next` (requires ESLint 8)
+- **Web app**: `next@15.5.x` + `react@19.1.x` + `react-dom@19.1.x` — App Router only (`apps/web/src/app/`). The old React 19 + pages-router conflict does NOT apply under the App Router; do not downgrade to Next 14 / React 18 thinking there's a bug to work around.
+- **Mobile app**: `react@19.1.x` + `react-native@0.81.x` (Expo SDK 54 set).
+- **ESLint**: v9 flat config — do NOT add `eslint-config-next` (requires ESLint 8).
 
 ### README Maintenance
 - **Always update `README.md`** when making changes that affect the project structure, setup instructions, available scripts, API modules, database models, or tech stack
