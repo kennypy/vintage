@@ -118,9 +118,9 @@ run_step() {
     printf "     ${RED}FAIL (exit %d, %ds)${NC} — log: %s\n" \
            "$exit_code" "$((end - start))" "${log#"$REPO_ROOT/"}"
     echo ""
-    printf "${RED}---- last 40 lines of %s ----${NC}\n" "${log#"$REPO_ROOT/"}"
+    printf -- "${RED}---- last 40 lines of %s ----${NC}\n" "${log#"$REPO_ROOT/"}"
     tail -40 "$log" || true
-    printf "${RED}---- end ----${NC}\n\n"
+    printf -- "${RED}---- end ----${NC}\n\n"
     FAIL=1
     FAILED_STEPS+=("$name")
   fi
