@@ -146,7 +146,7 @@ export default function ConversationPage() {
     );
   }
 
-  if (!conversation) return null;
+  if (!conversation || !conversation.otherUser) return null;
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>

@@ -285,6 +285,7 @@ export class OrdersService {
         'Nova venda!',
         `${order.buyer.name} comprou "${order.listing.title}"`,
         { orderId: order.id },
+        'orders',
       )
       .catch(() => {});
 
@@ -441,6 +442,7 @@ export class OrdersService {
         'Pedido cancelado',
         'O comprador cancelou o pedido antes do pagamento. O anúncio voltou a ficar ativo.',
         { orderId: order.id },
+        'orders',
       )
       .catch(() => {});
 
@@ -491,6 +493,7 @@ export class OrdersService {
         'Pedido enviado!',
         `Seu pedido "${(updated as any).listing?.title ?? 'item'}" foi enviado. Rastreio: ${dto.trackingCode}`,
         { orderId: updated.id, trackingCode: dto.trackingCode },
+        'orders',
       )
       .catch(() => {});
 
@@ -564,6 +567,7 @@ export class OrdersService {
         'Pedido entregue!',
         `Seu pedido "${updated.listing.title}" foi entregue. Confirme o recebimento.`,
         { orderId: updated.id },
+        'orders',
       )
       .catch(() => {});
 
@@ -671,6 +675,7 @@ export class OrdersService {
         'Pagamento liberado!',
         `R$ ${Number(result.itemPriceBrl).toFixed(2).replace('.', ',')} da venda "${result.listing.title}" foi creditado na sua carteira.`,
         { orderId: result.id },
+        'orders',
       )
       .catch(() => {});
 

@@ -90,6 +90,30 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  // ── Notification preferences ─────────────────────────────────────────
+  // Channel toggles: pushEnabled silences mobile Expo pushes; emailEnabled
+  // silences marketing/notification emails. Transactional emails (order
+  // receipts, verification, password reset, email change, account
+  // deletion code) ignore emailEnabled — users must receive those to use
+  // the service. Push has no transactional bypass: a user who turned off
+  // push opted out of all push.
+  //
+  // Category toggles: each cover a class of notification (see
+  // NotificationCategory in notifications.service.ts). If a category is
+  // off, both the in-app bell entry and the push are suppressed.
+  //
+  // All default true so existing users (pre-migration) keep receiving
+  // everything until they opt out.
+  pushEnabled        Boolean   @default(true)
+  emailEnabled       Boolean   @default(true)
+  notifOrders        Boolean   @default(true)
+  notifMessages      Boolean   @default(true)
+  notifOffers        Boolean   @default(true)
+  notifFollowers     Boolean   @default(true)
+  notifPriceDrops    Boolean   @default(true)
+  notifPromotions    Boolean   @default(true)
+  notifNews          Boolean   @default(true)
+
   // Relations
   emailVerificationTokens EmailVerificationToken[]
   refreshTokens     RefreshToken[]
