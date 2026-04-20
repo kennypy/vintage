@@ -12,7 +12,7 @@ Vintage.br é uma plataforma peer-to-peer onde pessoas compram e vendem roupas, 
 | Camada | Tecnologia | Descrição |
 |--------|-----------|-----------|
 | Mobile (P1) | React Native (Expo) | App iOS + Android — plataforma principal |
-| Web (P2) | Next.js 14 + Tailwind CSS | Site secundário |
+| Web (P2) | Next.js 15 (App Router) + Tailwind CSS | Site secundário |
 | API | NestJS + Prisma + PostgreSQL | Backend com 30+ módulos |
 | Shared | TypeScript package | Tipos, constantes, validação CPF/CEP |
 | Infra | Docker Compose | Postgres 16, Redis 7, Meilisearch |
@@ -26,7 +26,7 @@ vintage/
 │   ├── mobile/           # React Native (Expo) — iOS + Android
 │   │   ├── app/          # Expo Router (16+ telas: tabs, auth, orders, offers, wallet, chat, etc.)
 │   │   └── src/          # 8 services API, theme, hooks, contexts, components
-│   ├── web/              # Next.js 14 + Tailwind CSS
+│   ├── web/              # Next.js 15 (App Router) + Tailwind CSS
 │   │   └── src/          # 8 páginas (home, listings, sell, auth, profile) + componentes + testes
 │   └── api/              # NestJS backend
 │       ├── prisma/       # Schema (35+ models) + seed
