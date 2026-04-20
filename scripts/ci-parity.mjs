@@ -111,11 +111,12 @@ function runStep(name, cmd, extraEnv = {}) {
           `     ${c.red}FAIL (exit ${code}, ${elapsed}s)${c.nc} — log: ${logPath.replace(REPO_ROOT + '\\', '').replace(REPO_ROOT + '/', '')}\n\n`,
         );
         process.stdout.write(`${c.red}---- last 40 lines of log ----${c.nc}\n`);
-        tail(logPath, 40);
-        process.stdout.write(`${c.red}---- end ----${c.nc}\n\n`);
-        failed = 1;
-        failedSteps.push(name);
-        resolveStep();
+        tail(logPath, 40).then(() => {
+          process.stdout.write(`${c.red}---- end ----${c.nc}\n\n`);
+          failed = 1;
+          failedSteps.push(name);
+          resolveStep();
+        });
       }
     });
 
