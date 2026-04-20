@@ -17,6 +17,23 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  user: {
+    findUnique: jest.fn(),
+  },
+};
+
+// All-on default, used in tests that don't exercise the preference
+// gating. Each flag defaults to true in the migration so this matches
+// what every user row looks like immediately after upgrade.
+const ALL_ON_PREFS = {
+  pushEnabled: true,
+  notifOrders: true,
+  notifMessages: true,
+  notifOffers: true,
+  notifFollowers: true,
+  notifPriceDrops: true,
+  notifPromotions: true,
+  notifNews: true,
 };
 
 describe('NotificationsService', () => {
@@ -119,7 +136,7 @@ describe('NotificationsService', () => {
   });
 
   describe('createNotification', () => {
-    it('should create a notification', async () => {
+    it('should create a notification with all prefs on (baseline)', async () => {
       const notification = {
         id: 'notif-1',
         userId: 'user-1',
@@ -128,6 +145,7 @@ describe('NotificationsService', () => {
         body: 'Você recebeu um novo pedido',
         data: { orderId: 'order-1' },
       };
+      mockPrisma.user.findUnique.mockResolvedValue(ALL_ON_PREFS);
       mockPrisma.notification.create.mockResolvedValue(notification);
 
       const result = await service.createNotification(
@@ -148,6 +166,90 @@ describe('NotificationsService', () => {
           data: { orderId: 'order-1' },
         },
       });
+      expect(mockPushService.sendPushNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null and skips both DB + push when the category is off', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...ALL_ON_PREFS,
+        notifOrders: false,
+      });
+
+      const result = await service.createNotification(
+        'user-1',
+        'order',
+        'Nova venda!',
+        'body',
+        { orderId: 'o1' },
+        'orders',
+      );
+
+      expect(result).toBeNull();
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockPushService.sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it('creates in-app but skips push when pushEnabled=false', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        ...ALL_ON_PREFS,
+        pushEnabled: false,
+      });
+      mockPrisma.notification.create.mockResolvedValue({ id: 'n1' });
+
+      await service.createNotification(
+        'user-1',
+        'order',
+        'Nova venda!',
+        'body',
+        { orderId: 'o1' },
+        'orders',
+      );
+
+      expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+      expect(mockPushService.sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it('always-delivers system notifications (no category) regardless of category flags', async () => {
+      // All category flags off — should NOT prevent a security/system alert.
+      mockPrisma.user.findUnique.mockResolvedValue({
+        pushEnabled: true,
+        notifOrders: false,
+        notifMessages: false,
+        notifOffers: false,
+        notifFollowers: false,
+        notifPriceDrops: false,
+        notifPromotions: false,
+        notifNews: false,
+      });
+      mockPrisma.notification.create.mockResolvedValue({ id: 'n1' });
+
+      await service.createNotification(
+        'user-1',
+        'NEW_DEVICE_LOGIN',
+        'Novo login detectado',
+        'body',
+        {},
+      );
+
+      expect(mockPrisma.notification.create).toHaveBeenCalledTimes(1);
+      expect(mockPushService.sendPushNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null when the user no longer exists', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      const result = await service.createNotification(
+        'ghost-user',
+        'order',
+        't',
+        'b',
+        {},
+        'orders',
+      );
+
+      expect(result).toBeNull();
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(mockPushService.sendPushNotification).not.toHaveBeenCalled();
     });
   });
 });

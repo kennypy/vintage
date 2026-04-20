@@ -300,6 +300,118 @@ describe('UsersService', () => {
     });
   });
 
+  describe('notification preferences', () => {
+    // DB columns use notif-prefix to keep them grouped on the User row;
+    // the API response flattens them to match the web's NotificationPreferences
+    // shape. Both halves of the mapping exercised below.
+    const DB_ROW = {
+      pushEnabled: true,
+      emailEnabled: true,
+      notifOrders: true,
+      notifMessages: false,
+      notifOffers: true,
+      notifFollowers: true,
+      notifPriceDrops: false,
+      notifPromotions: true,
+      notifNews: true,
+    };
+
+    describe('getNotificationPreferences', () => {
+      it('flattens notif-prefixed DB columns to the web-facing shape', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(DB_ROW);
+
+        const result = await service.getNotificationPreferences('user-1');
+
+        expect(result).toEqual({
+          pushEnabled: true,
+          emailEnabled: true,
+          orders: true,
+          messages: false,
+          offers: true,
+          followers: true,
+          priceDrops: false,
+          promotions: true,
+          news: true,
+        });
+      });
+
+      it('throws NotFoundException when the user does not exist', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue(null);
+
+        await expect(
+          service.getNotificationPreferences('ghost'),
+        ).rejects.toThrow(NotFoundException);
+      });
+    });
+
+    describe('updateNotificationPreferences', () => {
+      it('applies only the fields present in the patch (flat → notif-prefix)', async () => {
+        mockPrisma.user.update.mockResolvedValue({});
+        mockPrisma.user.findUnique.mockResolvedValue({
+          ...DB_ROW,
+          notifOrders: false,
+          notifMessages: true,
+        });
+
+        await service.updateNotificationPreferences('user-1', {
+          orders: false,
+          messages: true,
+        });
+
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: { notifOrders: false, notifMessages: true },
+        });
+      });
+
+      it('passes channel toggles through unmapped', async () => {
+        mockPrisma.user.update.mockResolvedValue({});
+        mockPrisma.user.findUnique.mockResolvedValue({
+          ...DB_ROW,
+          pushEnabled: false,
+          emailEnabled: false,
+        });
+
+        await service.updateNotificationPreferences('user-1', {
+          pushEnabled: false,
+          emailEnabled: false,
+        });
+
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: { pushEnabled: false, emailEnabled: false },
+        });
+      });
+
+      it('returns the updated preferences in web-facing shape', async () => {
+        mockPrisma.user.update.mockResolvedValue({});
+        mockPrisma.user.findUnique.mockResolvedValue({
+          ...DB_ROW,
+          notifPromotions: false,
+        });
+
+        const result = await service.updateNotificationPreferences('user-1', {
+          promotions: false,
+        });
+
+        expect(result.promotions).toBe(false);
+        expect(result).toHaveProperty('orders');
+      });
+
+      it('ignores fields not in the patch (Prisma noop)', async () => {
+        mockPrisma.user.update.mockResolvedValue({});
+        mockPrisma.user.findUnique.mockResolvedValue(DB_ROW);
+
+        await service.updateNotificationPreferences('user-1', {});
+
+        expect(mockPrisma.user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: {},
+        });
+      });
+    });
+  });
+
   describe('setCpf', () => {
     // Real CPF with a valid check-digit (Modulo 11). Never use the 11-same-
     // digit masks (111…) — the validator correctly rejects those.

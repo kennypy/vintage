@@ -1,38 +1,10 @@
 import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Alert, Linking, ActivityIndicator } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { secureGet, secureSet } from '../../src/services/secureStorage';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { apiFetch } from '../../src/services/api';
-
-const NOTIF_PREFS_KEY = 'vintage_notif_prefs';
-
-interface NotifPrefs {
-  push: boolean;
-  email: boolean;
-  sms: boolean;
-}
-
-async function loadNotifPrefs(): Promise<NotifPrefs> {
-  try {
-    const raw = await secureGet(NOTIF_PREFS_KEY);
-    if (raw) return JSON.parse(raw) as NotifPrefs;
-  } catch (_e) {
-    // Return defaults if SecureStore unavailable
-  }
-  return { push: true, email: true, sms: false };
-}
-
-async function saveNotifPrefs(prefs: NotifPrefs): Promise<void> {
-  try {
-    await secureSet(NOTIF_PREFS_KEY, JSON.stringify(prefs));
-  } catch (_e) {
-    // Silently fail if SecureStore unavailable
-  }
-}
 
 export default function ConfiguracoesScreen() {
   const router = useRouter();
@@ -42,27 +14,9 @@ export default function ConfiguracoesScreen() {
   // row so they can link one before hitting a flow that requires it.
   const cpfMissing = !user?.cpf;
 
-  const [pushEnabled, setPushEnabled] = useState(true);
-  const [emailEnabled, setEmailEnabled] = useState(true);
-  const [smsEnabled, setSmsEnabled] = useState(false);
-  const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const darkMode = mode === 'dark' || (mode === 'system' && theme.isDark);
-
-  useEffect(() => {
-    loadNotifPrefs().then((prefs) => {
-      setPushEnabled(prefs.push);
-      setEmailEnabled(prefs.email);
-      setSmsEnabled(prefs.sms);
-      setPrefsLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!prefsLoaded) return;
-    saveNotifPrefs({ push: pushEnabled, email: emailEnabled, sms: smsEnabled });
-  }, [pushEnabled, emailEnabled, smsEnabled, prefsLoaded]);
 
   const handleToggleDark = (value: boolean) => {
     setMode(value ? 'dark' : 'light');
@@ -83,36 +37,14 @@ export default function ConfiguracoesScreen() {
     >
       <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Notificações</Text>
-        <View style={[styles.row, { borderBottomColor: theme.divider }]}>
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => router.push('/conta/notificacoes')}
+        >
           <Ionicons name="notifications-outline" size={22} color={theme.textSecondary} />
-          <Text style={[styles.rowLabel, { color: theme.text }]}>Notificações push</Text>
-          <Switch
-            value={pushEnabled}
-            onValueChange={setPushEnabled}
-            trackColor={{ true: colors.primary[500] }}
-            thumbColor={pushEnabled ? '#fff' : '#fff'}
-          />
-        </View>
-        <View style={[styles.row, { borderBottomColor: theme.divider }]}>
-          <Ionicons name="mail-outline" size={22} color={theme.textSecondary} />
-          <Text style={[styles.rowLabel, { color: theme.text }]}>E-mail</Text>
-          <Switch
-            value={emailEnabled}
-            onValueChange={setEmailEnabled}
-            trackColor={{ true: colors.primary[500] }}
-            thumbColor={emailEnabled ? '#fff' : '#fff'}
-          />
-        </View>
-        <View style={[styles.row, { borderBottomColor: theme.divider }]}>
-          <Ionicons name="chatbox-outline" size={22} color={theme.textSecondary} />
-          <Text style={[styles.rowLabel, { color: theme.text }]}>SMS</Text>
-          <Switch
-            value={smsEnabled}
-            onValueChange={setSmsEnabled}
-            trackColor={{ true: colors.primary[500] }}
-            thumbColor={smsEnabled ? '#fff' : '#fff'}
-          />
-        </View>
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Preferências de notificação</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
