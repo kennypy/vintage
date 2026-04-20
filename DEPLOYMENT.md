@@ -195,6 +195,7 @@ simultâneas).
      MERCADOPAGO_WEBHOOK_SECRET=$(openssl rand -hex 32) \
      MERCADOPAGO_PAYOUT_ENABLED="false" \
      CORREIOS_TOKEN="..." \
+     JADLOG_TOKEN="..." \
      NFE_API_KEY="..." \
      RESEND_API_KEY="re_..." \
      EMAIL_FROM="Vintage.br <noreply@vintage.br>" \
