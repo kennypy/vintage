@@ -13,6 +13,7 @@ import helmet from 'helmet';
 // Node + TS combo we ship.
 import cookieParser = require('cookie-parser');
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import { AppModule } from './app.module';
 import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
@@ -28,7 +29,20 @@ function runMigrations() {
   // spaces (e.g. `C:\Users\John Doe\...`). cmd.exe treats backslash as a
   // literal inside double quotes, and posix shells never see a backslash
   // path here, so the same quoted form is safe on every platform.
-  const schemaPath = path.join(__dirname, '..', 'prisma', 'schema.prisma');
+  // `__dirname` is `apps/api/dist/src` after `nest build`. The Prisma
+  // schema is NOT copied into dist, it lives at `apps/api/prisma/`.
+  // Going up one level only reaches `apps/api/dist/`, which has no
+  // `prisma/schema.prisma` — the CLI then errors with
+  // `Could not load --schema from provided path dist/prisma/schema.prisma`
+  // and dev migrations silently never run. Going up two levels lands
+  // at `apps/api/` on both the compiled build and `ts-node` runs.
+  // When invoked via `ts-node` from `apps/api/src` we still need to
+  // go up once; probe both layouts and pick whichever one resolves.
+  const candidates = [
+    path.join(__dirname, '..', '..', 'prisma', 'schema.prisma'),
+    path.join(__dirname, '..', 'prisma', 'schema.prisma'),
+  ];
+  const schemaPath = candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
   const result = spawnSync(
     `npx prisma migrate deploy --schema="${schemaPath}"`,
     { stdio: 'inherit', timeout: 60_000, shell: true },

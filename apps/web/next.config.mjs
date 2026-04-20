@@ -14,13 +14,24 @@
  */
 const isDev = process.env.NODE_ENV !== 'production';
 
+// Cloudflare Turnstile loads its widget script from challenges.cloudflare.com
+// and runs the challenge inside an iframe on the same host; PostHog's
+// browser SDK POSTs events to eu.i.posthog.com / us.i.posthog.com (configurable
+// via NEXT_PUBLIC_POSTHOG_HOST). Without these CSP carveouts the production
+// build silently breaks captcha on /auth/* and analytics everywhere — pages
+// render, but the widget + event pipeline get blocked by the browser.
+const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+const POSTHOG_CONNECT_ORIGINS = 'https://eu.i.posthog.com https://us.i.posthog.com https://*.i.posthog.com';
+
 const scriptSrc = isDev
-  ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-  : "script-src 'self'";
+  ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${TURNSTILE_ORIGIN}`
+  : `script-src 'self' ${TURNSTILE_ORIGIN}`;
 
 const connectSrc = isDev
-  ? "connect-src 'self' http://localhost:3001 ws://localhost:3000 https://api.vintage.br https://api-staging.vintage.br"
-  : "connect-src 'self' https://api.vintage.br https://api-staging.vintage.br";
+  ? `connect-src 'self' http://localhost:3001 ws://localhost:3000 https://api.vintage.br https://api-staging.vintage.br ${TURNSTILE_ORIGIN} ${POSTHOG_CONNECT_ORIGINS}`
+  : `connect-src 'self' https://api.vintage.br https://api-staging.vintage.br ${TURNSTILE_ORIGIN} ${POSTHOG_CONNECT_ORIGINS}`;
+
+const frameSrc = `frame-src ${TURNSTILE_ORIGIN}`;
 
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -48,6 +59,7 @@ const securityHeaders = [
       "img-src 'self' https: blob:",
       "font-src 'self' data:",
       connectSrc,
+      frameSrc,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
