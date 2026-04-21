@@ -122,9 +122,8 @@ export default function RegisterScreen() {
         ? birthDate.split('/').reverse().join('-')
         : birthDate;
       await signUp(name, email, rawCpf, password, isoBirthDate, { captchaToken });
-      // Post-signup walkthrough prompts identity verification while
-      // intent is fresh. Users can skip to the feed from there.
-      router.replace('/welcome/verify');
+      // Onboarding walkthrough → verify-CPF step → feed.
+      router.replace('/welcome/onboarding');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível criar sua conta. Verifique os dados e tente novamente.';
       Alert.alert('Erro ao criar conta', message);
