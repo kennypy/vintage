@@ -586,7 +586,11 @@ export class AuthService {
       };
     }
 
-    return this.generateTokensWithUser(user.id);
+    // Login happy path: the `user` row we fetched at the top of this
+    // method already contains tokenVersion, name, email, cpfEncrypted,
+    // avatarUrl, and createdAt. Pass it straight to token issuance so
+    // we don't re-read the same row twice more.
+    return this.generateTokensWithExistingUser(user);
   }
 
   /** Obfuscate a phone number for display: +55 (11) •••• 1234 */
@@ -1878,5 +1882,61 @@ export class AuthService {
     const { cpfEncrypted, ...rest } = row ?? {};
     const cpf = cpfEncrypted ? this.cpfVault.decrypt(cpfEncrypted) : null;
     return { ...tokens, user: row ? { ...rest, cpf } : null };
+  }
+
+  /**
+   * Token issuance for callers that already hold the User row (login being
+   * the hot path). Skips the two findUnique reads that
+   * generateTokens + generateTokensWithUser otherwise do for tokenVersion
+   * and the response user shape — cutting two DB round-trips off every
+   * successful login.
+   */
+  private async generateTokensWithExistingUser(
+    user: {
+      id: string;
+      tokenVersion: number;
+      name: string;
+      email: string;
+      cpfEncrypted: string | null;
+      avatarUrl: string | null;
+      createdAt: Date;
+    },
+    ctx: TokenIssueContext = {},
+  ) {
+    const accessToken = this.jwtService.sign({
+      sub: user.id,
+      ver: user.tokenVersion,
+    });
+
+    const rawRefresh = crypto
+      .randomBytes(REFRESH_TOKEN_BYTES)
+      .toString('base64url');
+    const tokenHash = this.hashRefreshToken(rawRefresh);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        userAgent: ctx.userAgent?.slice(0, 512) ?? null,
+        ipAddress: ctx.ipAddress?.slice(0, 64) ?? null,
+      },
+    });
+
+    const cpf = user.cpfEncrypted
+      ? this.cpfVault.decrypt(user.cpfEncrypted)
+      : null;
+    return {
+      accessToken,
+      refreshToken: rawRefresh,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        createdAt: user.createdAt,
+        cpf,
+      },
+    };
   }
 }
