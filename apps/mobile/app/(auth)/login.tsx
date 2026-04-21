@@ -3,9 +3,16 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
+import {
+  enrollBiometric,
+  getBiometricCapability,
+  isBiometricEnrolled,
+  unlockWithBiometric,
+} from '../../src/services/biometric';
 
 // expo-web-browser requires a native module that may not be available in all runtimes
 // (e.g. Expo Go). Load it lazily so the screen still renders when it's missing.
@@ -57,12 +64,52 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
+  // Biometric unlock — only surfaced when the device supports it AND
+  // the user opted in on a previous successful login.
+  const [biometricReady, setBiometricReady] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
 
   const useGoogleAuth = _Google?.useAuthRequest ?? useGoogleAuthStub;
   const [_request, googleResponse, promptGoogleAsync] = useGoogleAuth({
     clientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID ?? '',
     scopes: ['openid', 'profile', 'email'],
   });
+
+  // Surface the biometric button only when the device has hardware,
+  // the user enrolled a face/finger, AND they opted in previously.
+  useEffect(() => {
+    (async () => {
+      const cap = await getBiometricCapability();
+      const enrolled = await isBiometricEnrolled();
+      setBiometricReady(cap.available && cap.enrolled && enrolled);
+    })();
+  }, []);
+
+  const handleBiometricLogin = async () => {
+    setBiometricLoading(true);
+    try {
+      const creds = await unlockWithBiometric();
+      if (!creds) return;
+      const challenge = await signIn(creds.email, creds.password);
+      if (challenge) {
+        router.replace({
+          pathname: '/(auth)/2fa-challenge',
+          params: {
+            tempToken: challenge.tempToken,
+            method: challenge.method,
+            phoneHint: challenge.phoneHint ?? '',
+          },
+        });
+        return;
+      }
+      router.replace('/(tabs)');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha no desbloqueio biométrico.';
+      Alert.alert('Erro', message);
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (googleResponse?.type === 'success' && googleResponse.authentication?.idToken) {
@@ -96,6 +143,30 @@ export default function LoginScreen() {
         });
         return;
       }
+
+      // Offer biometric enrollment on first successful password login.
+      // Silent no-op if the device doesn't support biometrics or the
+      // user already opted in — never nag.
+      const cap = await getBiometricCapability();
+      const alreadyEnrolled = await isBiometricEnrolled();
+      if (cap.available && cap.enrolled && !alreadyEnrolled) {
+        Alert.alert(
+          'Ativar desbloqueio por biometria?',
+          'Entre mais rápido na próxima vez usando Face ID ou Touch ID.',
+          [
+            { text: 'Agora não', style: 'cancel', onPress: () => router.replace('/(tabs)') },
+            {
+              text: 'Ativar',
+              onPress: async () => {
+                await enrollBiometric(email, password);
+                router.replace('/(tabs)');
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       router.replace('/(tabs)');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Email ou senha incorretos. Tente novamente.';
@@ -173,6 +244,19 @@ export default function LoginScreen() {
           <TouchableOpacity style={styles.linkButton} onPress={() => router.push('/(auth)/forgot-password')}>
             <Text style={[styles.linkText, { color: colors.primary[600] }]}>Esqueceu a senha?</Text>
           </TouchableOpacity>
+
+          {biometricReady && (
+            <TouchableOpacity
+              style={[styles.biometricButton, { borderColor: colors.primary[600] }]}
+              onPress={handleBiometricLogin}
+              disabled={biometricLoading}
+            >
+              <Ionicons name="finger-print" size={20} color={colors.primary[600]} />
+              <Text style={[styles.biometricButtonText, { color: colors.primary[600] }]}>
+                {biometricLoading ? 'Verificando…' : 'Entrar com biometria'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.divider}>
@@ -246,6 +330,11 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.neutral[0], fontSize: 16, fontWeight: '600' },
   linkButton: { alignItems: 'center', paddingVertical: 8 },
   linkText: { fontSize: 14 },
+  biometricButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 50, borderWidth: 1, borderRadius: 12, marginTop: 4,
+  },
+  biometricButtonText: { fontSize: 15, fontWeight: '600' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 24 },
   dividerLine: { flex: 1, height: 1 },
   dividerText: { marginHorizontal: 16, fontSize: 14 },
