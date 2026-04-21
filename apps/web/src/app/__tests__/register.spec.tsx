@@ -142,7 +142,7 @@ describe('RegisterPage', () => {
       // Cookie migration: localStorage stores a presence marker ("1");
       // the JWT lives in an HttpOnly cookie set by the API.
       expect(localStorage.getItem('vintage_token')).toBe('1');
-      expect(mockPush).toHaveBeenCalledWith('/');
+      expect(mockPush).toHaveBeenCalledWith('/auth/welcome');
     });
   });
 

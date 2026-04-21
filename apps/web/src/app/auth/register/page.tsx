@@ -71,7 +71,9 @@ export default function RegisterPage() {
         captchaToken,
       });
       setAuthToken(response.accessToken);
-      router.push('/');
+      // Post-signup walkthrough prompts identity verification while
+      // the intent is fresh. "Explorar primeiro" skips to the feed.
+      router.push('/auth/welcome');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao criar conta. Tente novamente.');
     } finally {
