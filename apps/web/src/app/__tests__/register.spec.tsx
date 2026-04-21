@@ -52,14 +52,16 @@ describe('RegisterPage', () => {
     expect(screen.getByLabelText('Nome completo')).toBeInTheDocument();
     expect(screen.getByLabelText('E-mail')).toBeInTheDocument();
     expect(screen.getByLabelText('CPF')).toBeInTheDocument();
+    expect(screen.getByLabelText('Data de nascimento')).toBeInTheDocument();
     expect(screen.getByLabelText('Senha')).toBeInTheDocument();
   });
 
-  it('has required attribute on name, email, cpf and password', () => {
+  it('has required attribute on name, email, cpf, birth date and password', () => {
     render(<RegisterPage />);
     expect(screen.getByLabelText('Nome completo')).toBeRequired();
     expect(screen.getByLabelText('E-mail')).toBeRequired();
     expect(screen.getByLabelText('CPF')).toBeRequired();
+    expect(screen.getByLabelText('Data de nascimento')).toBeRequired();
     expect(screen.getByLabelText('Senha')).toBeRequired();
   });
 
@@ -87,6 +89,7 @@ describe('RegisterPage', () => {
     fireEvent.change(screen.getByLabelText('Nome completo'), { target: { value: 'Test User' } });
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'test@test.com' } });
     fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '12345678901' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1990-01-15' } });
     fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'password123' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Criar conta' }));
@@ -103,6 +106,7 @@ describe('RegisterPage', () => {
     fireEvent.change(screen.getByLabelText('Nome completo'), { target: { value: 'Test User' } });
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'test@test.com' } });
     fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '12345678901' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1990-01-15' } });
     fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('checkbox'));
 
@@ -128,6 +132,7 @@ describe('RegisterPage', () => {
     fireEvent.change(screen.getByLabelText('Nome completo'), { target: { value: 'Test User' } });
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'test@test.com' } });
     fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '12345678901' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1990-01-15' } });
     fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('checkbox'));
 
@@ -163,6 +168,7 @@ describe('RegisterPage', () => {
     fireEvent.change(screen.getByLabelText('Nome completo'), { target: { value: 'Test User' } });
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'existing@test.com' } });
     fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '12345678901' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1990-01-15' } });
     fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('checkbox'));
 
@@ -180,6 +186,7 @@ describe('RegisterPage', () => {
     fireEvent.change(screen.getByLabelText('Nome completo'), { target: { value: 'Test' } });
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'a@b.com' } });
     fireEvent.change(screen.getByLabelText('CPF'), { target: { value: '12345678901' } });
+    fireEvent.change(screen.getByLabelText('Data de nascimento'), { target: { value: '1990-01-15' } });
     fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'pass1234' } });
     fireEvent.click(screen.getByRole('checkbox'));
 

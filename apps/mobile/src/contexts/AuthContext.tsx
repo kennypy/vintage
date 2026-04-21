@@ -50,6 +50,7 @@ interface AuthContextType {
     email: string,
     cpf: string,
     password: string,
+    birthDate: string,
     opts?: { captchaToken?: string | null },
   ) => Promise<void>;
   signInWithGoogle: (idToken: string) => Promise<void>;
@@ -198,12 +199,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string,
     cpf: string,
     password: string,
+    birthDate: string,
     opts?: { captchaToken?: string | null },
   ) => {
     try {
       const response = await registerService(name, email, cpf, password, {
         acceptedTos: true,
         captchaToken: opts?.captchaToken ?? null,
+        birthDate,
       });
       setDemoActive(false);
       setUser(response.user);

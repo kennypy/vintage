@@ -179,10 +179,53 @@ export class AuthService {
       );
     }
 
+    // Age gate: reject accounts under 18. Enforced at the service layer
+    // (not only via @IsDateString on the DTO) because we also accept
+    // registration through OAuth flows and need a single source of truth.
+    const birthDate = new Date(dto.birthDate);
+    if (Number.isNaN(birthDate.getTime())) {
+      throw new BadRequestException('Data de nascimento inválida');
+    }
+    const ageMs = Date.now() - birthDate.getTime();
+    const ageYears = ageMs / (365.25 * 24 * 60 * 60 * 1000);
+    if (ageYears < 18) {
+      throw new BadRequestException(
+        'Você precisa ter pelo menos 18 anos para criar uma conta.',
+      );
+    }
+    // Sanity bound — reject obvious garbage (dates >150 years ago).
+    if (ageYears > 150) {
+      throw new BadRequestException('Data de nascimento inválida');
+    }
+
     // Validate CPF
     const cleanCpf = dto.cpf.replace(/\D/g, '');
     if (!isValidCPF(cleanCpf)) {
       throw new ConflictException('CPF inválido');
+    }
+
+    // Duplicate-account heuristic on phone. If the same phone is attached
+    // to a non-deleted, non-banned existing account, we flag rather than
+    // block — false positives on family-shared phones would be harsh. A
+    // FraudFlag lets ops decide. Banned accounts re-registering hit this
+    // path immediately because their record stays in the DB.
+    if (dto.phone) {
+      const normalizedPhone = dto.phone.replace(/\D/g, '');
+      if (normalizedPhone.length >= 10) {
+        const phoneCollision = await this.prisma.user.findFirst({
+          where: {
+            phone: normalizedPhone,
+            deletedAt: null,
+          },
+          select: { id: true, isBanned: true },
+        });
+        if (phoneCollision?.isBanned) {
+          throw new ForbiddenException(
+            'Não foi possível completar o cadastro. Entre em contato com o suporte.',
+          );
+        }
+        // Non-banned collision queued as a flag post-create (see below).
+      }
     }
 
     // CPF at rest is always ciphertext (see CpfVaultService). Collision
@@ -220,6 +263,7 @@ export class AuthService {
 
     // Create user + wallet. CPF goes in encrypted; the lookup hash
     // (HMAC-SHA256) handles the collision check + future lookups.
+    const normalizedPhone = dto.phone ? dto.phone.replace(/\D/g, '') : null;
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
@@ -227,7 +271,8 @@ export class AuthService {
         cpfEncrypted: this.cpfVault.encrypt(cleanCpf),
         cpfLookupHash,
         name: dto.name,
-        phone: dto.phone ?? null,
+        phone: normalizedPhone,
+        birthDate,
         // Modulo-11 passed (checked above by isValidCPF). Identity
         // verification (Receita + name match) is a separate gate set
         // later by the KYC provider — see cpfIdentityVerified.
@@ -240,6 +285,39 @@ export class AuthService {
         wallet: { create: {} },
       },
     });
+
+    // Fire a FraudFlag if this phone number is already on another
+    // non-deleted account. Ops reviews from /admin/moderation. Done
+    // after create so the flag carries the real user id.
+    if (normalizedPhone && normalizedPhone.length >= 10) {
+      const siblings = await this.prisma.user.findMany({
+        where: {
+          phone: normalizedPhone,
+          deletedAt: null,
+          NOT: { id: user.id },
+        },
+        select: { id: true, email: true, createdAt: true },
+        take: 5,
+      });
+      if (siblings.length > 0) {
+        const phoneSha256 = crypto
+          .createHash('sha256')
+          .update(normalizedPhone)
+          .digest('hex');
+        await this.prisma.fraudFlag
+          .create({
+            data: {
+              userId: user.id,
+              ruleCode: 'DUPLICATE_PHONE',
+              evidence: {
+                phoneSha256,
+                siblingIds: siblings.map((s) => s.id),
+              },
+            },
+          })
+          .catch(() => {});
+      }
+    }
 
     // Issue + send the verification email. Fire-and-forget so a transient
     // SMTP outage doesn't 500 the registration — the user can request a

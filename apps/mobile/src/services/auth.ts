@@ -143,6 +143,7 @@ export async function register(
     acceptedTos: boolean;
     tosVersion?: string;
     captchaToken?: string | null;
+    birthDate?: string;
   } = { acceptedTos: true },
 ): Promise<RegisterResponse> {
   const data = await apiFetch<RegisterResponse>('/auth/register', {
@@ -155,6 +156,8 @@ export async function register(
       password,
       acceptedTos: opts.acceptedTos,
       tosVersion: opts.tosVersion ?? CURRENT_TOS_VERSION,
+      // ISO 8601 yyyy-mm-dd. Required by the API for the 18+ age gate.
+      birthDate: opts.birthDate,
       // Null when the Turnstile widget hasn't solved yet (or isn't
       // configured in dev). The backend CaptchaGuard is a no-op
       // unless CAPTCHA_ENFORCE=true.

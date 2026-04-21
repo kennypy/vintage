@@ -35,6 +35,9 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
   const [password, setPassword] = useState('');
+  // Birth date is required (18+ check). Kept as ISO yyyy-mm-dd string so
+  // it serialises cleanly into RegisterDto.birthDate.
+  const [birthDate, setBirthDate] = useState('');
 
   // Address fields
   const [cep, setCep] = useState('');
@@ -65,12 +68,26 @@ export default function RegisterScreen() {
   };
 
   const validateAccount = () => {
-    if (!name || !email || !cpf || !password) {
+    if (!name || !email || !cpf || !password || !birthDate) {
       Alert.alert('Campos obrigatórios', 'Preencha todos os campos.');
       return false;
     }
     if (password.length < 8) {
       Alert.alert('Senha fraca', 'A senha deve ter no mínimo 8 caracteres.');
+      return false;
+    }
+    // Accept dd/mm/yyyy or yyyy-mm-dd; convert the brazilian form to ISO.
+    const iso = birthDate.includes('/')
+      ? birthDate.split('/').reverse().join('-')
+      : birthDate;
+    const birth = new Date(iso);
+    if (Number.isNaN(birth.getTime())) {
+      Alert.alert('Data inválida', 'Use o formato DD/MM/AAAA.');
+      return false;
+    }
+    const ageYears = (Date.now() - birth.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (ageYears < 18) {
+      Alert.alert('Idade mínima', 'Você precisa ter pelo menos 18 anos para criar uma conta.');
       return false;
     }
     return true;
@@ -101,7 +118,10 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       const rawCpf = cpf.replace(/\D/g, '');
-      await signUp(name, email, rawCpf, password, { captchaToken });
+      const isoBirthDate = birthDate.includes('/')
+        ? birthDate.split('/').reverse().join('-')
+        : birthDate;
+      await signUp(name, email, rawCpf, password, isoBirthDate, { captchaToken });
       router.replace('/(tabs)');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível criar sua conta. Verifique os dados e tente novamente.';
@@ -165,6 +185,20 @@ export default function RegisterScreen() {
               onChangeText={(t) => setCpf(formatCpf(t))}
               keyboardType="numeric"
               maxLength={14}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Data de nascimento (DD/MM/AAAA)"
+              placeholderTextColor={colors.neutral[400]}
+              value={birthDate}
+              onChangeText={(t) => {
+                // Live-format into DD/MM/AAAA as the user types.
+                const digits = t.replace(/\D/g, '').slice(0, 8);
+                const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean);
+                setBirthDate(parts.join('/'));
+              }}
+              keyboardType="numeric"
+              maxLength={10}
             />
             <TextInput
               style={styles.input}

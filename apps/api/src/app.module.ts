@@ -1,5 +1,5 @@
 import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -48,6 +48,7 @@ import { IdentityModule } from './identity/identity.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { ReturnsModule } from './returns/returns.module';
+import { TosVersionInterceptor } from './auth/tos-version.interceptor';
 
 @Module({
   imports: [
@@ -117,6 +118,10 @@ import { ReturnsModule } from './returns/returns.module';
     {
       provide: APP_GUARD,
       useClass: HashThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TosVersionInterceptor,
     },
     CsrfMiddleware,
   ],
