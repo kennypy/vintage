@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from './orders.service';
 import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
-import { SHIPPING_DEADLINE_DAYS } from '@vintage/shared';
+import { SHIPPING_DEADLINE_DAYS, RETURN_INSPECTION_DAYS } from '@vintage/shared';
 
 @Injectable()
 export class OrdersCronService {
@@ -45,11 +45,49 @@ export class OrdersCronService {
 
     for (const order of expiredOrders) {
       try {
-        await this.ordersService.releaseEscrow(order.id);
-        this.logger.log(`Auto-confirmed order ${order.id}`);
+        await this.ordersService.enterHold(order.id);
+        this.logger.log(`Auto-confirmed order ${order.id} — entering escrow hold`);
       } catch (err) {
         this.logger.error(
           `Failed to auto-confirm order ${order.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Release escrow on HELD orders whose hold window has elapsed.
+   * Skips any order that has an OPEN dispute or an active (non-terminal)
+   * return — those paths will settle the money themselves.
+   * Runs every hour.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async releaseHeldEscrow() {
+    if (!(await this.cronLock.acquire('orders:releaseHeld'))) return;
+
+    const now = new Date();
+
+    const ready = await this.prisma.order.findMany({
+      where: {
+        status: 'HELD',
+        escrowReleasesAt: { lte: now },
+        dispute: { is: null },
+        returnRequest: { is: null },
+      },
+      select: { id: true },
+    });
+
+    if (ready.length === 0) return;
+
+    this.logger.log(`Releasing escrow hold for ${ready.length} orders`);
+
+    for (const order of ready) {
+      try {
+        await this.ordersService.finalizeEscrow(order.id);
+        this.logger.log(`Released escrow for order ${order.id}`);
+      } catch (err) {
+        this.logger.error(
+          `Failed to release escrow for order ${order.id}: ${String(err).slice(0, 200)}`,
         );
       }
     }
@@ -158,6 +196,67 @@ export class OrdersCronService {
       } catch (err) {
         this.logger.error(
           `Failed to auto-cancel order ${order.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Auto-escalate RECEIVED returns that the seller hasn't inspected
+   * within RETURN_INSPECTION_DAYS. Creates a Dispute so ops can
+   * mediate — the buyer isn't stuck waiting for seller action.
+   * Runs every hour.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async escalateStaleReturns() {
+    if (!(await this.cronLock.acquire('returns:escalateStale'))) return;
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - RETURN_INSPECTION_DAYS);
+
+    const stale = await this.prisma.orderReturn.findMany({
+      where: {
+        status: 'RECEIVED',
+        receivedAt: { lt: cutoff },
+      },
+      include: { order: { select: { id: true } } },
+    });
+
+    if (stale.length === 0) return;
+
+    this.logger.log(
+      `Escalating ${stale.length} stale returns past ${RETURN_INSPECTION_DAYS}-day inspection window`,
+    );
+
+    for (const ret of stale) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.orderReturn.update({
+            where: { id: ret.id },
+            data: { status: 'DISPUTED' },
+          });
+          const existing = await tx.dispute.findUnique({
+            where: { orderId: ret.order.id },
+          });
+          if (!existing) {
+            await tx.dispute.create({
+              data: {
+                orderId: ret.order.id,
+                openedById: ret.requestedById,
+                reason: ret.reason,
+                description: `Devolução recebida sem inspeção do vendedor dentro do prazo. Descrição original: ${ret.description}`,
+                status: 'OPEN',
+              },
+            });
+            await tx.order.update({
+              where: { id: ret.order.id },
+              data: { status: 'DISPUTED' },
+            });
+          }
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to escalate stale return ${ret.id}: ${String(err).slice(0, 200)}`,
         );
       }
     }

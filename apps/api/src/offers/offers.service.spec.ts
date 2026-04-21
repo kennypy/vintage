@@ -16,17 +16,20 @@ const mockNotifications = {
 jest.mock('@vintage/shared', () => ({
   MIN_OFFER_PERCENTAGE: 0.5,
   OFFER_EXPIRY_HOURS: 48,
+  MAX_OFFER_COUNTERS: 3,
   containsProhibitedContent: jest.fn().mockReturnValue({ matched: false }),
 }));
 
-const mockPrisma = {
+const mockPrisma: Record<string, any> = {
   listing: {
     findUnique: jest.fn(),
   },
   offer: {
     create: jest.fn(),
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   user: {
     findMany: jest.fn().mockResolvedValue([]),
@@ -35,6 +38,9 @@ const mockPrisma = {
     findFirst: jest.fn().mockResolvedValue(null),
   },
 };
+mockPrisma.$transaction = jest.fn(
+  async (fn: (tx: Record<string, any>) => Promise<unknown>) => fn(mockPrisma),
+);
 
 describe('OffersService', () => {
   let service: OffersService;
@@ -263,6 +269,76 @@ describe('OffersService', () => {
       await expect(
         service.reject('nonexistent', 'seller-1'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('counter', () => {
+    const basePrev = {
+      id: 'offer-1',
+      buyerId: 'buyer-1',
+      listingId: 'listing-1',
+      amountBrl: new Decimal('50.00'),
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      parentOfferId: null,
+      counterCount: 0,
+      counteredById: 'buyer-1',
+      listing: {
+        sellerId: 'seller-1',
+        priceBrl: new Decimal('100.00'),
+        title: 'Item',
+      },
+    };
+
+    it('rejects counter when caller made the most recent offer (alternation)', async () => {
+      mockPrisma.offer.findUnique.mockResolvedValue(basePrev);
+      await expect(
+        service.counter('offer-1', 'buyer-1', { amountBrl: 70 }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects counter when chain depth exceeds MAX_OFFER_COUNTERS', async () => {
+      mockPrisma.offer.findUnique.mockResolvedValue({ ...basePrev, counterCount: 3 });
+      await expect(
+        service.counter('offer-1', 'seller-1', { amountBrl: 80 }),
+      ).rejects.toThrow(/Limite de 3/);
+    });
+
+    it('enforces 50% floor relative to listing price', async () => {
+      mockPrisma.offer.findUnique.mockResolvedValue(basePrev);
+      await expect(
+        service.counter('offer-1', 'seller-1', { amountBrl: 10 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('creates a new offer with incremented counterCount and parentOfferId', async () => {
+      mockPrisma.offer.findUnique.mockResolvedValue(basePrev);
+      mockPrisma.offer.updateMany.mockResolvedValue({ count: 1 });
+      const newOffer = {
+        id: 'offer-2',
+        parentOfferId: 'offer-1',
+        counterCount: 1,
+        counteredById: 'seller-1',
+      };
+      mockPrisma.offer.create.mockResolvedValue(newOffer);
+
+      const result = await service.counter('offer-1', 'seller-1', { amountBrl: 70 });
+
+      expect(mockPrisma.offer.updateMany).toHaveBeenCalledWith({
+        where: { id: 'offer-1', status: 'PENDING' },
+        data: { status: 'COUNTERED' },
+      });
+      expect(mockPrisma.offer.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            parentOfferId: 'offer-1',
+            counterCount: 1,
+            counteredById: 'seller-1',
+            amountBrl: 70,
+          }),
+        }),
+      );
+      expect(result).toEqual(newOffer);
     });
   });
 });

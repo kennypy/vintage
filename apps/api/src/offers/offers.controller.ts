@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { OffersService } from './offers.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
+import { CounterOfferDto } from './dto/counter-offer.dto';
 
 @ApiTags('offers')
 @ApiBearerAuth()
@@ -62,5 +63,23 @@ export class OffersController {
   @ApiResponse({ status: 200, description: 'Oferta rejeitada' })
   reject(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.offersService.reject(id, user.id);
+  }
+
+  @Post(':id/counter')
+  @ApiOperation({ summary: 'Fazer uma contraproposta' })
+  @ApiResponse({ status: 201, description: 'Contraproposta criada' })
+  counter(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CounterOfferDto,
+  ) {
+    return this.offersService.counter(id, user.id, dto);
+  }
+
+  @Get(':id/thread')
+  @ApiOperation({ summary: 'Ver toda a cadeia de contrapropostas' })
+  @ApiResponse({ status: 200, description: 'Thread de negociação' })
+  thread(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.offersService.findThread(id, user.id);
   }
 }

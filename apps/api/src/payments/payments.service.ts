@@ -13,6 +13,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { MercadoPagoClient } from './mercadopago.client';
+import { MAX_PAYMENT_ATTEMPTS } from '@vintage/shared';
+import { RetryPaymentDto, RetryPaymentMethod } from './dto/retry-payment.dto';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
@@ -102,11 +104,51 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Next attempt number for this order. Payment rows are 1-based and
+   * unique per (orderId, attemptNumber), so the current count + 1 is
+   * the next slot. Used by first-time-create AND retry paths so a
+   * retry that comes in before the first row was written (very fast
+   * double-tap) still gets attemptNumber=1 via the @@unique fallback
+   * — the unique violation surfaces as a 409 that the client retries.
+   */
+  private async nextAttemptNumber(orderId: string): Promise<number> {
+    const count = await this.prisma.payment.count({ where: { orderId } });
+    return count + 1;
+  }
+
+  /**
+   * Write the Payment row for a brand-new (or retried) attempt. Called
+   * after the provider accepts the request so we have a `providerPaymentId`
+   * to capture. parentPaymentId links the retry chain for audit.
+   */
+  private async recordPaymentAttempt(
+    orderId: string,
+    attemptNumber: number,
+    method: 'PIX' | 'CREDIT_CARD' | 'BOLETO',
+    amountBrl: number,
+    providerPaymentId: string,
+    parentPaymentId: string | null,
+  ) {
+    return this.prisma.payment.create({
+      data: {
+        orderId,
+        attemptNumber,
+        method,
+        status: 'PENDING',
+        amountBrl: new Decimal(amountBrl.toFixed(2)),
+        providerPaymentId,
+        parentPaymentId: parentPaymentId ?? undefined,
+      },
+    });
+  }
+
   async createPixPayment(orderId: string, userId: string) {
     const order = await this.getAndValidateOrder(orderId, userId);
     const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
-    this.logger.log(`Creating PIX payment for order ${orderId}`);
+    const attemptNumber = await this.nextAttemptNumber(orderId);
+    this.logger.log(`Creating PIX payment for order ${orderId} (attempt ${attemptNumber})`);
     const result = await this.mercadoPago.createPixPayment(
       orderId,
       amountBrl,
@@ -116,6 +158,7 @@ export class PaymentsService {
       where: { id: orderId },
       data: { paymentId: String(result.id) },
     });
+    await this.recordPaymentAttempt(orderId, attemptNumber, 'PIX', amountBrl, String(result.id), null);
     return result;
   }
 
@@ -128,7 +171,8 @@ export class PaymentsService {
     const order = await this.getAndValidateOrder(orderId, userId);
     const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
-    this.logger.log(`Creating card payment for order ${orderId}`);
+    const attemptNumber = await this.nextAttemptNumber(orderId);
+    this.logger.log(`Creating card payment for order ${orderId} (attempt ${attemptNumber})`);
     const result = await this.mercadoPago.createCardPayment(
       orderId,
       amountBrl,
@@ -139,6 +183,7 @@ export class PaymentsService {
       where: { id: orderId },
       data: { paymentId: String(result.id) },
     });
+    await this.recordPaymentAttempt(orderId, attemptNumber, 'CREDIT_CARD', amountBrl, String(result.id), null);
     return result;
   }
 
@@ -146,7 +191,8 @@ export class PaymentsService {
     const order = await this.getAndValidateOrder(orderId, userId);
     const amountBrl = Number(order.totalBrl);
     this.validateAmount(amountBrl, orderId);
-    this.logger.log(`Creating boleto payment for order ${orderId}`);
+    const attemptNumber = await this.nextAttemptNumber(orderId);
+    this.logger.log(`Creating boleto payment for order ${orderId} (attempt ${attemptNumber})`);
     const result = await this.mercadoPago.createBoletoPayment(
       orderId,
       amountBrl,
@@ -156,7 +202,97 @@ export class PaymentsService {
       where: { id: orderId },
       data: { paymentId: String(result.id) },
     });
+    await this.recordPaymentAttempt(orderId, attemptNumber, 'BOLETO', amountBrl, String(result.id), null);
     return result;
+  }
+
+  /**
+   * Retry payment for a PENDING order whose previous attempt failed /
+   * expired. Clears the order's active paymentId, marks the previous
+   * Payment row as FAILED (so status math is accurate), and delegates
+   * to the requested method's create helper. The create helper's
+   * `nextAttemptNumber` call will see the existing rows and assign
+   * attemptNumber = prev+1.
+   *
+   * Caps at MAX_PAYMENT_ATTEMPTS. Beyond the cap, the retry refuses
+   * and transitions the order to CANCELLED so the listing can be
+   * re-listed.
+   *
+   * Tenant-isolated: getAndValidateOrder-style ownership check but
+   * relaxed on the `paymentId !== null` guard — retry EXPECTS an
+   * active paymentId from the prior attempt.
+   */
+  async retryPayment(orderId: string, userId: string, dto: RetryPaymentDto) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { payments: { orderBy: { attemptNumber: 'desc' }, take: 1 } },
+    });
+    if (!order) {
+      throw new NotFoundException('Pedido não encontrado.');
+    }
+    if (order.buyerId !== userId) {
+      throw new ForbiddenException('Acesso negado ao pedido.');
+    }
+    if (order.status !== 'PENDING') {
+      throw new BadRequestException(
+        'Somente pedidos aguardando pagamento podem ser retentados.',
+      );
+    }
+
+    const attemptsSoFar = await this.prisma.payment.count({ where: { orderId } });
+    if (attemptsSoFar >= MAX_PAYMENT_ATTEMPTS) {
+      // Auto-cancel the order and free the listing so the buyer can
+      // start fresh if they still want the item.
+      this.logger.warn(
+        `Order ${orderId} hit MAX_PAYMENT_ATTEMPTS (${MAX_PAYMENT_ATTEMPTS}); auto-cancelling.`,
+      );
+      await this.prisma.$transaction(async (tx) => {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { status: 'CANCELLED', paymentId: null },
+        });
+        await tx.listing.update({
+          where: { id: order.listingId },
+          data: { status: 'ACTIVE' },
+        });
+        await tx.orderListingSnapshot.deleteMany({ where: { orderId } });
+      });
+      throw new BadRequestException(
+        `Número máximo de tentativas de pagamento (${MAX_PAYMENT_ATTEMPTS}) atingido. Pedido cancelado.`,
+      );
+    }
+
+    // Mark the most-recent Payment row as FAILED so webhook + ledger
+    // state stays consistent. Idempotent — if it's already FAILED we
+    // leave it alone. If it was actually SUCCEEDED the order status
+    // check above would have rejected us so that branch is unreachable.
+    const lastAttempt = order.payments[0];
+    if (lastAttempt && lastAttempt.status === 'PENDING') {
+      await this.prisma.payment.update({
+        where: { id: lastAttempt.id },
+        data: { status: 'FAILED', failureReason: 'Buyer retried payment' },
+      });
+    }
+
+    // Clear the active paymentId so getAndValidateOrder in the delegate
+    // create call doesn't reject with "já existe um pagamento em
+    // andamento".
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { paymentId: null },
+    });
+
+    // Delegate to the right create helper based on requested method.
+    if (dto.method === RetryPaymentMethod.PIX) {
+      return this.createPixPayment(orderId, userId);
+    }
+    if (dto.method === RetryPaymentMethod.CREDIT_CARD) {
+      if (!dto.installments) {
+        throw new BadRequestException('installments é obrigatório para CREDIT_CARD.');
+      }
+      return this.createCardPayment(orderId, userId, dto.installments, dto.cardToken);
+    }
+    return this.createBoletoPayment(orderId, userId);
   }
 
   async handleWebhook(
@@ -439,6 +575,16 @@ export class PaymentsService {
         await tx.order.update({
           where: { id: order.id },
           data: { status: 'PAID' },
+        });
+
+        // Mark the matching Payment row SUCCEEDED. We resolve by
+        // providerPaymentId rather than by attemptNumber so the mark
+        // works even when the row was written by an older code path
+        // (legacy orders pre-Payment-model have no row and the
+        // updateMany is a silent no-op).
+        await tx.payment.updateMany({
+          where: { orderId: order.id, providerPaymentId: paymentId },
+          data: { status: 'SUCCEEDED' },
         });
 
         const wallet = await tx.wallet.upsert({

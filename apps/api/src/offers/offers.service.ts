@@ -3,13 +3,16 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
+import { CounterOfferDto } from './dto/counter-offer.dto';
 import {
   MIN_OFFER_PERCENTAGE,
   OFFER_EXPIRY_HOURS,
+  MAX_OFFER_COUNTERS,
   containsProhibitedContent,
 } from '@vintage/shared';
 
@@ -120,6 +123,7 @@ export class OffersService {
         amountBrl: dto.amountBrl,
         status: 'PENDING',
         expiresAt,
+        counteredById: buyerId,
       },
       include: {
         listing: {
@@ -211,6 +215,159 @@ export class OffersService {
       });
 
     return updated;
+  }
+
+  /**
+   * Counter an offer. Alternating semantics: seller counters buyer's
+   * offer, buyer counters seller's counter. The server derives the
+   * next expected party from `counteredById` on the latest link in
+   * the chain — clients cannot spoof it.
+   *
+   * Chain depth is capped at MAX_OFFER_COUNTERS. The previous offer
+   * is marked COUNTERED; a new Offer row is created with parentOfferId
+   * pointing at it. Expiry resets to now + OFFER_EXPIRY_HOURS.
+   */
+  async counter(offerId: string, actorId: string, dto: CounterOfferDto) {
+    const prev = await this.prisma.offer.findUnique({
+      where: { id: offerId },
+      include: { listing: true },
+    });
+    if (!prev) {
+      throw new NotFoundException('Oferta não encontrada');
+    }
+    if (prev.status !== 'PENDING') {
+      throw new BadRequestException('Esta oferta não está mais pendente');
+    }
+    if (prev.expiresAt <= new Date()) {
+      throw new BadRequestException('Esta oferta expirou');
+    }
+    if (prev.counterCount >= MAX_OFFER_COUNTERS) {
+      throw new BadRequestException(
+        `Limite de ${MAX_OFFER_COUNTERS} contrapropostas atingido`,
+      );
+    }
+
+    // Alternation: the caller must be the OTHER party from whoever
+    // made the current offer. If the buyer placed the current offer,
+    // the seller counters (and vice-versa).
+    const lastActor = prev.counteredById ?? prev.buyerId;
+    if (actorId === lastActor) {
+      throw new ForbiddenException(
+        'Aguarde a resposta da outra parte antes de fazer uma nova contraproposta.',
+      );
+    }
+    // The counter must come from someone legitimately on the chain —
+    // either the listing's seller or the original buyer.
+    if (actorId !== prev.listing.sellerId && actorId !== prev.buyerId) {
+      throw new ForbiddenException('Apenas comprador ou vendedor podem contrapropor.');
+    }
+
+    // 50% floor relative to listing price still applies.
+    const minAmount = Number(prev.listing.priceBrl) * MIN_OFFER_PERCENTAGE;
+    if (dto.amountBrl < minAmount) {
+      throw new BadRequestException(
+        `O valor mínimo é R$ ${minAmount.toFixed(2)} (50% do preço do anúncio)`,
+      );
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + OFFER_EXPIRY_HOURS);
+
+    const newOffer = await this.prisma.$transaction(async (tx) => {
+      // Mark previous as COUNTERED (claim-style updateMany so a double
+      // counter race is refused — the loser gets count=0).
+      const claim = await tx.offer.updateMany({
+        where: { id: offerId, status: 'PENDING' },
+        data: { status: 'COUNTERED' },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException('Oferta já foi atualizada por outra ação.');
+      }
+      return tx.offer.create({
+        data: {
+          listingId: prev.listingId,
+          buyerId: prev.buyerId,
+          amountBrl: dto.amountBrl,
+          status: 'PENDING',
+          expiresAt,
+          parentOfferId: prev.id,
+          counterCount: prev.counterCount + 1,
+          counteredById: actorId,
+        },
+        include: {
+          listing: {
+            include: { images: { orderBy: { position: 'asc' }, take: 1 } },
+          },
+          buyer: { select: { id: true, name: true, avatarUrl: true } },
+        },
+      });
+    });
+
+    // Notify the other party.
+    const recipient =
+      actorId === prev.listing.sellerId ? prev.buyerId : prev.listing.sellerId;
+    this.notifications
+      .createNotification(
+        recipient,
+        'OFFER_COUNTERED',
+        'Contraproposta recebida',
+        `Nova contraproposta de R$ ${Number(dto.amountBrl).toFixed(2)} em "${prev.listing.title}".`,
+        { offerId: newOffer.id, listingId: prev.listingId, parentOfferId: prev.id },
+        'offers',
+      )
+      .catch(() => {});
+
+    return newOffer;
+  }
+
+  /**
+   * Walk the parentOfferId chain and return the full negotiation
+   * thread in chronological order. Tenant-scoped: only participants
+   * (buyer or listing seller) can read.
+   */
+  async findThread(offerId: string, userId: string) {
+    const seed = await this.prisma.offer.findUnique({
+      where: { id: offerId },
+      include: { listing: { select: { sellerId: true } } },
+    });
+    if (!seed) {
+      throw new NotFoundException('Oferta não encontrada');
+    }
+    if (seed.buyerId !== userId && seed.listing.sellerId !== userId) {
+      throw new ForbiddenException('Acesso negado');
+    }
+    // Walk UP to find root, then fetch the whole chain ordered by createdAt.
+    let root = seed;
+    while (root.parentOfferId) {
+      const parent = await this.prisma.offer.findUnique({
+        where: { id: root.parentOfferId },
+        include: { listing: { select: { sellerId: true } } },
+      });
+      if (!parent) break;
+      root = parent;
+    }
+    const thread = await this.prisma.offer.findMany({
+      where: {
+        OR: [
+          { id: root.id },
+          { parentOfferId: root.id },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    // Chain may go deeper — fetch descendants recursively via a wide
+    // IN query bounded by MAX_OFFER_COUNTERS. Cheaper than N roundtrips.
+    const rootIds = thread.map((o) => o.id);
+    const deeper = await this.prisma.offer.findMany({
+      where: {
+        parentOfferId: { in: rootIds },
+        id: { notIn: rootIds },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return [...thread, ...deeper].sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+    );
   }
 
   async reject(offerId: string, sellerId: string) {

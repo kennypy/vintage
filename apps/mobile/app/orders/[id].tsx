@@ -20,12 +20,13 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
   paid: 'Pago',
   shipped: 'Enviado',
   delivered: 'Entregue',
+  held: 'Em custódia',
   confirmed: 'Confirmado',
   cancelled: 'Cancelado',
   refunded: 'Reembolsado',
 };
 
-const STATUS_TIMELINE: OrderStatus[] = ['pending_payment', 'paid', 'shipped', 'delivered', 'confirmed'];
+const STATUS_TIMELINE: OrderStatus[] = ['pending_payment', 'paid', 'shipped', 'delivered', 'held', 'confirmed'];
 
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -255,17 +256,47 @@ export default function OrderDetailScreen() {
 
       {/* Actions */}
       {order.status === 'pending_payment' && isBuyer && (
-        <TouchableOpacity
-          style={[styles.actionButton, styles.disputeButton, actionLoading && styles.actionDisabled]}
-          onPress={handleCancelOrder}
-          disabled={actionLoading}
-          accessibilityRole="button"
-          accessibilityLabel="Cancelar pedido"
-        >
-          <Ionicons name="close-circle-outline" size={20} color={colors.neutral[0]} />
-          <Text style={styles.actionButtonText}>
-            {actionLoading ? 'Cancelando...' : 'Cancelar pedido'}
+        <>
+          <TouchableOpacity
+            style={[styles.actionButton, actionLoading && styles.actionDisabled]}
+            onPress={() => router.push(`/orders/retry-payment?orderId=${order.id}`)}
+            disabled={actionLoading}
+          >
+            <Ionicons name="refresh-outline" size={20} color={colors.neutral[0]} />
+            <Text style={styles.actionButtonText}>Retentar pagamento</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.disputeButton, actionLoading && styles.actionDisabled]}
+            onPress={handleCancelOrder}
+            disabled={actionLoading}
+            accessibilityRole="button"
+            accessibilityLabel="Cancelar pedido"
+          >
+            <Ionicons name="close-circle-outline" size={20} color={colors.neutral[0]} />
+            <Text style={styles.actionButtonText}>
+              {actionLoading ? 'Cancelando...' : 'Cancelar pedido'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {order.status === 'held' && order.escrowReleasesAt && (
+        <View style={styles.holdBanner}>
+          <Ionicons name="time-outline" size={18} color={colors.neutral[0]} />
+          <Text style={styles.holdBannerText}>
+            Em custódia até {new Date(order.escrowReleasesAt).toLocaleDateString('pt-BR')}.
+            {isBuyer ? ' Abra disputa ou devolução antes dessa data se houver problema.' : ''}
           </Text>
+        </View>
+      )}
+
+      {(order.status === 'delivered' || order.status === 'held' || order.status === 'confirmed') && isBuyer && (
+        <TouchableOpacity
+          style={[styles.actionButton, styles.reviewButton]}
+          onPress={() => router.push(`/returns/new?orderId=${order.id}`)}
+        >
+          <Ionicons name="return-up-back-outline" size={20} color={colors.neutral[0]} />
+          <Text style={styles.actionButtonText}>Solicitar devolução</Text>
         </TouchableOpacity>
       )}
 
@@ -483,5 +514,14 @@ const styles = StyleSheet.create({
   },
   modalConfirmText: {
     fontSize: 15, fontWeight: '600', color: colors.neutral[0],
+  },
+  holdBanner: {
+    backgroundColor: colors.warning[600],
+    padding: 12, borderRadius: 8,
+    flexDirection: 'row', gap: 8, alignItems: 'center',
+    marginTop: 16, marginHorizontal: 16,
+  },
+  holdBannerText: {
+    flex: 1, color: colors.neutral[0], fontSize: 13, fontWeight: '500',
   },
 });

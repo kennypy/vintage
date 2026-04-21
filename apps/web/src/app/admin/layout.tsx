@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: '/admin/moderation', label: 'Moderação', icon: '~' },
   { href: '/admin/image-flags', label: 'Imagens sinalizadas', icon: '~' },
   { href: '/admin/disputes', label: 'Disputas', icon: '~' },
+  { href: '/admin/orders', label: 'Pedidos em custódia', icon: '~' },
   { href: '/admin/authenticity', label: 'Autenticidade', icon: '~' },
   { href: '/admin/payouts', label: 'Saques', icon: '~' },
   { href: '/admin/features', label: 'Feature Toggles', icon: '~' },

@@ -319,6 +319,11 @@ model Order {
   deliveredAt           DateTime?
   confirmedAt           DateTime?
   disputeDeadline       DateTime?
+  // Escrow hold: set when buyer confirms receipt (or auto-confirm cron fires).
+  // Funds stay in seller's pendingBrl until this timestamp elapses, at which
+  // point the releaseHeldEscrow cron moves them to balanceBrl. During the
+  // hold window the buyer can still open a dispute or request a return.
+  escrowReleasesAt      DateTime?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
@@ -330,6 +335,8 @@ model Order {
   conversation    Conversation?
   reviews         Review[]
   dispute         Dispute?
+  returnRequest   OrderReturn?
+  payments        Payment[]
   notaFiscal      NotaFiscal?
   paymentFlags    PaymentFlag[]
   listingSnapshot OrderListingSnapshot?
@@ -339,6 +346,100 @@ model Order {
   @@index([sellerId])
   @@index([status])
   @@index([createdAt])
+  @@index([escrowReleasesAt])
+}
+
+// --- Payments ---
+//
+// Per-attempt payment record. Replaces the single `order.paymentId` string
+// as the durable record of every payment attempt made against an order;
+// `order.paymentId` stays populated with the ACTIVE attempt's provider id
+// so the existing webhook path keeps resolving by that key.
+//
+// attemptNumber is 1-based and unique per order. When a buyer retries
+// after a failed PIX / card, we create a new Payment row with
+// attemptNumber=prev+1 and parentPaymentId=prev.id, capped at
+// MAX_PAYMENT_ATTEMPTS (shared constant). After the cap, the next
+// retry auto-cancels the order and unwinds escrow.
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String
+  attemptNumber     Int           @default(1)
+  parentPaymentId   String?
+  providerPaymentId String?       // MP reference, null until the provider responds
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  amountBrl         Decimal       @db.Decimal(10, 2)
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  order  Order    @relation(fields: [orderId], references: [id])
+  parent Payment? @relation("PaymentRetryChain", fields: [parentPaymentId], references: [id])
+  retry  Payment[] @relation("PaymentRetryChain")
+
+  @@unique([orderId, attemptNumber])
+  @@index([orderId])
+  @@index([providerPaymentId])
+  @@index([status])
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// --- Returns ---
+//
+// Buyer-initiated return flow. Distinct from Dispute: a return is a
+// collaborative refund path that both parties agreed to, whereas a
+// dispute is an adversarial resolution. Returns escalate to a dispute
+// when the seller rejects or fails to inspect in time.
+//
+// State machine:
+//   REQUESTED  (buyer opened)
+//     ├─ seller approves → APPROVED → (buyer ships, tracking poller) → SHIPPED
+//     │                                 → (carrier delivers) → RECEIVED
+//     │                                   → seller inspects: APPROVED_INSPECTION
+//     │                                     → REFUNDED (money refunded to buyer)
+//     │                                   → seller rejects inspection → DISPUTED
+//     └─ seller rejects → REJECTED → auto-opens Dispute
+//
+// One active OrderReturn per order (schema-enforced via @@unique).
+model OrderReturn {
+  id                 String        @id @default(cuid())
+  orderId            String        @unique
+  requestedById      String
+  status             ReturnStatus  @default(REQUESTED)
+  reason             DisputeReason
+  description        String        @db.Text
+  returnTrackingCode String?
+  returnCarrier      Carrier?
+  returnLabelUrl     String?
+  rejectionReason    String?
+  shippedAt          DateTime?
+  receivedAt         DateTime?
+  inspectedAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([returnTrackingCode])
+  @@index([createdAt])
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  SHIPPED
+  RECEIVED
+  REFUNDED
+  DISPUTED
 }
 
 // --- Payment Flags (flagged for manual review, e.g. amount mismatch) ---
@@ -365,15 +466,27 @@ model Offer {
   amountBrl Decimal     @db.Decimal(10, 2)
   status    OfferStatus @default(PENDING)
   expiresAt DateTime
+  // Counter-offer chain. parentOfferId points at the previous offer in
+  // the negotiation; counterCount is the chain depth (0 = original offer
+  // from buyer; 1 = seller's first counter; etc.). counteredById records
+  // who made THIS offer — matters because buyer and seller alternate and
+  // the next counter must come from the OTHER side. Chain is capped at
+  // MAX_OFFER_COUNTERS (shared constant).
+  parentOfferId String?
+  counterCount  Int     @default(0)
+  counteredById String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  listing Listing @relation(fields: [listingId], references: [id])
-  buyer   User    @relation(fields: [buyerId], references: [id])
+  listing  Listing @relation(fields: [listingId], references: [id])
+  buyer    User    @relation(fields: [buyerId], references: [id])
+  parent   Offer?  @relation("OfferChain", fields: [parentOfferId], references: [id])
+  counters Offer[] @relation("OfferChain")
 
   @@index([listingId])
   @@index([buyerId])
   @@index([status])
+  @@index([parentOfferId])
 }
 
 // --- Bundles ---
@@ -1303,6 +1416,11 @@ enum OrderStatus {
   PAID
   SHIPPED
   DELIVERED
+  // Buyer confirmed receipt (or auto-confirm cron fired) but the
+  // escrow hold window hasn't elapsed yet. Funds sit in seller's
+  // pendingBrl; releaseHeldEscrow cron moves them to balanceBrl when
+  // order.escrowReleasesAt <= now, provided no open dispute/return.
+  HELD
   COMPLETED
   DISPUTED
   REFUNDED

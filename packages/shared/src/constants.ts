@@ -9,6 +9,17 @@ export const BUYER_PROTECTION_RATE = 0.05;
 // Offer constraints
 export const MIN_OFFER_PERCENTAGE = 0.5; // Minimum 50% of asking price
 export const OFFER_EXPIRY_HOURS = 48;
+// Counter-offer chain depth cap. 0 = original buyer offer; subsequent
+// rounds alternate seller → buyer → seller. Cap prevents negotiation
+// loops; after the cap the buyer must either buy at the last offered
+// price or walk away.
+export const MAX_OFFER_COUNTERS = 3;
+
+// Payment retry
+// Cap on attempts per order before auto-cancellation. Each create /
+// retry mints a new Payment row with attemptNumber = prev + 1; when
+// the cap is reached the next retry refuses and the order is cancelled.
+export const MAX_PAYMENT_ATTEMPTS = 3;
 
 // Listing constraints
 export const MAX_LISTING_IMAGES = 20;
@@ -26,6 +37,22 @@ export const MAX_VACATION_DAYS = 90;
 export const SHIPPING_DEADLINE_DAYS = 5;
 export const DISPUTE_WINDOW_DAYS = 5; // Buyer has 5 days after delivery to dispute
 export const AUTO_CONFIRM_DAYS = 5; // Auto-confirm if no dispute after 5 days
+
+// Escrow hold window — seller-protection buffer between the buyer
+// confirming receipt (or auto-confirm firing) and funds landing in
+// the seller's withdrawable balance. Buyer can open a dispute or
+// request a return at any point during the hold. Env-overridable
+// via ESCROW_HOLD_DAYS.
+export const ESCROW_HOLD_DAYS = 2;
+
+// Returns
+// RETURN_WINDOW_DAYS: days after deliveredAt that a buyer may open a
+// return request. RETURN_INSPECTION_DAYS: days after the returned
+// package is marked RECEIVED before the seller is forced to either
+// approve the refund or escalate to a dispute (auto-escalates on
+// timeout so buyers don't sit in limbo).
+export const RETURN_WINDOW_DAYS = 7;
+export const RETURN_INSPECTION_DAYS = 3;
 
 // Wallet
 export const MIN_PAYOUT_BRL = 10.0;

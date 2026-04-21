@@ -5,6 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { ConfigService } from '@nestjs/config';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
@@ -17,6 +18,7 @@ jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
   BUYER_PROTECTION_RATE: 0.05,
   DISPUTE_WINDOW_DAYS: 2,
+  ESCROW_HOLD_DAYS: 2,
 }));
 
 const mockTx = {
@@ -91,6 +93,7 @@ describe('OrdersService', () => {
           },
         },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
       ],
     }).compile();
 
@@ -308,7 +311,7 @@ describe('OrdersService', () => {
   });
 
   describe('confirmReceipt', () => {
-    it('should credit seller wallet on confirmation', async () => {
+    it('should transition order to HELD and set escrowReleasesAt (no immediate wallet credit)', async () => {
       mockPrisma.order.findUnique.mockResolvedValue({
         id: 'order-1',
         buyerId: 'buyer-1',
@@ -317,39 +320,27 @@ describe('OrdersService', () => {
         itemPriceBrl: new Decimal('100'),
       });
 
-      const confirmedOrder = {
+      const heldOrder = {
         id: 'order-1',
         sellerId: 'seller-1',
-        status: 'COMPLETED',
+        status: 'HELD',
         itemPriceBrl: new Decimal('100'),
         listing: { title: 'Vestido' },
       };
-      mockTx.order.update.mockResolvedValue(confirmedOrder);
-      mockTx.wallet.upsert.mockResolvedValue({ id: 'wallet-1', userId: 'seller-1' });
-      mockTx.wallet.update.mockResolvedValue({});
-      mockTx.walletTransaction.create.mockResolvedValue({});
-
-      // Override $transaction for this test to use the callback pattern
-      mockPrisma.$transaction.mockImplementation(
-        (cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx),
-      );
+      mockPrisma.order.update.mockResolvedValue(heldOrder);
 
       const result = await service.confirmReceipt('order-1', 'buyer-1');
 
-      expect(result).toEqual(confirmedOrder);
-      expect(mockTx.wallet.update).toHaveBeenCalledWith(
+      expect(result).toEqual(heldOrder);
+      // Funds MUST NOT leave pendingBrl until the hold window elapses.
+      expect(mockTx.wallet.update).not.toHaveBeenCalled();
+      expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
+      expect(mockPrisma.order.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: {
-            pendingBrl: { decrement: 100 },
-            balanceBrl: { increment: 100 },
-          },
-        }),
-      );
-      expect(mockTx.walletTransaction.create).toHaveBeenCalledWith(
-        expect.objectContaining({
+          where: { id: 'order-1' },
           data: expect.objectContaining({
-            type: 'ESCROW_RELEASE',
-            walletId: 'wallet-1',
+            status: 'HELD',
+            escrowReleasesAt: expect.any(Date),
           }),
         }),
       );

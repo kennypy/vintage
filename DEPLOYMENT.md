@@ -230,6 +230,17 @@ simultâneas).
      CAPTCHA_ENFORCE="false"
    ```
 
+   **Escrow hold + Returns — launch defaults.** Leave these at the
+   launch defaults unless ops data says otherwise. ESCROW_HOLD_DAYS=0
+   reverts to pre-hold behaviour; RETURN_WINDOW_DAYS=0 disables
+   return requests (buyer must open a dispute instead).
+   ```bash
+   fly secrets set \
+     ESCROW_HOLD_DAYS="2" \
+     RETURN_WINDOW_DAYS="7" \
+     RETURN_INSPECTION_DAYS="3"
+   ```
+
    **Analytics (PostHog, EU region)**
    ```bash
    fly secrets set \

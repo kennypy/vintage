@@ -37,6 +37,12 @@ const mockPrisma: Record<string, any> = {
   paymentFlag: {
     create: jest.fn(),
   },
+  payment: {
+    create: jest.fn().mockResolvedValue({ id: 'payment-1' }),
+    count: jest.fn().mockResolvedValue(0),
+    update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
   user: {
     findMany: jest.fn().mockResolvedValue([]),
   },

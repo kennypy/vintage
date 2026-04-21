@@ -47,6 +47,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { IdentityModule } from './identity/identity.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { ReturnsModule } from './returns/returns.module';
 
 @Module({
   imports: [
@@ -110,6 +111,7 @@ import { MetricsModule } from './metrics/metrics.module';
     FraudModule,
     AnalyticsModule,
     IdentityModule,
+    ReturnsModule,
   ],
   providers: [
     {

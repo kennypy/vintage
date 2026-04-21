@@ -16,6 +16,7 @@ interface OrderDetail {
   createdAt: string;
   trackingCode?: string;
   carrier?: string;
+  escrowReleasesAt?: string | null;
   listing?: {
     id: string;
     title: string;
@@ -331,14 +332,41 @@ export default function OrderDetailPage() {
 
       {/* Actions */}
       {order.status === 'PENDING' && isBuyer && (
-        <button
-          type="button"
-          onClick={handleCancel}
-          disabled={confirming}
-          className="w-full py-3 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition disabled:opacity-50 mb-3"
+        <>
+          <Link
+            href={`/orders/${order.id}/retry-payment`}
+            className="block w-full py-3 bg-brand-600 text-white rounded-xl font-medium hover:bg-brand-700 transition mb-3 text-center"
+          >
+            Retentar pagamento
+          </Link>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={confirming}
+            className="w-full py-3 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition disabled:opacity-50 mb-3"
+          >
+            {confirming ? 'Cancelando...' : 'Cancelar pedido'}
+          </button>
+        </>
+      )}
+
+      {order.status === 'HELD' && order.escrowReleasesAt && (
+        <div className="mb-4 rounded-xl bg-yellow-50 border border-yellow-200 p-4">
+          <p className="font-semibold text-yellow-900">Em custódia</p>
+          <p className="mt-1 text-sm text-yellow-800">
+            Fundos serão liberados em {new Date(order.escrowReleasesAt).toLocaleDateString('pt-BR')}.
+            {isBuyer ? ' Abra disputa ou devolução antes dessa data se houver problema.' : ''}
+          </p>
+        </div>
+      )}
+
+      {(order.status === 'DELIVERED' || order.status === 'HELD' || order.status === 'COMPLETED') && isBuyer && (
+        <Link
+          href={`/returns/new?orderId=${order.id}`}
+          className="block w-full py-3 border-2 border-brand-600 text-brand-600 rounded-xl font-medium hover:bg-brand-50 transition mb-3 text-center"
         >
-          {confirming ? 'Cancelando...' : 'Cancelar pedido'}
-        </button>
+          Solicitar devolução
+        </Link>
       )}
 
       {order.status === 'PAID' && isSeller && (

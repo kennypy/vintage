@@ -13,11 +13,12 @@ interface Offer {
   listingTitle: string;
   listingImageUrl?: string;
   amountBrl: number;
-  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  status: 'pending' | 'accepted' | 'rejected' | 'countered' | 'expired';
   buyer: { id: string; name: string };
   seller: { id: string; name: string };
   createdAt: string;
   expiresAt: string;
+  counterCount?: number;
 }
 
 function formatDate(iso: string): string {
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'Pendente',
   accepted: 'Aceita',
   rejected: 'Recusada',
+  countered: 'Contraproposta',
   expired: 'Expirada',
 };
 
@@ -35,6 +37,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
   accepted: 'bg-green-100 text-green-800',
   rejected: 'bg-red-100 text-red-800',
+  countered: 'bg-orange-100 text-orange-800',
   expired: 'bg-gray-100 text-gray-600',
 };
 
@@ -174,6 +177,12 @@ export default function OffersPage() {
                       </button>
                     </div>
                   )}
+                  <Link
+                    href={`/offers/${offer.id}`}
+                    className="mt-1 text-xs font-medium text-brand-600 hover:underline"
+                  >
+                    Ver negociação →
+                  </Link>
                 </div>
               </div>
             </div>
