@@ -15,6 +15,7 @@ import { MetricsService } from '../metrics/metrics.service';
 import { MercadoPagoClient } from './mercadopago.client';
 import { MAX_PAYMENT_ATTEMPTS } from '@vintage/shared';
 import { RetryPaymentDto, RetryPaymentMethod } from './dto/retry-payment.dto';
+import { FraudService } from '../fraud/fraud.service';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
@@ -48,6 +49,7 @@ export class PaymentsService {
     private readonly notifications: NotificationsService,
     private readonly analytics: AnalyticsService,
     private readonly metrics: MetricsService,
+    private readonly fraud: FraudService,
   ) {
     this.nodeEnv = this.configService.get<string>(
       'NODE_ENV',
@@ -237,6 +239,18 @@ export class PaymentsService {
       throw new BadRequestException(
         'Somente pedidos aguardando pagamento podem ser retentados.',
       );
+    }
+
+    // PAYMENT_FAILURE_VELOCITY — flag or block on repeated failures.
+    // Runs via FraudService so thresholds stay DB-tunable without a
+    // deploy. Injected lazily to avoid a circular module import.
+    if (this.fraud) {
+      const decision = await this.fraud.evaluatePaymentAttempt(userId);
+      if (decision.action === 'BLOCK') {
+        throw new ForbiddenException(
+          'Muitas tentativas de pagamento falharam recentemente. Aguarde alguns minutos antes de tentar novamente.',
+        );
+      }
     }
 
     const attemptsSoFar = await this.prisma.payment.count({ where: { orderId } });

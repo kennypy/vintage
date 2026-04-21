@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, MaxLength, Matches, IsOptional, IsBoolean, Equals } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, Matches, IsOptional, IsBoolean, Equals, IsDateString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { CPF_REGEX } from '@vintage/shared';
 
@@ -28,6 +28,13 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  // Birth date is required to enforce the 18+ age gate at registration.
+  // Stored on the User row; also used by the Serpro identity check
+  // (CPF + name + DOB match). ISO-8601 date format (YYYY-MM-DD).
+  @ApiProperty({ example: '1995-06-15', description: 'Data de nascimento (ISO 8601, obrigatório, 18+)' })
+  @IsDateString({}, { message: 'Data de nascimento inválida' })
+  birthDate!: string;
 
   @ApiProperty({
     description: 'Aceitação obrigatória dos Termos de Uso e Política de Privacidade',

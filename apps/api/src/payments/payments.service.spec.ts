@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { FraudService } from '../fraud/fraud.service';
 
 const mockMercadoPago = {
   createPixPayment: jest.fn(),
@@ -84,6 +85,12 @@ describe('PaymentsService', () => {
           },
         },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
+        {
+          provide: FraudService,
+          useValue: {
+            evaluatePaymentAttempt: jest.fn().mockResolvedValue({ action: 'ALLOW' }),
+          },
+        },
       ],
     }).compile();
 

@@ -20,6 +20,8 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
   const [password, setPassword] = useState('');
+  // ISO 8601 yyyy-mm-dd, bound to the native <input type="date">.
+  const [birthDate, setBirthDate] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -38,6 +40,21 @@ export default function RegisterPage() {
       return;
     }
 
+    if (!birthDate) {
+      setError('Data de nascimento é obrigatória.');
+      return;
+    }
+    const birth = new Date(birthDate);
+    if (Number.isNaN(birth.getTime())) {
+      setError('Data de nascimento inválida.');
+      return;
+    }
+    const ageYears = (Date.now() - birth.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (ageYears < 18) {
+      setError('Você precisa ter pelo menos 18 anos para criar uma conta.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -46,6 +63,7 @@ export default function RegisterPage() {
         email,
         cpf: cpf.replace(/\D/g, ''),
         password,
+        birthDate,
         // Null when Turnstile isn't configured or the widget hasn't
         // solved yet — the backend CaptchaGuard no-ops unless
         // CAPTCHA_ENFORCE=true, so the server rejects only when
@@ -111,6 +129,21 @@ export default function RegisterPage() {
               required
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
+          </div>
+
+          <div>
+            <label htmlFor="birthDate" className="block text-sm font-medium text-gray-700 mb-1">
+              Data de nascimento
+            </label>
+            <input
+              id="birthDate"
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              required
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
+            />
+            <p className="mt-1 text-xs text-gray-500">Você precisa ter 18 anos ou mais.</p>
           </div>
 
           <div>

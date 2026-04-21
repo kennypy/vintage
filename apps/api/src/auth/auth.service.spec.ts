@@ -35,11 +35,15 @@ import { MetricsService } from '../metrics/metrics.service';
 
 const mockPrisma = {
   user: {
-    findFirst: jest.fn(),
+    findFirst: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+  },
+  fraudFlag: {
+    create: jest.fn().mockResolvedValue({}),
   },
   loginEvent: {
     create: jest.fn(),
@@ -144,6 +148,7 @@ describe('AuthService', () => {
       cpf: '529.982.247-25',
       name: 'Maria Silva',
       phone: '+5511999999999',
+      birthDate: '1990-01-15',
       acceptedTos: true,
       tosVersion: '1.0.0',
     };
@@ -176,7 +181,8 @@ describe('AuthService', () => {
           passwordHash: 'hashed_password',
           cpfEncrypted: 'ENC(52998224725)', cpfLookupHash: 'HASH(52998224725)',
           name: 'Maria Silva',
-          phone: '+5511999999999',
+          // Phone is normalised to digits-only at create time.
+          phone: '5511999999999',
           wallet: { create: {} },
         }),
       });

@@ -12,6 +12,7 @@ import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
 import { MAX_LISTING_IMAGES, containsProhibitedContent } from '@vintage/shared';
+import { FraudService } from '../fraud/fraud.service';
 
 @Injectable()
 export class ListingsService {
@@ -24,6 +25,7 @@ export class ListingsService {
     private readonly searchService: SearchService,
     private readonly analytics: AnalyticsService,
     private readonly notifications: NotificationsService,
+    private readonly fraud: FraudService,
   ) {
     this.allowedImageHosts = buildAllowedImageHosts(this.config);
   }
@@ -84,7 +86,7 @@ export class ListingsService {
   async create(sellerId: string, dto: CreateListingDto) {
     const seller = await this.prisma.user.findUnique({
       where: { id: sellerId },
-      select: { vacationMode: true, isBanned: true },
+      select: { vacationMode: true, isBanned: true, cpfIdentityVerified: true, cpfChecksumValid: true },
     });
 
     if (seller?.isBanned) {
@@ -93,6 +95,35 @@ export class ListingsService {
 
     if (seller?.vacationMode) {
       throw new BadRequestException('Desative o modo férias antes de criar anúncios');
+    }
+
+    // KYC-gated listing creation. When IDENTITY_VERIFICATION_ENABLED is on,
+    // sellers must have completed identity verification (Serpro/CAF) before
+    // they can list. This closes the ban-evasion loop where a suspended user
+    // re-registers with a fresh email and immediately starts selling. We
+    // keep it behind a flag so initial rollout and markets without the KYC
+    // vendor active can still onboard — but the cpfChecksumValid fallback
+    // is always enforced to reject malformed CPF inputs.
+    const kycEnforced =
+      this.config.get<string>('IDENTITY_VERIFICATION_ENABLED') === 'true';
+    if (kycEnforced && !seller?.cpfIdentityVerified) {
+      throw new ForbiddenException(
+        'Verifique sua identidade antes de criar anúncios. Acesse suas configurações e conclua a verificação de CPF.',
+      );
+    }
+    if (!seller?.cpfChecksumValid) {
+      throw new ForbiddenException(
+        'CPF inválido. Atualize seu cadastro antes de criar anúncios.',
+      );
+    }
+
+    // LISTING_VELOCITY — flag (or block, if the rule is set to BLOCK)
+    // sellers publishing an unusual burst of items. See FraudService.
+    const fraudDecision = await this.fraud.evaluateListingCreation(sellerId);
+    if (fraudDecision.action === 'BLOCK') {
+      throw new ForbiddenException(
+        'Você atingiu o limite de novos anúncios por período. Aguarde algumas horas ou entre em contato com o suporte.',
+      );
     }
 
     // Prohibited content check

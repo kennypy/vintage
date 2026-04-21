@@ -10,6 +10,20 @@ import { PrismaService } from '../prisma/prisma.service';
 export const FRAUD_RULE_CODES = {
   NEW_ACCOUNT_VELOCITY: 'NEW_ACCOUNT_VELOCITY',
   PAYOUT_DRAIN: 'PAYOUT_DRAIN',
+  // Seller lists more than N items within W minutes — classic bulk
+  // reseller / inventory dump signal. FLAG only (sellers with real
+  // wardrobes hit this during spring-cleaning bursts; we don't want
+  // to BLOCK their first upload).
+  LISTING_VELOCITY: 'LISTING_VELOCITY',
+  // Buyer hits more than N failed payment attempts in W minutes across
+  // any payment method. Either stolen card enumeration or a
+  // testing-the-store-bot. BLOCK only on the most egregious thresholds
+  // — default rule comes in as FLAG.
+  PAYMENT_FAILURE_VELOCITY: 'PAYMENT_FAILURE_VELOCITY',
+  // Registered twice with the same phone number (runtime check lives in
+  // AuthService.register — this rule code is just the label under which
+  // the flag lands so ops can filter).
+  DUPLICATE_PHONE: 'DUPLICATE_PHONE',
 } as const;
 
 export type FraudAction = 'FLAG' | 'BLOCK';
@@ -130,6 +144,81 @@ export class FraudService {
     } catch (err) {
       this.logger.warn(
         `evaluatePayout failed for ${userId}: ${String(err).slice(0, 200)}`,
+      );
+      return { action: 'ALLOW' };
+    }
+  }
+
+  /**
+   * Evaluate a seller about to create a listing. Runs LISTING_VELOCITY:
+   * flag if the seller has published more than `threshold` listings in
+   * the last `windowMinutes`. Caller proceeds unless rule is BLOCK.
+   */
+  async evaluateListingCreation(sellerId: string): Promise<FraudDecision> {
+    try {
+      const rule = await this.getRule(FRAUD_RULE_CODES.LISTING_VELOCITY);
+      if (!rule) return { action: 'ALLOW' };
+
+      const since = new Date(Date.now() - rule.windowMinutes * 60 * 1000);
+      const recent = await this.prisma.listing.count({
+        where: { sellerId, createdAt: { gte: since } },
+      });
+      if (recent < rule.threshold) return { action: 'ALLOW' };
+
+      const flag = await this.createFlag(sellerId, rule.code, {
+        listingsInWindow: recent,
+        windowMinutes: rule.windowMinutes,
+        threshold: rule.threshold,
+      });
+      return {
+        action: rule.action as FraudAction,
+        ruleCode: rule.code,
+        flagId: flag?.id,
+        reason: rule.description,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `evaluateListingCreation failed for ${sellerId}: ${String(err).slice(0, 200)}`,
+      );
+      return { action: 'ALLOW' };
+    }
+  }
+
+  /**
+   * Evaluate a payment attempt. Runs PAYMENT_FAILURE_VELOCITY: flag
+   * when the buyer has racked up more than `threshold` FAILED Payment
+   * rows in the last `windowMinutes`. Called from the payments
+   * retry path; on BLOCK, caller must refuse the attempt.
+   */
+  async evaluatePaymentAttempt(buyerId: string): Promise<FraudDecision> {
+    try {
+      const rule = await this.getRule(FRAUD_RULE_CODES.PAYMENT_FAILURE_VELOCITY);
+      if (!rule) return { action: 'ALLOW' };
+
+      const since = new Date(Date.now() - rule.windowMinutes * 60 * 1000);
+      const failed = await this.prisma.payment.count({
+        where: {
+          status: 'FAILED',
+          createdAt: { gte: since },
+          order: { buyerId },
+        },
+      });
+      if (failed < rule.threshold) return { action: 'ALLOW' };
+
+      const flag = await this.createFlag(buyerId, rule.code, {
+        failedPayments: failed,
+        windowMinutes: rule.windowMinutes,
+        threshold: rule.threshold,
+      });
+      return {
+        action: rule.action as FraudAction,
+        ruleCode: rule.code,
+        flagId: flag?.id,
+        reason: rule.description,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `evaluatePaymentAttempt failed for ${buyerId}: ${String(err).slice(0, 200)}`,
       );
       return { action: 'ALLOW' };
     }

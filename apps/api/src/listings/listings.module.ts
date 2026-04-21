@@ -3,12 +3,13 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SearchModule } from '../search/search.module';
+import { FraudModule } from '../fraud/fraud.module';
 import { ListingsController } from './listings.controller';
 import { ListingsService } from './listings.service';
 import { ListingsCronService } from './listings-cron.service';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, NotificationsModule, SearchModule],
+  imports: [ConfigModule, PrismaModule, NotificationsModule, SearchModule, FraudModule],
   controllers: [ListingsController],
   providers: [ListingsService, ListingsCronService],
   exports: [ListingsService],

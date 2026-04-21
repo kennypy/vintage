@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FraudService } from '../fraud/fraud.service';
 
 jest.mock('@vintage/shared', () => ({
   MAX_LISTING_IMAGES: 20,
@@ -83,6 +84,12 @@ describe('ListingsService', () => {
           provide: NotificationsService,
           useValue: { createNotification: jest.fn().mockResolvedValue(null) },
         },
+        {
+          provide: FraudService,
+          useValue: {
+            evaluateListingCreation: jest.fn().mockResolvedValue({ action: 'ALLOW' }),
+          },
+        },
       ],
     }).compile();
 
@@ -101,7 +108,7 @@ describe('ListingsService', () => {
     } as any;
 
     it('should create listing with images', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false });
+      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false, isBanned: false, cpfIdentityVerified: true, cpfChecksumValid: true });
       mockPrisma.category.findUnique.mockResolvedValue({ id: 'cat-1' });
       const createdListing = { id: 'listing-1', ...createDto };
       mockPrisma.listing.create.mockResolvedValue(createdListing);
@@ -126,7 +133,7 @@ describe('ListingsService', () => {
     });
 
     it('should reject if user is on vacation mode', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: true });
+      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: true, isBanned: false, cpfIdentityVerified: true, cpfChecksumValid: true });
 
       await expect(service.create('seller-1', createDto)).rejects.toThrow(
         BadRequestException,
@@ -137,7 +144,7 @@ describe('ListingsService', () => {
     });
 
     it('should reject if more than 20 images', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false });
+      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false, isBanned: false, cpfIdentityVerified: true, cpfChecksumValid: true });
       const tooManyImages = Array.from({ length: 21 }, (_, i) => `https://img.example.com/${i}.jpg`);
 
       await expect(
@@ -146,7 +153,7 @@ describe('ListingsService', () => {
     });
 
     it('should reject if no images provided', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false });
+      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false, isBanned: false, cpfIdentityVerified: true, cpfChecksumValid: true });
 
       await expect(
         service.create('seller-1', { ...createDto, imageUrls: [] }),
@@ -154,7 +161,7 @@ describe('ListingsService', () => {
     });
 
     it('should reject if category is invalid', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false });
+      mockPrisma.user.findUnique.mockResolvedValue({ vacationMode: false, isBanned: false, cpfIdentityVerified: true, cpfChecksumValid: true });
       mockPrisma.category.findUnique.mockResolvedValue(null);
 
       await expect(service.create('seller-1', createDto)).rejects.toThrow(
