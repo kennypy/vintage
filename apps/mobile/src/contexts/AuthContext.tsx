@@ -21,6 +21,22 @@ import {
   registerForPushNotifications,
   configureForegroundNotifications,
 } from '../services/pushNotifications';
+import { maybePrimeNotificationPermission } from '../services/permissions';
+
+/**
+ * Prime + register combo used on login/register paths. The primer shows
+ * at most once per install and only when the OS hasn't already decided.
+ * If the user accepts and we get permission, we also register the push
+ * token. All failures are swallowed — notifications are best-effort.
+ */
+async function primeAndRegisterPush(): Promise<void> {
+  try {
+    const granted = await maybePrimeNotificationPermission();
+    if (granted) await registerForPushNotifications();
+  } catch {
+    /* push registration must never break an auth flow */
+  }
+}
 
 interface AuthContextType {
   user: (AuthUser & Partial<UserProfile>) | null;
@@ -104,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const profile = await getProfile();
           setUser(profile as AuthUser & Partial<UserProfile>);
           // Register push token on app launch for returning users
-          registerForPushNotifications().catch(() => {});
+          primeAndRegisterPush();
         }
       } catch (_error) {
         setUser(null);
@@ -133,7 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return response;
         }
         setUser(response.user);
-        registerForPushNotifications().catch(() => {});
+        primeAndRegisterPush();
         return null;
       } catch (error) {
         if (isNetworkError(error)) {
@@ -172,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await confirmLoginTwoFaService(tempToken, code);
       const profile = await apiFetch<AuthUser & Partial<UserProfile>>('/users/me');
       setUser(profile);
-      registerForPushNotifications().catch(() => {});
+      primeAndRegisterPush();
     },
     [],
   );
@@ -191,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       setDemoActive(false);
       setUser(response.user);
-      registerForPushNotifications().catch(() => {});
+      primeAndRegisterPush();
     } catch (error) {
       if (isNetworkError(error)) {
         // API unavailable — create local demo user with provided details

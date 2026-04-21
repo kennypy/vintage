@@ -10,6 +10,10 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { createListing, uploadListingImage, uploadListingVideo, setListingVideo, ListingSuggestions } from '../../src/services/listings';
 import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
+import {
+  ensureCameraPermission,
+  ensureMediaLibraryPermission,
+} from '../../src/services/permissions';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { containsProhibitedContent } from '@vintage/shared';
 
@@ -217,19 +221,10 @@ function SellScreenContent() {
 
 
     const pickFromSource = async (useCamera: boolean) => {
-      if (useCamera) {
-        const camPerm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!camPerm.granted) {
-          Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para tirar fotos.');
-          return;
-        }
-      } else {
-        const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!libPerm.granted) {
-          Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar fotos.');
-          return;
-        }
-      }
+      const ok = useCamera
+        ? await ensureCameraPermission({ purpose: 'à câmera para tirar fotos dos anúncios' })
+        : await ensureMediaLibraryPermission({ purpose: 'à sua galeria para adicionar fotos' });
+      if (!ok) return;
 
       const result = useCamera
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
@@ -298,19 +293,10 @@ function SellScreenContent() {
 
   const handleAddVideo = async () => {
     const pickVideoFromSource = async (useCamera: boolean) => {
-      if (useCamera) {
-        const camPerm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!camPerm.granted) {
-          Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para gravar o vídeo.');
-          return;
-        }
-      } else {
-        const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!libPerm.granted) {
-          Alert.alert('Permissão necessária', 'Precisamos de acesso à sua galeria para adicionar o vídeo.');
-          return;
-        }
-      }
+      const ok = useCamera
+        ? await ensureCameraPermission({ purpose: 'à câmera para gravar o vídeo' })
+        : await ensureMediaLibraryPermission({ purpose: 'à sua galeria para adicionar o vídeo' });
+      if (!ok) return;
 
       const result = useCamera
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], videoMaxDuration: 30, quality: 0.8 })

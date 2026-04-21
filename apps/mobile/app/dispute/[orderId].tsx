@@ -11,6 +11,10 @@ import { getOrder } from '../../src/services/orders';
 import type { Order } from '../../src/services/orders';
 import { createDispute } from '../../src/services/disputes';
 import type { DisputeReason } from '../../src/services/disputes';
+import {
+  ensureCameraPermission,
+  ensureMediaLibraryPermission,
+} from '../../src/services/permissions';
 
 const REASONS: { value: DisputeReason; label: string }[] = [
   { value: 'NOT_RECEIVED', label: 'Item n\u00e3o recebido' },
@@ -67,17 +71,11 @@ export default function DisputeScreen() {
 
   const pickPhoto = async (useCamera: boolean) => {
     if (useCamera) {
-      const camPerm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!camPerm.granted) {
-        Alert.alert('Permiss\u00e3o necess\u00e1ria', 'Precisamos de acesso \u00e0 c\u00e2mera para tirar fotos.');
-        return;
-      }
+      const __camOk = await ensureCameraPermission({ purpose: 'à câmera para documentar a disputa' });
+      if (!__camOk) return;
     } else {
-      const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!libPerm.granted) {
-        Alert.alert('Permiss\u00e3o necess\u00e1ria', 'Precisamos de acesso \u00e0 sua galeria para adicionar fotos.');
-        return;
-      }
+      const __libOk = await ensureMediaLibraryPermission({ purpose: 'à sua galeria para anexar fotos da disputa' });
+      if (!__libOk) return;
     }
 
     const result = useCamera

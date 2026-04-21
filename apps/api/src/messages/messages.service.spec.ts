@@ -5,6 +5,11 @@ import {
 } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const mockNotifications = {
+  createNotification: jest.fn().mockResolvedValue(null),
+};
 
 const mockPrisma = {
   conversation: {
@@ -43,6 +48,7 @@ describe('MessagesService', () => {
       providers: [
         MessagesService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 
@@ -142,12 +148,29 @@ describe('MessagesService', () => {
 
     it('should send a message and update lastMessageAt', async () => {
       mockPrisma.conversation.findUnique.mockResolvedValue(mockConversation);
-      const sentMessage = { id: 'msg-1', conversationId: 'conv-1', senderId: 'user-1', body: 'Olá' };
+      // Include the sender relation because sendMessage now reads
+      // message.sender.name to compose the notification title.
+      const sentMessage = {
+        id: 'msg-1',
+        conversationId: 'conv-1',
+        senderId: 'user-1',
+        body: 'Olá',
+        sender: { id: 'user-1', name: 'Maria', avatarUrl: null },
+      };
       mockPrisma.$transaction.mockResolvedValue([sentMessage, {}]);
 
       const result = await service.sendMessage('conv-1', 'user-1', 'Olá');
 
       expect(result).toEqual(sentMessage);
+      // Recipient (participant2 here) gets a "messages"-category notif.
+      expect(mockNotifications.createNotification).toHaveBeenCalledWith(
+        'user-2',
+        'NEW_MESSAGE',
+        expect.stringContaining('mensagem'),
+        'Olá',
+        expect.objectContaining({ conversationId: 'conv-1', senderId: 'user-1' }),
+        'messages',
+      );
     });
 
     it('should throw NotFoundException if conversation not found', async () => {

@@ -127,6 +127,86 @@ export class ListingsCronService {
   }
 
   /**
+   * Fire "new items match your saved search" notifications once per day.
+   * For each user with `notify = true` on a SavedSearch, look at listings
+   * created in the last 24 hours that match the saved filter set, and
+   * send a single aggregated push per matching saved search (up to a
+   * hard cap to stay polite).
+   *
+   * Deliberate simplifications vs. the search endpoint:
+   *   - The text `query` string is NOT matched here — running a real
+   *     Meilisearch query per saved search per night is expensive for
+   *     a marginal UX win. Users set text queries for exploration; we
+   *     treat that as best-effort and lean on filters for the alert.
+   *   - The window is strictly 24h. If the cron misses a day, those
+   *     listings are lost for alerts — no backfill. Acceptable because
+   *     saved-search is discovery, not audit.
+   *
+   * Runs daily at 09:00 (locale-friendly morning notification).
+   */
+  @Cron('0 9 * * *')
+  async notifySavedSearchMatches() {
+    if (!(await this.cronLock.acquire('listings:savedSearchMatches'))) return;
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const savedSearches = await this.prisma.savedSearch.findMany({
+      where: { notify: true },
+      select: { id: true, userId: true, query: true, filtersJson: true },
+      take: 2000,
+    });
+    if (savedSearches.length === 0) return;
+
+    this.logger.log(`Checking ${savedSearches.length} saved searches for new matches`);
+
+    for (const ss of savedSearches) {
+      try {
+        const filters = (ss.filtersJson ?? {}) as Record<string, unknown>;
+        const where: Record<string, unknown> = {
+          status: 'ACTIVE',
+          createdAt: { gte: since },
+        };
+        if (typeof filters.categoryId === 'string') where.categoryId = filters.categoryId;
+        if (typeof filters.brandId === 'string') where.brandId = filters.brandId;
+        if (typeof filters.condition === 'string') where.condition = filters.condition;
+        if (typeof filters.size === 'string') where.size = filters.size;
+        if (typeof filters.minPrice === 'number' || typeof filters.maxPrice === 'number') {
+          const priceBrl: Record<string, number> = {};
+          if (typeof filters.minPrice === 'number') priceBrl.gte = filters.minPrice;
+          if (typeof filters.maxPrice === 'number') priceBrl.lte = filters.maxPrice;
+          where.priceBrl = priceBrl;
+        }
+
+        const matchCount = await this.prisma.listing.count({ where });
+        if (matchCount === 0) continue;
+
+        await this.notifications
+          .createNotification(
+            ss.userId,
+            'SAVED_SEARCH_MATCH',
+            'Novos itens na sua busca salva',
+            matchCount === 1
+              ? `Chegou 1 item novo que combina com "${ss.query}".`
+              : `Chegaram ${matchCount} itens novos que combinam com "${ss.query}".`,
+            { savedSearchId: ss.id, matchCount: String(matchCount) },
+            // Vinted's "new items" card sits under the "Other" block —
+            // same semantic as favourites (low-urgency discovery), so we
+            // reuse the favourites toggle instead of adding a yet another
+            // preference column.
+            'favorites',
+          )
+          .catch(() => {
+            /* per-user failure must not break the batch */
+          });
+      } catch (err) {
+        this.logger.error(
+          `Saved search ${ss.id} notification failed: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Expire active promotions whose endsAt has passed.
    * Resets promotedUntil on the listing.
    * Runs every hour.

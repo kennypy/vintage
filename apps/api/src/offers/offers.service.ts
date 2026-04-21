@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import {
   MIN_OFFER_PERCENTAGE,
@@ -14,7 +15,10 @@ import {
 
 @Injectable()
 export class OffersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async findUserOffers(
     userId: string,
@@ -109,7 +113,7 @@ export class OffersService {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + OFFER_EXPIRY_HOURS);
 
-    return this.prisma.offer.create({
+    const offer = await this.prisma.offer.create({
       data: {
         listingId: dto.listingId,
         buyerId,
@@ -126,6 +130,23 @@ export class OffersService {
         buyer: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
+
+    // Notify the seller — they decide whether to accept/reject. Fire-and-
+    // forget so a notification outage doesn't rollback the offer.
+    this.notifications
+      .createNotification(
+        listing.sellerId,
+        'OFFER_RECEIVED',
+        'Você recebeu uma nova oferta',
+        `${offer.buyer?.name ?? 'Alguém'} ofereceu R$ ${Number(dto.amountBrl).toFixed(2)} por "${listing.title}".`,
+        { offerId: offer.id, listingId: listing.id, buyerId },
+        'offers',
+      )
+      .catch(() => {
+        /* never let notification failure break an offer create */
+      });
+
+    return offer;
   }
 
   async accept(offerId: string, sellerId: string) {
@@ -161,7 +182,7 @@ export class OffersService {
       throw new BadRequestException('Este anúncio não está disponível para transações');
     }
 
-    return this.prisma.offer.update({
+    const updated = await this.prisma.offer.update({
       where: { id: offerId },
       data: { status: 'ACCEPTED' },
       include: {
@@ -173,6 +194,23 @@ export class OffersService {
         buyer: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
+
+    // Notify the buyer — their offer was accepted, they're expected to
+    // complete checkout now.
+    this.notifications
+      .createNotification(
+        offer.buyerId,
+        'OFFER_ACCEPTED',
+        'Sua oferta foi aceita!',
+        `O vendedor aceitou sua oferta de R$ ${Number(offer.amountBrl).toFixed(2)} em "${offer.listing.title}". Finalize a compra antes que a oferta expire.`,
+        { offerId, listingId: offer.listingId },
+        'offers',
+      )
+      .catch(() => {
+        /* never let notification failure break an offer accept */
+      });
+
+    return updated;
   }
 
   async reject(offerId: string, sellerId: string) {
@@ -193,7 +231,7 @@ export class OffersService {
       throw new BadRequestException('Esta oferta não está mais pendente');
     }
 
-    return this.prisma.offer.update({
+    const updated = await this.prisma.offer.update({
       where: { id: offerId },
       data: { status: 'REJECTED' },
       include: {
@@ -205,5 +243,21 @@ export class OffersService {
         buyer: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
+
+    // Notify the buyer — offer was declined so they stop waiting.
+    this.notifications
+      .createNotification(
+        offer.buyerId,
+        'OFFER_REJECTED',
+        'Sua oferta foi recusada',
+        `O vendedor recusou sua oferta em "${offer.listing.title}". Você pode fazer uma nova oferta ou comprar pelo preço cheio.`,
+        { offerId, listingId: offer.listingId },
+        'offers',
+      )
+      .catch(() => {
+        /* never let notification failure break an offer reject */
+      });
+
+    return updated;
   }
 }

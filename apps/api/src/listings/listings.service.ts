@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { buildAllowedImageHosts, validateImageUrl } from '../common/validators/image-url.validator';
 import { CreateListingDto } from './dto/create-listing.dto';
@@ -22,6 +23,7 @@ export class ListingsService {
     private readonly config: ConfigService,
     private readonly searchService: SearchService,
     private readonly analytics: AnalyticsService,
+    private readonly notifications: NotificationsService,
   ) {
     this.allowedImageHosts = buildAllowedImageHosts(this.config);
   }
@@ -331,6 +333,10 @@ export class ListingsService {
       data.status = dto.status;
     }
 
+    const oldPrice = Number(listing.priceBrl);
+    const newPrice = dto.priceBrl !== undefined ? Number(dto.priceBrl) : oldPrice;
+    const isPriceDrop = dto.priceBrl !== undefined && newPrice < oldPrice;
+
     const updated = await this.prisma.listing.update({
       where: { id },
       data,
@@ -339,7 +345,56 @@ export class ListingsService {
 
     this.syncSearchIndex(updated.id).catch(() => {});
 
+    if (isPriceDrop) {
+      // Fire-and-forget so a slow notification batch doesn't block the
+      // seller's update response. Alert only users who haven't already
+      // been notified for this listing (notifiedAt IS NULL) — prevents a
+      // spammy seller who ratchets the price down repeatedly from
+      // pinging the same watcher every time.
+      this.notifyPriceDrop(updated.id, updated.title, oldPrice, newPrice).catch(
+        (err) => this.logger.warn(`price-drop notify failed: ${String(err).slice(0, 200)}`),
+      );
+    }
+
     return updated;
+  }
+
+  private async notifyPriceDrop(
+    listingId: string,
+    title: string,
+    oldPrice: number,
+    newPrice: number,
+  ): Promise<void> {
+    const alerts = await this.prisma.priceDropAlert.findMany({
+      where: { listingId, notifiedAt: null },
+      select: { id: true, userId: true },
+    });
+    if (alerts.length === 0) return;
+
+    await Promise.all(
+      alerts.map((a) =>
+        this.notifications
+          .createNotification(
+            a.userId,
+            'PRICE_DROP',
+            'Item favorito com preço menor',
+            `"${title}" caiu de R$ ${oldPrice.toFixed(2)} para R$ ${newPrice.toFixed(2)}.`,
+            { listingId },
+            'priceDrops',
+          )
+          .catch(() => {
+            /* per-user notification failure must not block the batch */
+          }),
+      ),
+    );
+
+    // Mark notifiedAt so future drops to a different price don't re-ping
+    // the same user. A seller who raises and then drops again still only
+    // emits one notification per subscriber per listing.
+    await this.prisma.priceDropAlert.updateMany({
+      where: { id: { in: alerts.map((a) => a.id) } },
+      data: { notifiedAt: new Date() },
+    });
   }
 
   async remove(id: string, sellerId: string) {
@@ -396,6 +451,28 @@ export class ListingsService {
 
     await this.prisma.favorite.create({ data: { userId, listingId } });
     await this.prisma.listing.update({ where: { id: listingId }, data: { favoriteCount: { increment: 1 } } });
+
+    // Notify the seller unless they favourited their own item (impossible
+    // today because toggleFavorite has no self-check, but cheap defence).
+    if (listing.sellerId !== userId) {
+      const favoriter = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+      this.notifications
+        .createNotification(
+          listing.sellerId,
+          'LISTING_FAVORITED',
+          'Alguém favoritou seu anúncio',
+          `${favoriter?.name ?? 'Alguém'} adicionou "${listing.title}" aos favoritos.`,
+          { listingId, favoriterId: userId },
+          'favorites',
+        )
+        .catch(() => {
+          /* never let notification failure break a favourite */
+        });
+    }
+
     return { favorited: true };
   }
 

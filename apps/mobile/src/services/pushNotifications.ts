@@ -1,30 +1,38 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { apiFetch } from './api';
+import { ensureNotificationPermission } from './permissions';
 
 /**
- * Request push notification permissions, obtain the Expo push token,
- * and register it with the Vintage.br backend.
+ * Request push notification permissions (via the shared helper so a
+ * denial routes through the Settings deep-link UX), obtain the native
+ * push token, and register it with the Vintage.br backend.
+ *
+ * Call this ONLY after the user has seen the first-run primer
+ * (AuthContext/AppShell). If the user hasn't granted permission it
+ * returns null silently — the caller should not treat that as an error.
  */
 export async function registerForPushNotifications(): Promise<string | null> {
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+  const granted = await ensureNotificationPermission({
+    purpose:
+      'para te avisar de mensagens, ofertas e atualizações dos seus pedidos',
+  });
+  if (!granted) return null;
 
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
-  if (finalStatus !== 'granted') {
+  // Get the native push token (FCM for Android, APNs for iOS). This
+  // only works once Firebase (Android) / APNs (iOS) credentials are
+  // configured in EAS. Before those land, getDevicePushTokenAsync
+  // throws on-device — we swallow here so dev builds without creds
+  // still boot.
+  let token: string;
+  try {
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    token = tokenData.data;
+  } catch {
     return null;
   }
-
-  // Get the native push token (FCM for Android, APNs for iOS)
-  const tokenData = await Notifications.getDevicePushTokenAsync();
-  const token = tokenData.data;
   const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
 
-  // Register with backend
   await apiFetch('/push/register', {
     method: 'POST',
     body: JSON.stringify({ token, platform }),

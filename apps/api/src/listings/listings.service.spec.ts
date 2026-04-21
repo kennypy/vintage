@@ -9,6 +9,7 @@ import { ListingsService } from './listings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 jest.mock('@vintage/shared', () => ({
   MAX_LISTING_IMAGES: 20,
@@ -46,6 +47,10 @@ const mockPrisma = {
     count: jest.fn(),
   },
   follow: { findMany: jest.fn() },
+  priceDropAlert: {
+    findMany: jest.fn().mockResolvedValue([]),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
 };
 
 describe('ListingsService', () => {
@@ -74,6 +79,10 @@ describe('ListingsService', () => {
           },
         },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
+        {
+          provide: NotificationsService,
+          useValue: { createNotification: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 

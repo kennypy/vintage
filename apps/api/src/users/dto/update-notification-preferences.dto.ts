@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -54,4 +54,24 @@ export class UpdateNotificationPreferencesDto {
   @IsOptional()
   @IsBoolean()
   news?: boolean;
+
+  @ApiPropertyOptional({ description: 'Notificações quando você recebe uma nova avaliação' })
+  @IsOptional()
+  @IsBoolean()
+  reviews?: boolean;
+
+  @ApiPropertyOptional({ description: 'Notificações quando alguém favorita um item seu' })
+  @IsOptional()
+  @IsBoolean()
+  favorites?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Limite diário de pushes por categoria. 0 = sem limite. Acima do limite, a entrada ainda aparece na sineta mas o push é suprimido.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  dailyCap?: number;
 }
