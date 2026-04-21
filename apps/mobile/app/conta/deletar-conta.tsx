@@ -30,7 +30,7 @@ import { apiFetch } from '../../src/services/api';
 export default function DeletarContaScreen() {
   const router = useRouter();
   const { theme } = useTheme();
-  const { signOut } = useAuth();
+  const { signOut, isDemoMode } = useAuth();
 
   const [method, setMethod] = useState<'password' | 'emailCode'>('password');
   const [password, setPassword] = useState('');
@@ -81,6 +81,15 @@ export default function DeletarContaScreen() {
   const runDelete = async () => {
     setBusy(true);
     try {
+      // Demo mode has no server-side account — the "user" only ever
+      // existed on-device. signOut() clears the local demo record and
+      // disables the flag, which is what deletion actually means here.
+      if (isDemoMode) {
+        await signOut();
+        router.replace('/(tabs)');
+        return;
+      }
+
       const body: Record<string, string> = {};
       if (method === 'password' && password) body.password = password;
       if (method === 'emailCode' && confirmToken) body.confirmToken = confirmToken;
