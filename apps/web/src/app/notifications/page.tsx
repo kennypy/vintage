@@ -24,6 +24,9 @@ interface NotificationPreferences {
   priceDrops: boolean;
   promotions: boolean;
   news: boolean;
+  reviews: boolean;
+  favorites: boolean;
+  dailyCap: number;
 }
 
 function timeAgo(iso: string): string {
@@ -66,6 +69,13 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   );
 }
 
+// Defaults MUST match the backend schema (apps/api/prisma/schema.prisma
+// User.notif* columns): every category is on by default so a fresh
+// install stays in sync with a fresh DB row. Previously the web
+// silently pinned promotions+news to false, which looked like the
+// account had them off even though the DB had them on — the first
+// PATCH from any other toggle would persist the false value. Keep the
+// whole shape aligned across mobile, web, and DB.
 const DEFAULT_PREFS: NotificationPreferences = {
   pushEnabled: true,
   emailEnabled: true,
@@ -74,9 +84,19 @@ const DEFAULT_PREFS: NotificationPreferences = {
   offers: true,
   followers: true,
   priceDrops: true,
-  promotions: false,
-  news: false,
+  promotions: true,
+  news: true,
+  reviews: true,
+  favorites: true,
+  dailyCap: 0,
 };
+
+const DAILY_CAP_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: 0, label: 'Sem limite' },
+  { value: 2, label: 'Até 2 por dia' },
+  { value: 5, label: 'Até 5 por dia' },
+  { value: 10, label: 'Até 10 por dia' },
+];
 
 type Tab = 'all' | 'unread' | 'preferences';
 
@@ -231,20 +251,26 @@ export default function NotificationsPage() {
           <section className="bg-white border border-gray-200 rounded-xl p-6">
             <h2 className="text-base font-semibold text-gray-900 mb-4">Categorias</h2>
             <div className="divide-y divide-gray-100">
-              <PrefRow label="Pedidos" hint="Pagamento, envio e entrega">
-                <Toggle value={prefs.orders} onChange={(v) => updatePref({ orders: v })} />
-              </PrefRow>
               <PrefRow label="Mensagens" hint="Novas mensagens de compradores e vendedores">
                 <Toggle value={prefs.messages} onChange={(v) => updatePref({ messages: v })} />
+              </PrefRow>
+              <PrefRow label="Pedidos" hint="Pagamento, envio e entrega">
+                <Toggle value={prefs.orders} onChange={(v) => updatePref({ orders: v })} />
               </PrefRow>
               <PrefRow label="Ofertas" hint="Propostas recebidas e respostas">
                 <Toggle value={prefs.offers} onChange={(v) => updatePref({ offers: v })} />
               </PrefRow>
-              <PrefRow label="Novos seguidores">
-                <Toggle value={prefs.followers} onChange={(v) => updatePref({ followers: v })} />
+              <PrefRow label="Avaliações" hint="Quando um comprador avalia sua venda">
+                <Toggle value={prefs.reviews} onChange={(v) => updatePref({ reviews: v })} />
               </PrefRow>
               <PrefRow label="Queda de preço" hint="Favoritos com preço reduzido">
                 <Toggle value={prefs.priceDrops} onChange={(v) => updatePref({ priceDrops: v })} />
+              </PrefRow>
+              <PrefRow label="Favoritos e novos itens" hint="Quando alguém favorita seu anúncio ou chegam itens das suas buscas salvas">
+                <Toggle value={prefs.favorites} onChange={(v) => updatePref({ favorites: v })} />
+              </PrefRow>
+              <PrefRow label="Novos seguidores">
+                <Toggle value={prefs.followers} onChange={(v) => updatePref({ followers: v })} />
               </PrefRow>
               <PrefRow label="Promoções" hint="Destaque, Impulso e campanhas">
                 <Toggle value={prefs.promotions} onChange={(v) => updatePref({ promotions: v })} />
@@ -253,6 +279,38 @@ export default function NotificationsPage() {
                 <Toggle value={prefs.news} onChange={(v) => updatePref({ news: v })} />
               </PrefRow>
             </div>
+          </section>
+
+          <section className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-2">Limite diário</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Pushes por categoria por dia. Acima do limite, a entrada
+              ainda aparece na sineta, mas sem alerta no dispositivo.
+            </p>
+            <select
+              value={prefs.dailyCap}
+              onChange={(e) => updatePref({ dailyCap: Number(e.target.value) })}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm bg-white"
+              aria-label="Limite diário de notificações"
+            >
+              {DAILY_CAP_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </section>
+
+          <section className="bg-white border border-gray-200 rounded-xl p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-2">
+              Configurações do sistema
+            </h2>
+            <p className="text-sm text-gray-600">
+              Se o navegador ou o sistema operacional estiver bloqueando
+              notificações, você precisa ajustar essa permissão
+              diretamente nas configurações do navegador — os toggles
+              acima só controlam o que o Vintage.br tenta enviar.
+            </p>
           </section>
 
           {prefsSaving && (

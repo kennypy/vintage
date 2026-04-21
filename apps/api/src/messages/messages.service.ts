@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { containsProhibitedContent } from '@vintage/shared';
 
 @Injectable()
 export class MessagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   /**
    * Returns true if either user is banned, soft-deleted, or has blocked
@@ -141,6 +145,22 @@ export class MessagesService {
         data: { lastMessageAt: new Date() },
       }),
     ]);
+
+    // Notify the recipient. Fire-and-forget — a down NotificationsService
+    // must never break the message delivery itself; the bell entry is a
+    // side channel for the real thing (the Message row).
+    this.notifications
+      .createNotification(
+        otherId,
+        'NEW_MESSAGE',
+        `${message.sender.name ?? 'Alguém'} te mandou uma mensagem`,
+        body.slice(0, 140),
+        { conversationId, messageId: message.id, senderId },
+        'messages',
+      )
+      .catch(() => {
+        /* notification failures must not break chat */
+      });
 
     return message;
   }

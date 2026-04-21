@@ -3,9 +3,16 @@ import { NotFoundException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../push/push.service';
+import { RedisService } from '../common/services/redis.service';
 
 const mockPushService = {
   sendPushNotification: jest.fn(),
+};
+
+const mockRedis = {
+  // Default: 1 means "this is the first call today" — below any cap.
+  // Individual tests override to exercise the over-cap path.
+  incrWithTtl: jest.fn().mockResolvedValue(1),
 };
 
 const mockPrisma = {
@@ -34,6 +41,9 @@ const ALL_ON_PREFS = {
   notifPriceDrops: true,
   notifPromotions: true,
   notifNews: true,
+  notifReviews: true,
+  notifFavorites: true,
+  notifDailyCap: 0,
 };
 
 describe('NotificationsService', () => {
@@ -41,12 +51,14 @@ describe('NotificationsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockRedis.incrWithTtl.mockResolvedValue(1);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PushService, useValue: mockPushService },
+        { provide: RedisService, useValue: mockRedis },
       ],
     }).compile();
 

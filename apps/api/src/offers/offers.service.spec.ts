@@ -7,6 +7,11 @@ import {
 import { Decimal } from '@prisma/client/runtime/client';
 import { OffersService } from './offers.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const mockNotifications = {
+  createNotification: jest.fn().mockResolvedValue(null),
+};
 
 jest.mock('@vintage/shared', () => ({
   MIN_OFFER_PERCENTAGE: 0.5,
@@ -43,6 +48,7 @@ describe('OffersService', () => {
       providers: [
         OffersService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 

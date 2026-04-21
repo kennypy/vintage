@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
@@ -40,6 +41,7 @@ export class UsersService {
     private listings: ListingsService,
     private auditLog: AuditLogService,
     private cpfVault: CpfVaultService,
+    private notifications: NotificationsService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -327,16 +329,40 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    await this.prisma.follow.upsert({
+    const upserted = await this.prisma.follow.upsert({
       where: { followerId_followingId: { followerId, followingId } },
       create: { followerId, followingId },
       update: {},
+      // createdAt tells us whether this is a NEW follow (same ms as
+      // just now) or an idempotent re-call. We only fire the notification
+      // on the first edge so a client retrying doesn't spam the target.
+      select: { createdAt: true },
     });
+    const isNewEdge = Date.now() - upserted.createdAt.getTime() < 1000;
 
     await Promise.all([
       this.prisma.user.update({ where: { id: followingId }, data: { followerCount: { increment: 1 } } }),
       this.prisma.user.update({ where: { id: followerId }, data: { followingCount: { increment: 1 } } }),
     ]);
+
+    if (isNewEdge) {
+      const follower = await this.prisma.user.findUnique({
+        where: { id: followerId },
+        select: { name: true },
+      });
+      this.notifications
+        .createNotification(
+          followingId,
+          'NEW_FOLLOWER',
+          'Você tem um novo seguidor',
+          `${follower?.name ?? 'Alguém'} começou a te seguir.`,
+          { followerId },
+          'followers',
+        )
+        .catch(() => {
+          /* never let notification failure break a follow */
+        });
+    }
 
     return { following: true };
   }
@@ -916,6 +942,9 @@ export class UsersService {
         notifPriceDrops: true,
         notifPromotions: true,
         notifNews: true,
+        notifReviews: true,
+        notifFavorites: true,
+        notifDailyCap: true,
       },
     });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
@@ -929,6 +958,9 @@ export class UsersService {
       priceDrops: user.notifPriceDrops,
       promotions: user.notifPromotions,
       news: user.notifNews,
+      reviews: user.notifReviews,
+      favorites: user.notifFavorites,
+      dailyCap: user.notifDailyCap,
     };
   }
 
@@ -944,13 +976,16 @@ export class UsersService {
       priceDrops?: boolean;
       promotions?: boolean;
       news?: boolean;
+      reviews?: boolean;
+      favorites?: boolean;
+      dailyCap?: number;
     },
   ) {
     // Build the DB patch only with fields the client actually sent.
     // Prisma treats undefined as "leave unchanged", so we could hand it
     // `{ notifOrders: patch.orders }` directly — but being explicit keeps
     // the column rename mapping in one place (grep-friendly).
-    const data: Record<string, boolean> = {};
+    const data: Record<string, boolean | number> = {};
     if (patch.pushEnabled !== undefined) data.pushEnabled = patch.pushEnabled;
     if (patch.emailEnabled !== undefined) data.emailEnabled = patch.emailEnabled;
     if (patch.orders !== undefined) data.notifOrders = patch.orders;
@@ -960,6 +995,13 @@ export class UsersService {
     if (patch.priceDrops !== undefined) data.notifPriceDrops = patch.priceDrops;
     if (patch.promotions !== undefined) data.notifPromotions = patch.promotions;
     if (patch.news !== undefined) data.notifNews = patch.news;
+    if (patch.reviews !== undefined) data.notifReviews = patch.reviews;
+    if (patch.favorites !== undefined) data.notifFavorites = patch.favorites;
+    if (patch.dailyCap !== undefined) {
+      // 0 = unlimited, max 100 = defence against a client sending a
+      // deranged value that would make the counter useless.
+      data.notifDailyCap = Math.max(0, Math.min(100, Math.floor(patch.dailyCap)));
+    }
 
     await this.prisma.user.update({ where: { id: userId }, data });
     return this.getNotificationPreferences(userId);

@@ -9,6 +9,7 @@ import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
 import * as bcrypt from 'bcrypt';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 jest.mock('bcrypt');
@@ -80,6 +81,10 @@ describe('UsersService', () => {
         {
           provide: ListingsService,
           useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: NotificationsService,
+          useValue: { createNotification: jest.fn().mockResolvedValue(null) },
         },
       ],
     }).compile();
@@ -202,23 +207,27 @@ describe('UsersService', () => {
 
   describe('followUser', () => {
     it('should create follow relationship', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2' });
-      mockPrisma.follow.upsert.mockResolvedValue({});
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2', name: 'Maria' });
+      // createdAt set to "just now" so the service's new-edge
+      // detection (Date.now() - createdAt < 1s) fires the notification.
+      mockPrisma.follow.upsert.mockResolvedValue({ createdAt: new Date() });
       mockPrisma.user.update.mockResolvedValue({});
 
       const result = await service.followUser('user-1', 'user-2');
 
       expect(result).toEqual({ following: true });
-      expect(mockPrisma.follow.upsert).toHaveBeenCalledWith({
-        where: {
-          followerId_followingId: {
-            followerId: 'user-1',
-            followingId: 'user-2',
+      expect(mockPrisma.follow.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            followerId_followingId: {
+              followerId: 'user-1',
+              followingId: 'user-2',
+            },
           },
-        },
-        create: { followerId: 'user-1', followingId: 'user-2' },
-        update: {},
-      });
+          create: { followerId: 'user-1', followingId: 'user-2' },
+          update: {},
+        }),
+      );
     });
 
     it('should reject following yourself', async () => {
@@ -314,6 +323,9 @@ describe('UsersService', () => {
       notifPriceDrops: false,
       notifPromotions: true,
       notifNews: true,
+      notifReviews: true,
+      notifFavorites: true,
+      notifDailyCap: 0,
     };
 
     describe('getNotificationPreferences', () => {
@@ -332,6 +344,9 @@ describe('UsersService', () => {
           priceDrops: false,
           promotions: true,
           news: true,
+          reviews: true,
+          favorites: true,
+          dailyCap: 0,
         });
       });
 

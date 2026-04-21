@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async create(reviewerId: string, orderId: string, rating: number, comment?: string) {
     if (rating !== 1 && rating !== 5) {
@@ -48,6 +52,22 @@ export class ReviewsService {
         ratingCount: stats._count.rating,
       },
     });
+
+    // Notify the seller that they just got a new review.
+    this.notifications
+      .createNotification(
+        order.sellerId,
+        'REVIEW_RECEIVED',
+        rating === 5
+          ? 'Você recebeu uma avaliação positiva'
+          : 'Você recebeu uma nova avaliação',
+        comment?.slice(0, 140) ?? `${rating} ${rating === 1 ? 'estrela' : 'estrelas'}.`,
+        { reviewId: review.id, orderId, rating: String(rating) },
+        'reviews',
+      )
+      .catch(() => {
+        /* never let notification failure break the review commit */
+      });
 
     return review;
   }

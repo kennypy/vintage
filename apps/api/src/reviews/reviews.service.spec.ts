@@ -6,6 +6,11 @@ import {
 } from '@nestjs/common';
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const mockNotifications = {
+  createNotification: jest.fn().mockResolvedValue(null),
+};
 
 const mockPrisma = {
   order: {
@@ -33,6 +38,7 @@ describe('ReviewsService', () => {
       providers: [
         ReviewsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 

@@ -33,10 +33,7 @@
         "LSApplicationQueriesSchemes": ["mailto", "tel", "https", "http"],
         "NSCameraUsageDescription": "O Vintage.br usa a câmera para você fotografar as peças que vai anunciar.",
         "NSPhotoLibraryUsageDescription": "O Vintage.br acessa sua galeria para você escolher fotos dos seus anúncios e sua foto de perfil.",
-        "NSPhotoLibraryAddUsageDescription": "O Vintage.br pode salvar comprovantes de pagamento e QR codes PIX na sua galeria.",
-        "NSFaceIDUsageDescription": "Use Face ID para entrar rapidamente e confirmar transações com segurança.",
         "NSMicrophoneUsageDescription": "O microfone é utilizado apenas para gravar vídeos curtos dos seus anúncios.",
-        "NSUserTrackingUsageDescription": "Não rastreamos você em outros apps. Esta permissão só é solicitada caso você ative analytics opcional.",
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleLocalizations": ["pt-BR", "pt", "en"],
         "CFBundleDevelopmentRegion": "pt-BR"
@@ -55,8 +52,6 @@
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
@@ -109,12 +104,6 @@
         {
           "color": "#1a1a2e",
           "defaultChannel": "default"
-        }
-      ],
-      [
-        "expo-local-authentication",
-        {
-          "faceIDPermission": "Use Face ID para entrar rapidamente e confirmar transações com segurança."
         }
       ]
     ],

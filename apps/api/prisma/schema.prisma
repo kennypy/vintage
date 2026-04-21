@@ -113,6 +113,20 @@ model User {
   notifPriceDrops    Boolean   @default(true)
   notifPromotions    Boolean   @default(true)
   notifNews          Boolean   @default(true)
+  // Review-received + favourite-activity toggles (Vinted parity — "New
+  // feedback" and "Favourited items"). Review notifications fire when a
+  // buyer leaves a review on a seller's listing; favourite notifications
+  // fire when somebody favourites an item you're selling. Defaults on so
+  // existing users get them.
+  notifReviews       Boolean   @default(true)
+  notifFavorites     Boolean   @default(true)
+  // Per-category daily push cap. Cheap anti-fatigue knob: 0 = unlimited,
+  // N = the first N notifications per category per UTC day are pushed;
+  // everything beyond that still lands in the bell but doesn't buzz the
+  // phone. Evaluated against a Redis counter in
+  // NotificationsService.createNotification. UI exposes presets (2, 5,
+  // 10, unlimited) but any int ≥0 is accepted.
+  notifDailyCap      Int       @default(0)
 
   // Relations
   emailVerificationTokens EmailVerificationToken[]

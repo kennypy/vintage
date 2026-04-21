@@ -21,6 +21,10 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { updateProfile } from '../../src/services/users';
 import { uploadAvatar } from '../../src/services/listings';
+import {
+  ensureCameraPermission,
+  ensureMediaLibraryPermission,
+} from '../../src/services/permissions';
 import { Avatar, PRESET_AVATARS } from '../../src/components/Avatar';
 
 export default function EditProfileScreen() {
@@ -38,11 +42,10 @@ export default function EditProfileScreen() {
 
   const handlePickCamera = async () => {
     setAvatarPickerVisible(false);
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permissão necessária', 'Permita o acesso à câmera para tirar uma foto.');
-      return;
-    }
+    const ok = await ensureCameraPermission({
+      purpose: 'à câmera para tirar sua foto de perfil',
+    });
+    if (!ok) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -56,11 +59,10 @@ export default function EditProfileScreen() {
 
   const handlePickGallery = async () => {
     setAvatarPickerVisible(false);
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permissão necessária', 'Permita o acesso à galeria para escolher uma foto.');
-      return;
-    }
+    const ok = await ensureMediaLibraryPermission({
+      purpose: 'à sua galeria para escolher uma foto de perfil',
+    });
+    if (!ok) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
