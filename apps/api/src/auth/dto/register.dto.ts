@@ -55,4 +55,14 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   captchaToken?: string;
+
+  // Optional invite/referral code from another Vintage.br user. When
+  // redeemed it creates a Referral row; reward fires on the referee's
+  // first completed order. Case-insensitive — normalised to uppercase
+  // in ReferralsService.linkReferralAtSignup.
+  @ApiProperty({ example: 'A2B4C6D8', required: false, description: 'Código de indicação (opcional)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  referralCode?: string;
 }

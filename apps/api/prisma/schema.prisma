@@ -77,6 +77,10 @@ model User {
   // ToS / Privacy acceptance tracking (required at signup)
   acceptedTosAt      DateTime?
   acceptedTosVersion String?
+  // Stable, user-shareable invite code. Generated at registration.
+  // Case-insensitive uniqueness is ensured by storing uppercase only
+  // (see AuthService.register). Nullable for legacy rows pre-migration.
+  referralCode       String?   @unique
   ratingAvg          Float     @default(0)
   ratingCount        Int       @default(0)
   followerCount      Int       @default(0)
@@ -166,6 +170,9 @@ model User {
   fraudFlagReviews       FraudFlag[]         @relation("FraudFlagReviewer")
   cpfVerificationLogs    CpfVerificationLog[]
   cafVerificationSessions CafVerificationSession[]
+  favoriteCollections    FavoriteCollection[]
+  referralsMade          Referral[]          @relation("ReferralReferrer")
+  referralReceived       Referral?           @relation("ReferralReferee")
 
   @@index([email])
   // cpfLookupHash is already @unique (which implies an index) — no
@@ -616,15 +623,70 @@ enum PayoutRequestStatus {
 // --- Social ---
 
 model Favorite {
-  id        String   @id @default(cuid())
-  userId    String
-  listingId String
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String
+  listingId    String
+  // Optional grouping into a named collection ("Festa", "Trabalho",
+  // etc.). Null = the user's default collection, which every account
+  // has implicitly — preserves the previous flat-favorites API shape
+  // for clients that don't know about collections yet.
+  collectionId String?
+  createdAt    DateTime @default(now())
 
-  user    User    @relation(fields: [userId], references: [id])
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user       User                @relation(fields: [userId], references: [id])
+  listing    Listing             @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  collection FavoriteCollection? @relation(fields: [collectionId], references: [id], onDelete: SetNull)
 
   @@unique([userId, listingId])
+  @@index([collectionId])
+}
+
+/// User-curated wishlist collection. A user can keep multiple named
+/// collections (Vinted-style "wardrobe lists"). The implicit "default"
+/// collection (isDefault=true) is auto-created on first favorite and
+/// cannot be renamed or deleted; additional collections are free-form.
+model FavoriteCollection {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String   @db.VarChar(64)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  favorites Favorite[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+/// Referral code + reward ledger. Every user gets a stable code at
+/// registration (User.referralCode). When a new account signs up
+/// supplying that code, we write a Referral row linking referrer and
+/// referee; on the referee's first completed order we credit REFERRAL_REWARD_BRL
+/// to both wallets and set rewardCreditedAt.
+///
+/// A single (referrer, referee) pair can only exist once (enforced by
+/// @@unique) — stops a banned account from re-registering to farm more
+/// rewards from the same inviter.
+model Referral {
+  id                 String    @id @default(cuid())
+  referrerId         String
+  refereeId          String
+  code               String // snapshot of the referrer's code at signup time
+  rewardCreditedAt   DateTime?
+  rewardAmountBrl    Decimal?  @db.Decimal(10, 2)
+  createdAt          DateTime  @default(now())
+
+  referrer User @relation("ReferralReferrer", fields: [referrerId], references: [id])
+  referee  User @relation("ReferralReferee",  fields: [refereeId],  references: [id])
+
+  // Each referee can only have been invited once — unique refereeId
+  // stops a user from "re-redeeming" a different code after signup.
+  @@unique([refereeId])
+  @@unique([referrerId, refereeId])
+  @@index([referrerId])
+  @@index([code])
 }
 
 model Follow {

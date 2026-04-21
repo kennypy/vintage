@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -94,6 +95,10 @@ describe('OrdersService', () => {
         },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
         { provide: ConfigService, useValue: { get: jest.fn() } },
+        {
+          provide: ReferralsService,
+          useValue: { creditIfEligible: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

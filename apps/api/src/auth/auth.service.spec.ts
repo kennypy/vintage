@@ -32,6 +32,7 @@ jest.mock('@vintage/shared', () => ({
 import { isValidCPF } from '@vintage/shared';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 const mockPrisma = {
   user: {
@@ -135,6 +136,14 @@ describe('AuthService', () => {
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: RedisService, useValue: mockRedisService },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
+        {
+          provide: ReferralsService,
+          useValue: {
+            generateUniqueCode: jest.fn().mockResolvedValue('TESTCODE'),
+            linkReferralAtSignup: jest.fn().mockResolvedValue(undefined),
+            creditIfEligible: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

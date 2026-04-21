@@ -48,6 +48,8 @@ import { IdentityModule } from './identity/identity.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { ReturnsModule } from './returns/returns.module';
+import { ReferralsModule } from './referrals/referrals.module';
+import { FavoriteCollectionsModule } from './favorite-collections/favorite-collections.module';
 import { TosVersionInterceptor } from './auth/tos-version.interceptor';
 
 @Module({
@@ -113,6 +115,8 @@ import { TosVersionInterceptor } from './auth/tos-version.interceptor';
     AnalyticsModule,
     IdentityModule,
     ReturnsModule,
+    ReferralsModule,
+    FavoriteCollectionsModule,
   ],
   providers: [
     {

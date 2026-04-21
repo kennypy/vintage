@@ -11,12 +11,14 @@ import { CaptchaService } from './captcha.service';
 import { CaptchaGuard } from './captcha.guard';
 import { UsersModule } from '../users/users.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
 
 @Module({
   imports: [
     UsersModule,
     NotificationsModule,
+    ReferralsModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

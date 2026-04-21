@@ -235,4 +235,90 @@ export class ListingsCronService {
 
     this.logger.log(`Expired promotions on ${expired.length} listings`);
   }
+
+  /**
+   * Fire a notification to every user who favorited a listing whose
+   * price has dropped below the snapshot we took when they favorited.
+   * Runs hourly. Once fired we reset `originalPriceBrl` to the new
+   * price so future drops also notify — the field is a rolling
+   * baseline, not a lifetime original.
+   *
+   * Low threshold: any drop triggers. If this floods inboxes we can
+   * add a configurable PRICE_DROP_MIN_PCT env var later.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async notifyPriceDrops() {
+    if (!(await this.cronLock.acquire('listings:priceDrops'))) return;
+
+    const alerts = await this.prisma.priceDropAlert.findMany({
+      where: {
+        notifiedAt: null,
+        listing: { status: 'ACTIVE' },
+      },
+      include: {
+        listing: {
+          select: { id: true, title: true, priceBrl: true, images: { orderBy: { position: 'asc' }, take: 1 } },
+        },
+      },
+      take: 500,
+    });
+
+    let fired = 0;
+    for (const alert of alerts) {
+      const currentPrice = Number(alert.listing.priceBrl);
+      const baseline = Number(alert.originalPriceBrl);
+      if (currentPrice >= baseline) continue;
+
+      const drop = baseline - currentPrice;
+      const pct = Math.round((drop / baseline) * 100);
+
+      try {
+        await this.notifications.createNotification(
+          alert.userId,
+          'price_drop',
+          'Preço baixou em um item que você salvou',
+          `"${alert.listing.title}" agora custa R$ ${currentPrice.toFixed(2).replace('.', ',')} (-${pct}%).`,
+          { listingId: alert.listing.id, oldPriceBrl: baseline, newPriceBrl: currentPrice },
+          'priceDrops',
+        );
+        await this.prisma.priceDropAlert.update({
+          where: { id: alert.id },
+          data: {
+            notifiedAt: new Date(),
+            // Roll the baseline forward so further drops re-notify.
+            originalPriceBrl: alert.listing.priceBrl,
+          },
+        });
+        fired += 1;
+      } catch (err) {
+        this.logger.warn(
+          `Price-drop notification failed for alert ${alert.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+
+    if (fired > 0) this.logger.log(`Price-drop cron fired ${fired} notifications`);
+  }
+
+  /**
+   * Reset price-drop alerts that have already notified but whose
+   * listing just had its price raised (or stayed flat) — lets the
+   * subscriber get notified again if the seller later drops further.
+   * Runs daily, cheap.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async rearmPriceDropAlerts() {
+    if (!(await this.cronLock.acquire('listings:priceDropsRearm'))) return;
+    // Set notifiedAt=null where current price >= baseline. That way the
+    // hourly cron will fire again when a new drop occurs.
+    await this.prisma.$executeRawUnsafe(`
+      UPDATE "PriceDropAlert" pda
+      SET "notifiedAt" = NULL,
+          "originalPriceBrl" = l."priceBrl"
+      FROM "Listing" l
+      WHERE pda."listingId" = l.id
+        AND pda."notifiedAt" IS NOT NULL
+        AND l."priceBrl" >= pda."originalPriceBrl";
+    `);
+  }
 }

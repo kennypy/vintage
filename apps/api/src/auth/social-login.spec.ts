@@ -12,6 +12,7 @@ import { RedisService } from '../common/services/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 jest.mock('bcrypt');
 jest.mock('otplib', () => ({
@@ -100,6 +101,14 @@ describe('AuthService - Social Login', () => {
         { provide: NotificationsService, useValue: mockNotificationsService },
         { provide: RedisService, useValue: mockRedisService },
         { provide: AnalyticsService, useValue: { capture: jest.fn() } },
+        {
+          provide: ReferralsService,
+          useValue: {
+            generateUniqueCode: jest.fn().mockResolvedValue('TESTCODE'),
+            linkReferralAtSignup: jest.fn().mockResolvedValue(undefined),
+            creditIfEligible: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
