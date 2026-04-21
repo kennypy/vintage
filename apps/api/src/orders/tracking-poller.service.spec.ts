@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ShippingService, TrackingEvent } from '../shipping/shipping.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { OrdersService } from './orders.service';
+import { ReturnsService } from '../returns/returns.service';
 
 describe('isDeliveredEvent (carrier-agnostic predicate)', () => {
   const evt = (status: string, description = ''): TrackingEvent => ({
@@ -52,6 +53,7 @@ describe('TrackingPollerService', () => {
 
   const mockPrisma = {
     order: { findMany: jest.fn() },
+    orderReturn: { findMany: jest.fn().mockResolvedValue([]) },
   };
   // The poller now calls markDeliveredInternal(orderId, null) — the
   // "null" userId signals a system caller and skips the buyer/seller
@@ -62,9 +64,11 @@ describe('TrackingPollerService', () => {
   };
   const mockShipping = { getTrackingStatus: jest.fn() };
   const mockCronLock = { acquire: jest.fn().mockResolvedValue(true) };
+  const mockReturns = { markReceivedByTracking: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.orderReturn.findMany.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -73,6 +77,7 @@ describe('TrackingPollerService', () => {
         { provide: OrdersService, useValue: mockOrders },
         { provide: ShippingService, useValue: mockShipping },
         { provide: CronLockService, useValue: mockCronLock },
+        { provide: ReturnsService, useValue: mockReturns },
         {
           provide: ConfigService,
           useValue: { get: jest.fn((_k, def) => def) },

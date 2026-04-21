@@ -32,6 +32,7 @@ export type OrderStatus =
   | 'paid'
   | 'shipped'
   | 'delivered'
+  | 'held'
   | 'confirmed'
   | 'cancelled'
   | 'refunded';
@@ -47,6 +48,7 @@ export interface Order {
   feeBrl: number;
   address: OrderAddress;
   shipping?: OrderShipping;
+  escrowReleasesAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -101,6 +103,20 @@ export async function markShipped(
 export async function confirmReceipt(id: string): Promise<Order> {
   return apiFetch<Order>(`/orders/${encodeURIComponent(id)}/confirm`, {
     method: 'PATCH',
+  });
+}
+
+export type RetryPaymentMethod = 'PIX' | 'CREDIT_CARD' | 'BOLETO';
+
+export async function retryPayment(
+  orderId: string,
+  method: RetryPaymentMethod,
+  installments?: number,
+  cardToken?: string,
+): Promise<unknown> {
+  return apiFetch(`/payments/${encodeURIComponent(orderId)}/retry`, {
+    method: 'POST',
+    body: JSON.stringify({ method, installments, cardToken }),
   });
 }
 

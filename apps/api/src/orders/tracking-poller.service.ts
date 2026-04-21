@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ShippingService, TrackingEvent } from '../shipping/shipping.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { OrdersService } from './orders.service';
+import { ReturnsService } from '../returns/returns.service';
 
 /**
  * Carrier-agnostic "was this event a delivery confirmation?" check.
@@ -48,6 +49,7 @@ export class TrackingPollerService {
     private readonly orders: OrdersService,
     private readonly shipping: ShippingService,
     private readonly cronLock: CronLockService,
+    private readonly returns: ReturnsService,
     config: ConfigService,
   ) {
     this.lookbackDays = config.get<number>('TRACKING_POLL_LOOKBACK_DAYS', 30);
@@ -123,6 +125,51 @@ export class TrackingPollerService {
       this.logger.log(
         `Tracking poll tick: ${flipped}/${pending.length} orders flipped to DELIVERED`,
       );
+    }
+
+    await this.pollReturns();
+  }
+
+  /**
+   * Same logic as pollInFlightShipments but for return shipments
+   * (buyer → seller). When the carrier reports the return package
+   * delivered we transition OrderReturn.SHIPPED → RECEIVED and
+   * notify the seller to inspect. Runs as part of the same hourly
+   * tick so it inherits the cron lock.
+   */
+  private async pollReturns() {
+    const cutoff = new Date(
+      Date.now() - this.lookbackDays * 24 * 60 * 60 * 1000,
+    );
+
+    const pendingReturns = await this.prisma.orderReturn.findMany({
+      where: {
+        status: 'SHIPPED',
+        returnTrackingCode: { not: null },
+        shippedAt: { gte: cutoff },
+      },
+      select: { id: true, returnTrackingCode: true },
+      orderBy: { shippedAt: 'asc' },
+      take: this.batchSize,
+    });
+
+    if (pendingReturns.length === 0) return;
+
+    for (const ret of pendingReturns) {
+      try {
+        const events = await this.shipping.getTrackingStatus(
+          ret.returnTrackingCode!,
+        );
+        if (!events.some(isDeliveredEvent)) continue;
+        await this.returns.markReceivedByTracking(ret.id);
+        this.logger.log(
+          `Return ${ret.id} auto-marked RECEIVED from carrier event (${ret.returnTrackingCode})`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Return tracking poll failed for ${ret.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
     }
   }
 }

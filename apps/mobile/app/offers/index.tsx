@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -10,6 +11,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'Pendente',
   accepted: 'Aceita',
   rejected: 'Recusada',
+  countered: 'Contraproposta',
   expired: 'Expirada',
 };
 
@@ -17,6 +19,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending: colors.warning[500],
   accepted: colors.success[500],
   rejected: colors.error[500],
+  countered: colors.accent[500],
   expired: colors.neutral[400],
 };
 
@@ -25,6 +28,7 @@ const formatBrl = (value: number) =>
 
 export default function OffersScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'received' | 'sent'>('received');
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +102,11 @@ export default function OffersScreen() {
   }, []);
 
   const renderOffer = useCallback(({ item }: { item: Offer }) => (
-    <View style={[styles.offerCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+    <TouchableOpacity
+      style={[styles.offerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+      onPress={() => router.push(`/offers/${item.id}`)}
+      activeOpacity={0.8}
+    >
       <View style={styles.offerHeader}>
         <View style={[styles.statusBadge, { backgroundColor: (STATUS_COLORS[item.status] ?? colors.neutral[400]) + '20' }]}>
           <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] ?? colors.neutral[400] }]}>
@@ -133,8 +141,8 @@ export default function OffersScreen() {
           </TouchableOpacity>
         </View>
       )}
-    </View>
-  ), [theme, activeTab, handleReject, handleAccept]);
+    </TouchableOpacity>
+  ), [theme, activeTab, handleReject, handleAccept, router]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>

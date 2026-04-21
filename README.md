@@ -45,8 +45,10 @@ vintage/
 | **Auth** | register, login, refresh, Google OAuth, Apple Sign In, 2FA setup/enable/disable/confirm, 2FA-SMS setup/enable/resend, email-change request/confirm | CPF validation, bcrypt, JWT, social login, TOTP + SMS 2FA (Twilio), login anomaly detection, email change with token-hash storage |
 | **Users** | profile, addresses, follow, vacation, storefront, block/unblock/list-blocks, set-CPF (OAuth accounts) | CEP autocomplete, follow counts, vacation mode, public storefront, user blocking (gates messages + offers), set-once CPF linker for OAuth users |
 | **Listings** | CRUD, search, favorites, categories, feed, saved searches, price suggestion, video | Filtros, paginação, social feed, preço sugerido por IA, vídeos 30s MP4/MOV |
-| **Orders** | create, ship, confirm | Escrow, taxa de proteção (R$3,50 + 5%), crédito na carteira |
-| **Offers** | create, accept, reject | Mínimo 50% do preço, expiração em 48h |
+| **Orders** | create, ship, confirm | Escrow com janela de hold configurável (ESCROW_HOLD_DAYS, padrão 2d) — buyer pode abrir devolução/disputa durante o hold; taxa de proteção (R$3,50 + 5%), crédito na carteira |
+| **Offers** | create, accept, reject, **counter**, thread | Mínimo 50% do preço, expiração em 48h, cadeia de contrapropostas (MAX_OFFER_COUNTERS=3, alternância comprador/vendedor) |
+| **Payments** | PIX, cartão, boleto, webhook, **retry** | Tentativas múltiplas por pedido via Payment model (MAX_PAYMENT_ATTEMPTS=3), cada tentativa rastreada com attemptNumber + parentPaymentId |
+| **Returns** | request, approve (gera etiqueta inversa), reject, mark-shipped, inspect-approve, inspect-reject | Fluxo de devolução colaborativo; janela de RETURN_WINDOW_DAYS (padrão 7); tracking poller detecta pacote de retorno; seller tem RETURN_INSPECTION_DAYS para inspecionar ou escala para disputa automática |
 | **Wallet** | balance, transactions, payout, payout-methods CRUD | Saque via chave PIX salva (race-safe, débito atômico), 5 chaves/conta, 5 tipos PIX canonicalizados (CPF/CNPJ/email/phone BR/random UUID), mascaramento obrigatório |
 | **Messages** | conversations, send, WebSocket gateway | Chat em tempo real (Socket.io), typing, read receipts, online status |
 | **Reviews** | create, list, seller reply | Avaliação binária (1 ou 5 estrelas), resposta pública do vendedor |

@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +20,7 @@ import {
   BUYER_PROTECTION_FIXED_BRL,
   BUYER_PROTECTION_RATE,
   DISPUTE_WINDOW_DAYS,
+  ESCROW_HOLD_DAYS,
 } from '@vintage/shared';
 
 @Injectable()
@@ -30,7 +32,14 @@ export class OrdersService {
     private listings: ListingsService,
     private fraud: FraudService,
     private analytics: AnalyticsService,
+    private configService: ConfigService,
   ) {}
+
+  private getEscrowHoldDays(): number {
+    const raw = this.configService.get<string | number>('ESCROW_HOLD_DAYS');
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : ESCROW_HOLD_DAYS;
+  }
 
   async create(buyerId: string, dto: CreateOrderDto) {
     // Idempotency check: if the buyer already submitted an order with the
@@ -606,21 +615,76 @@ export class OrdersService {
       throw new BadRequestException('Pedido precisa estar enviado para confirmar recebimento');
     }
 
-    return this.releaseEscrow(orderId);
+    return this.enterHold(orderId);
   }
 
   /**
-   * Releases escrowed funds: moves itemPriceBrl from seller's pendingBrl
-   * to balanceBrl, marks order as COMPLETED. Used by confirmReceipt(),
-   * auto-confirm cron, and dispute resolution (seller wins).
+   * Transitions a confirmed order into the escrow hold window. Funds
+   * STAY in the seller's pendingBrl — they do not move to balanceBrl
+   * until finalizeEscrow fires (via the releaseHeldEscrow cron). The
+   * buyer can still open a dispute or request a return during the hold.
+   *
+   * Callers: confirmReceipt (buyer), autoConfirmOrders cron.
    */
-  async releaseEscrow(orderId: string) {
+  async enterHold(orderId: string) {
+    const holdDays = this.getEscrowHoldDays();
+    const now = new Date();
+    const releasesAt = new Date(now);
+    releasesAt.setDate(releasesAt.getDate() + holdDays);
+
+    const result = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: 'HELD',
+        confirmedAt: now,
+        escrowReleasesAt: releasesAt,
+      },
+      include: {
+        listing: {
+          include: {
+            images: { orderBy: { position: 'asc' }, take: 1 },
+          },
+        },
+        buyer: { select: { id: true, name: true } },
+        seller: { select: { id: true, name: true } },
+      },
+    });
+
+    // Notify seller — recebimento confirmado, funds still in hold
+    this.notifications
+      .createNotification(
+        result.sellerId,
+        'order',
+        'Recebimento confirmado!',
+        `O comprador confirmou o recebimento de "${result.listing.title}". Os fundos serão liberados em ${holdDays} dia(s).`,
+        { orderId: result.id, escrowReleasesAt: releasesAt.toISOString() },
+        'orders',
+      )
+      .catch(() => {});
+
+    // Zero-day hold: finalize immediately. Keeps ops override simple
+    // (ESCROW_HOLD_DAYS=0 is equivalent to "no hold").
+    if (holdDays === 0) {
+      return this.finalizeEscrow(orderId);
+    }
+
+    return result;
+  }
+
+  /**
+   * Moves itemPriceBrl from seller's pendingBrl to balanceBrl and
+   * transitions the order to COMPLETED. Called only after the escrow
+   * hold window elapses (via releaseHeldEscrow cron) or when an admin
+   * force-releases from /admin/orders.
+   */
+  async finalizeEscrow(orderId: string) {
     const result = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.update({
         where: { id: orderId },
         data: {
           status: 'COMPLETED',
           confirmedAt: new Date(),
+          escrowReleasesAt: null,
         },
         include: {
           listing: {
@@ -680,6 +744,16 @@ export class OrdersService {
       .catch(() => {});
 
     return result;
+  }
+
+  /**
+   * Back-compat shim. Pre-HELD callers (DisputesService seller-wins
+   * branch) expect a single call that moves funds to balance and
+   * completes the order in one step, bypassing the hold window (the
+   * dispute resolution IS the settlement — no extra buffer needed).
+   */
+  async releaseEscrow(orderId: string) {
+    return this.finalizeEscrow(orderId);
   }
 
   /**

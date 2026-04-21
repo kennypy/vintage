@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { PaymentsService } from './payments.service';
 import { CreateBoletoDto, CreateCardDto, CreatePixDto } from './dto/create-payment.dto';
+import { RetryPaymentDto } from './dto/retry-payment.dto';
 
 @ApiTags('payments')
 @Controller('payments')
@@ -65,6 +66,20 @@ export class PaymentsController {
     @Body() body: CreateBoletoDto,
   ) {
     return this.paymentsService.createBoletoPayment(body.orderId, user.id);
+  }
+
+  @Post(':orderId/retry')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Retentar pagamento de um pedido pendente' })
+  @ApiResponse({ status: 201, description: 'Nova tentativa criada' })
+  @ApiResponse({ status: 400, description: 'Limite de tentativas atingido ou pedido não está pendente' })
+  retry(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+    @Body() body: RetryPaymentDto,
+  ) {
+    return this.paymentsService.retryPayment(orderId, user.id, body);
   }
 
   @Post('webhook')

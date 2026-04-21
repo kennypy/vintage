@@ -6,11 +6,14 @@ export interface Offer {
   listingTitle: string;
   listingImageUrl?: string;
   amountBrl: number;
-  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  status: 'pending' | 'accepted' | 'rejected' | 'countered' | 'expired';
   buyer: { id: string; name: string; avatarUrl?: string };
   seller: { id: string; name: string; avatarUrl?: string };
   createdAt: string;
   expiresAt: string;
+  parentOfferId?: string | null;
+  counterCount?: number;
+  counteredById?: string | null;
 }
 
 export interface OffersResponse {
@@ -49,4 +52,18 @@ export async function rejectOffer(id: string): Promise<Offer> {
   return apiFetch<Offer>(`/offers/${encodeURIComponent(id)}/reject`, {
     method: 'PATCH',
   });
+}
+
+export async function counterOffer(
+  id: string,
+  amountBrl: number,
+): Promise<Offer> {
+  return apiFetch<Offer>(`/offers/${encodeURIComponent(id)}/counter`, {
+    method: 'POST',
+    body: JSON.stringify({ amountBrl }),
+  });
+}
+
+export async function getOfferThread(id: string): Promise<Offer[]> {
+  return apiFetch<Offer[]>(`/offers/${encodeURIComponent(id)}/thread`);
 }

@@ -24,10 +24,28 @@ export enum OrderStatus {
   PAID = 'paid',
   SHIPPED = 'shipped',
   DELIVERED = 'delivered',
+  HELD = 'held',
   COMPLETED = 'completed',
   DISPUTED = 'disputed',
   REFUNDED = 'refunded',
   CANCELLED = 'cancelled',
+}
+
+export enum PaymentStatus {
+  PENDING = 'pending',
+  SUCCEEDED = 'succeeded',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled',
+}
+
+export enum ReturnStatus {
+  REQUESTED = 'requested',
+  APPROVED = 'approved',
+  REJECTED = 'rejected',
+  SHIPPED = 'shipped',
+  RECEIVED = 'received',
+  REFUNDED = 'refunded',
+  DISPUTED = 'disputed',
 }
 
 export enum PaymentMethod {
@@ -206,6 +224,37 @@ export interface Order {
   deliveredAt: string | null;
   confirmedAt: string | null;
   disputeDeadline: string | null;
+  escrowReleasesAt: string | null;
+  createdAt: string;
+}
+
+export interface Payment {
+  id: string;
+  orderId: string;
+  attemptNumber: number;
+  parentPaymentId: string | null;
+  providerPaymentId: string | null;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  amountBrl: number;
+  failureReason: string | null;
+  createdAt: string;
+}
+
+export interface Return {
+  id: string;
+  orderId: string;
+  requestedById: string;
+  status: ReturnStatus;
+  reason: DisputeReason;
+  description: string;
+  returnTrackingCode: string | null;
+  returnCarrier: Carrier | null;
+  returnLabelUrl: string | null;
+  rejectionReason: string | null;
+  shippedAt: string | null;
+  receivedAt: string | null;
+  inspectedAt: string | null;
   createdAt: string;
 }
 
@@ -218,6 +267,9 @@ export interface Offer {
   amountBrl: number;
   status: OfferStatus;
   expiresAt: string;
+  parentOfferId: string | null;
+  counterCount: number;
+  counteredById: string | null;
   createdAt: string;
 }
 
