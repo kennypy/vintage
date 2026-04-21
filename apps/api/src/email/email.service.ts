@@ -50,6 +50,18 @@ export class EmailService {
           Explorar Vintage.br
         </a>
       </div>
+      <div style="background-color: #f5f5f5; border-left: 4px solid #e91e63; padding: 16px; margin: 24px 0;">
+        <p style="color: #333; font-size: 15px; font-weight: bold; margin: 0 0 8px 0;">
+          Verifique seu CPF e ganhe o selo Vintage.br Verificado
+        </p>
+        <p style="color: #555; font-size: 14px; line-height: 1.5; margin: 0 0 12px 0;">
+          A verificação é rápida e dá mais confiança aos compradores. É obrigatória para
+          vender, sacar fundos e emitir nota fiscal.
+        </p>
+        <a href="https://vintage.br/conta/verificacao" style="color: #e91e63; font-weight: bold; text-decoration: none;">
+          Verificar agora →
+        </a>
+      </div>
     `);
 
     await this.send(to, subject, html);

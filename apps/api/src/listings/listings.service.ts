@@ -210,7 +210,7 @@ export class ListingsService {
         brand: true,
         seller: {
           select: {
-            id: true, name: true, avatarUrl: true, verified: true,
+            id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true,
             ratingAvg: true, ratingCount: true, createdAt: true,
             twoFaEnabled: true,
           },
@@ -299,7 +299,7 @@ export class ListingsService {
           images: { orderBy: { position: 'asc' }, take: 1 },
           category: { select: { namePt: true, slug: true } },
           brand: { select: { name: true } },
-          seller: { select: { id: true, name: true, avatarUrl: true, verified: true } },
+          seller: { select: { id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true } },
         },
         orderBy,
         skip,
@@ -574,7 +574,7 @@ export class ListingsService {
           category: { select: { namePt: true, slug: true } },
           brand: { select: { name: true } },
           seller: {
-            select: { id: true, name: true, avatarUrl: true, verified: true },
+            select: { id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true },
           },
         },
         orderBy: { createdAt: 'desc' },

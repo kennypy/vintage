@@ -14,6 +14,7 @@ export interface UserProfile {
   // 'google' | 'apple' for OAuth accounts, null for email+password signups.
   socialProvider?: string | null;
   verified: boolean;
+  cpfIdentityVerified?: boolean;
   ratingAvg: number;
   ratingCount: number;
   followerCount: number;
@@ -28,6 +29,7 @@ export interface PublicProfile {
   name: string;
   avatarUrl?: string;
   verified: boolean;
+  cpfIdentityVerified: boolean;
   ratingAvg: number;
   ratingCount: number;
   followerCount: number;

@@ -300,6 +300,12 @@ export default function ListingDetailScreen() {
           <View style={styles.sellerInfo}>
             <View style={styles.sellerNameRow}>
               <Text style={[styles.sellerName, { color: theme.text }]}>{listing.seller.name}</Text>
+              {listing.seller.cpfIdentityVerified && (
+                <View style={styles.verifiedBadge}>
+                  <Ionicons name="shield-checkmark" size={12} color="#fff" />
+                  <Text style={styles.verifiedBadgeText}>CPF verificado</Text>
+                </View>
+              )}
             </View>
             {listing.seller.rating && (
               <View style={styles.sellerRating}>
@@ -429,8 +435,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   sellerInfo: { flex: 1, marginLeft: 12 },
-  sellerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  sellerNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   sellerName: { fontSize: 15, fontWeight: '600' },
+  verifiedBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: colors.success[600],
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10,
+  },
+  verifiedBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   sellerRating: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   ratingText: { fontSize: 13 },
   stats: { flexDirection: 'row', justifyContent: 'center', gap: 24, paddingVertical: 16 },
