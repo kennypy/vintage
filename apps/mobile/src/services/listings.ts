@@ -13,6 +13,9 @@ export interface ListingSeller {
   name: string;
   avatarUrl?: string;
   rating?: number;
+  // True after Serpro identity verification succeeds. Surfaces as
+  // the "CPF Verificado" trust badge on listing cards + profiles.
+  cpfIdentityVerified?: boolean;
 }
 
 export interface Listing {

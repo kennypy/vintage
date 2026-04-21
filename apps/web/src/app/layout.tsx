@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { VerifyIdentityBanner } from '@/components/VerifyIdentityBanner';
 import { PostHogProvider } from '@/components/PostHogProvider';
 import './globals.css';
 
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Suspense fallback={null}>
           <PostHogProvider>
             <Header />
+            <VerifyIdentityBanner />
             <main className="flex-1">{children}</main>
             <Footer />
           </PostHogProvider>

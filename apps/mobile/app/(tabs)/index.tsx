@@ -6,6 +6,7 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { ListingCard } from '../../src/components/ListingCard';
+import { VerifyIdentityBanner } from '../../src/components/VerifyIdentityBanner';
 import { getListings } from '../../src/services/listings';
 import type { Listing } from '../../src/services/listings';
 import { DEMO_PHOTOS, getDemoListings } from '../../src/services/demoStore';
@@ -28,7 +29,9 @@ function mapListingToCard(listing: Listing) {
     priceBrl: listing.priceBrl,
     imageUrl: listing.images[0]?.url,
     sellerName: listing.seller.name,
-    sellerVerified: false,
+    // Prefer the Serpro-verified flag; falls back to false for legacy
+    // API responses that don't yet carry the field.
+    sellerVerified: listing.seller.cpfIdentityVerified ?? false,
     condition: listing.condition,
     size: listing.size,
   };
@@ -96,6 +99,7 @@ export default function HomeScreen() {
       <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border, paddingTop: insets.top + 8 }]}>
         <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
       </View>
+      <VerifyIdentityBanner />
       <FlatList
         data={listings}
         numColumns={2}

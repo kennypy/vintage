@@ -218,8 +218,11 @@ export default function SellerProfileScreen() {
         <View style={styles.profileInfo}>
           <View style={styles.nameRow}>
             <Text style={[styles.name, { color: theme.text }]}>{profile.name}</Text>
-            {profile.verified && (
-              <Ionicons name="checkmark-circle" size={18} color={colors.primary[500]} />
+            {profile.cpfIdentityVerified && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: colors.success[600], paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+                <Ionicons name="shield-checkmark" size={12} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>CPF verificado</Text>
+              </View>
             )}
           </View>
           <View style={styles.ratingRow}>
