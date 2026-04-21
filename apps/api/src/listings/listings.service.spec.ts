@@ -51,6 +51,8 @@ const mockPrisma = {
   priceDropAlert: {
     findMany: jest.fn().mockResolvedValue([]),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    upsert: jest.fn().mockResolvedValue({}),
+    deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
 };
 

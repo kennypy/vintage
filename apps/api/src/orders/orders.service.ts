@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -33,6 +34,7 @@ export class OrdersService {
     private fraud: FraudService,
     private analytics: AnalyticsService,
     private configService: ConfigService,
+    private referrals: ReferralsService,
   ) {}
 
   private getEscrowHoldDays(): number {
@@ -742,6 +744,12 @@ export class OrdersService {
         'orders',
       )
       .catch(() => {});
+
+    // Referral reward fires on the buyer's first completed order.
+    // creditIfEligible is a no-op for everyone else (no Referral row,
+    // or reward already credited). Fire-and-forget — a referral
+    // credit failure must not roll back the escrow release.
+    this.referrals.creditIfEligible(result.buyerId).catch(() => {});
 
     return result;
   }

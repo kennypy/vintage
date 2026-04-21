@@ -477,11 +477,29 @@ export class ListingsService {
     if (existing) {
       await this.prisma.favorite.delete({ where: { userId_listingId: { userId, listingId } } });
       await this.prisma.listing.update({ where: { id: listingId }, data: { favoriteCount: { decrement: 1 } } });
+      // Drop the price-drop subscription along with the favorite —
+      // "unfavorite" implies "stop pinging me about this one".
+      await this.prisma.priceDropAlert
+        .deleteMany({ where: { userId, listingId } })
+        .catch(() => {});
       return { favorited: false };
     }
 
     await this.prisma.favorite.create({ data: { userId, listingId } });
     await this.prisma.listing.update({ where: { id: listingId }, data: { favoriteCount: { increment: 1 } } });
+
+    // Auto-subscribe to price drops on the favorite. Snapshot the
+    // current price as the baseline; the price-drop cron later compares
+    // listing.priceBrl against this and notifies once the seller cuts
+    // the price. upsert is idempotent if the row somehow already exists
+    // (rare — unfavorite+refavorite inside one tick).
+    this.prisma.priceDropAlert
+      .upsert({
+        where: { listingId_userId: { listingId, userId } },
+        create: { listingId, userId, originalPriceBrl: listing.priceBrl },
+        update: { originalPriceBrl: listing.priceBrl, notifiedAt: null },
+      })
+      .catch(() => {});
 
     // Notify the seller unless they favourited their own item (impossible
     // today because toggleFavorite has no self-check, but cheap defence).
@@ -585,6 +603,108 @@ export class ListingsService {
     ]);
 
     return { items, total, page: p, pageSize: ps, hasMore: skip + items.length < total };
+  }
+
+  /**
+   * Trending listings — ranks ACTIVE items by a simple popularity
+   * score (favorites weighted 2x views) within the last 14 days.
+   * Cheap enough to be computed live; if this endpoint gets hot we
+   * can cache with a cron.
+   */
+  async getTrending(limit = 20) {
+    const take = Math.min(100, Math.max(1, Number(limit) || 20));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 14);
+
+    return this.prisma.listing.findMany({
+      where: { status: 'ACTIVE', createdAt: { gte: cutoff } },
+      include: {
+        images: { orderBy: { position: 'asc' }, take: 1 },
+        category: { select: { namePt: true, slug: true } },
+        brand: { select: { name: true } },
+        seller: { select: { id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true } },
+      },
+      // Prisma can't compose arbitrary math in orderBy, so sort by
+      // favoriteCount DESC, then viewCount DESC — close enough to
+      // (fav*2 + view) in most distributions, and bound by take.
+      orderBy: [{ favoriteCount: 'desc' }, { viewCount: 'desc' }, { createdAt: 'desc' }],
+      take,
+    });
+  }
+
+  /**
+   * "For you" recommendations. Uses the user's favourited listings
+   * to derive a taste profile (top categories + brands) and surfaces
+   * ACTIVE listings matching it — excluding the seller's own items
+   * and anything they've already favorited.
+   *
+   * Falls back to trending for users with no favourites yet — the
+   * cold-start path.
+   */
+  async getRecommended(userId: string, limit = 20) {
+    const take = Math.min(100, Math.max(1, Number(limit) || 20));
+
+    // Build the taste profile from the most recent 50 favourites.
+    const favourites = await this.prisma.favorite.findMany({
+      where: { userId },
+      select: { listing: { select: { categoryId: true, brandId: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    if (favourites.length === 0) {
+      return this.getTrending(take);
+    }
+
+    const categoryCounts = new Map<string, number>();
+    const brandCounts = new Map<string, number>();
+    for (const f of favourites) {
+      categoryCounts.set(
+        f.listing.categoryId,
+        (categoryCounts.get(f.listing.categoryId) ?? 0) + 1,
+      );
+      if (f.listing.brandId) {
+        brandCounts.set(f.listing.brandId, (brandCounts.get(f.listing.brandId) ?? 0) + 1);
+      }
+    }
+
+    const topCategories = [...categoryCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id]) => id);
+    const topBrands = [...brandCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id]) => id);
+
+    const favouritedIds = new Set(
+      (
+        await this.prisma.favorite.findMany({
+          where: { userId },
+          select: { listingId: true },
+        })
+      ).map((f) => f.listingId),
+    );
+
+    return this.prisma.listing.findMany({
+      where: {
+        status: 'ACTIVE',
+        sellerId: { not: userId },
+        id: { notIn: [...favouritedIds] },
+        OR: [
+          { categoryId: { in: topCategories } },
+          topBrands.length > 0 ? { brandId: { in: topBrands } } : { id: undefined },
+        ],
+      },
+      include: {
+        images: { orderBy: { position: 'asc' }, take: 1 },
+        category: { select: { namePt: true, slug: true } },
+        brand: { select: { name: true } },
+        seller: { select: { id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true } },
+      },
+      orderBy: [{ favoriteCount: 'desc' }, { createdAt: 'desc' }],
+      take,
+    });
   }
 
   async searchBrands(query: string) {

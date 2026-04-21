@@ -22,6 +22,7 @@ import { RedisService } from '../common/services/redis.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { isValidCPF } from '@vintage/shared';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -127,6 +128,7 @@ export class AuthService {
     private analytics: AnalyticsService,
     private cpfVault: CpfVaultService,
     private metrics: MetricsService,
+    private referrals: ReferralsService,
   ) {}
 
   // ── 2FA brute-force helpers ───────────────────────────────────────────
@@ -264,6 +266,10 @@ export class AuthService {
     // Create user + wallet. CPF goes in encrypted; the lookup hash
     // (HMAC-SHA256) handles the collision check + future lookups.
     const normalizedPhone = dto.phone ? dto.phone.replace(/\D/g, '') : null;
+    // Generate the invite/referral code before the create so it lands
+    // atomically with the row — new users never see a null
+    // referralCode if they open the referrals screen immediately.
+    const referralCode = await this.referrals.generateUniqueCode();
     const user = await this.prisma.user.create({
       data: {
         email: dto.email,
@@ -273,6 +279,7 @@ export class AuthService {
         name: dto.name,
         phone: normalizedPhone,
         birthDate,
+        referralCode,
         // Modulo-11 passed (checked above by isValidCPF). Identity
         // verification (Receita + name match) is a separate gate set
         // later by the KYC provider — see cpfIdentityVerified.
@@ -327,6 +334,11 @@ export class AuthService {
     );
 
     const tokens = await this.generateTokensWithUser(user.id);
+
+    // Link referral if the referee supplied a valid code. Never blocks
+    // signup — linkReferralAtSignup swallows all errors, so a bad
+    // code just means no reward pairing.
+    await this.referrals.linkReferralAtSignup(user.id, dto.referralCode);
 
     // Send welcome email (non-blocking, non-critical)
     this.emailService.sendWelcomeEmail(user.email, user.name);

@@ -112,6 +112,23 @@ export class ListingsController {
     return this.listingsService.getFollowingFeed(user.id, page, pageSize);
   }
 
+  @Get('trending')
+  @ApiOperation({ summary: 'Anúncios em alta nos últimos 14 dias' })
+  getTrending(@Query('limit') limit: number = 20) {
+    return this.listingsService.getTrending(limit);
+  }
+
+  @Get('for-you')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Recomendações personalizadas com base nos seus favoritos' })
+  getForYou(
+    @CurrentUser() user: AuthUser,
+    @Query('limit') limit: number = 20,
+  ) {
+    return this.listingsService.getRecommended(user.id, limit);
+  }
+
   @Get('favorites')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

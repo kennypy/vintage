@@ -6,6 +6,7 @@ import { ListingsModule } from '../listings/listings.module';
 import { ShippingModule } from '../shipping/shipping.module';
 import { FraudModule } from '../fraud/fraud.module';
 import { ReturnsModule } from '../returns/returns.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrdersCronService } from './orders-cron.service';
@@ -20,6 +21,7 @@ import { TrackingPollerService } from './tracking-poller.service';
     ShippingModule,
     FraudModule,
     ReturnsModule,
+    ReferralsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersCronService, TrackingPollerService],

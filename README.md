@@ -49,6 +49,10 @@ vintage/
 | **Offers** | create, accept, reject, **counter**, thread | Mínimo 50% do preço, expiração em 48h, cadeia de contrapropostas (MAX_OFFER_COUNTERS=3, alternância comprador/vendedor) |
 | **Payments** | PIX, cartão, boleto, webhook, **retry** | Tentativas múltiplas por pedido via Payment model (MAX_PAYMENT_ATTEMPTS=3), cada tentativa rastreada com attemptNumber + parentPaymentId |
 | **Returns** | request, approve (gera etiqueta inversa), reject, mark-shipped, inspect-approve, inspect-reject | Fluxo de devolução colaborativo; janela de RETURN_WINDOW_DAYS (padrão 7); tracking poller detecta pacote de retorno; seller tem RETURN_INSPECTION_DAYS para inspecionar ou escala para disputa automática |
+| **Referrals** | code generation, redeem at signup, credit on first order | Cada usuário recebe código estável de 8 caracteres ao se cadastrar; ao convidar via código, ambos ganham R$10 no primeiro pedido concluído da convidada |
+| **Favorite Collections** | list, create, rename, delete, move | Wishlists nomeadas (Festa, Trabalho, etc); favoritos fora de qualquer coleção ficam na padrão "Favoritos" (auto-criada) |
+| **Trending + For-You** | /listings/trending, /listings/for-you | Trending = favoritos + views últimos 14 dias; For-You = derivação de taste-profile dos favoritos (fallback para trending em cold-start) |
+| **Price-Drop Alerts** | auto-subscribe on favorite; cron fires on drop | Ao favoritar, baseline de preço é salva; cron horário notifica quando seller baixa preço; baseline rola para frente após notificar |
 | **Wallet** | balance, transactions, payout, payout-methods CRUD | Saque via chave PIX salva (race-safe, débito atômico), 5 chaves/conta, 5 tipos PIX canonicalizados (CPF/CNPJ/email/phone BR/random UUID), mascaramento obrigatório |
 | **Messages** | conversations, send, WebSocket gateway | Chat em tempo real (Socket.io), typing, read receipts, online status |
 | **Reviews** | create, list, seller reply | Avaliação binária (1 ou 5 estrelas), resposta pública do vendedor |
