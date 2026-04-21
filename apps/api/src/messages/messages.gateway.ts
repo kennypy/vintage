@@ -295,7 +295,7 @@ export class MessagesGateway
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; body: string },
+    @MessageBody() data: { conversationId: string; body: string; imageUrl?: string },
   ) {
     const userId = this.socketToUser.get(client.id);
     if (!userId) {
@@ -318,6 +318,11 @@ export class MessagesGateway
         error: `Mensagem muito longa (limite ${MAX_MESSAGE_BODY_CHARS} caracteres).`,
       };
     }
+    if (data.imageUrl !== undefined) {
+      if (typeof data.imageUrl !== 'string' || data.imageUrl.length > 1024) {
+        return { error: 'URL de imagem inválida' };
+      }
+    }
 
     if (!this.checkRate(client.id, 'send')) {
       return { error: 'Você está enviando mensagens muito rápido. Aguarde um pouco.' };
@@ -329,6 +334,7 @@ export class MessagesGateway
         data.conversationId,
         userId,
         sanitizedBody,
+        data.imageUrl,
       );
 
       // Emit to all participants in the conversation room

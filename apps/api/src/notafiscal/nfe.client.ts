@@ -46,24 +46,53 @@ const HTTP_TIMEOUT_MS = 15_000;
 // input is wrong and retrying won't change it.
 const HTTP_RETRY_DELAYS_MS = [750, 2_000];
 
+/**
+ * Supported NF-e providers. Focus NFe is the primary issuer post-launch
+ * (REST API, MEI/Simples/Lucro Presumido coverage, sandbox env);
+ * 'enotas' is kept as a fallback for the legacy integration. Swap via
+ * NFE_PROVIDER without a code change.
+ */
+type NFeProvider = 'focus' | 'enotas';
+
 @Injectable()
 export class NFeClient {
   private readonly logger = new Logger(NFeClient.name);
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly nodeEnv: string;
+  private readonly provider: NFeProvider;
 
   constructor(private configService: ConfigService) {
     this.apiKey = this.configService.get<string>('NFE_API_KEY', '');
-    this.baseUrl = this.configService.get<string>(
-      'NFE_API_URL',
-      'https://api.enotas.com.br/v2',
-    );
+    this.provider =
+      (this.configService.get<string>('NFE_PROVIDER', 'focus') as NFeProvider) ===
+      'enotas'
+        ? 'enotas'
+        : 'focus';
+    // Provider-appropriate default. Ops can still override via
+    // NFE_API_URL (e.g. Focus's sandbox vs prod host).
+    const defaultUrl =
+      this.provider === 'focus'
+        ? 'https://api.focusnfe.com.br'
+        : 'https://api.enotas.com.br/v2';
+    this.baseUrl = this.configService.get<string>('NFE_API_URL', defaultUrl);
     this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
   }
 
   private get isConfigured(): boolean {
     return this.apiKey.length > 0;
+  }
+
+  /**
+   * Focus NFe authenticates via HTTP Basic with the token as the
+   * username and an empty password. eNotas uses Bearer tokens.
+   */
+  private authHeader(): string {
+    if (this.provider === 'focus') {
+      const encoded = Buffer.from(`${this.apiKey}:`).toString('base64');
+      return `Basic ${encoded}`;
+    }
+    return `Bearer ${this.apiKey}`;
   }
 
   /**
@@ -100,7 +129,7 @@ export class NFeClient {
         const response = await fetch(url, {
           method,
           headers: {
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: this.authHeader(),
             'Content-Type': 'application/json',
           },
           body: body ? JSON.stringify(body) : undefined,
@@ -175,6 +204,42 @@ export class NFeClient {
       return this.mockGenerateNFe(orderData);
     }
 
+    if (this.provider === 'focus') {
+      // Focus NFe uses `v2/nfe` with a reference (idempotency key) and
+      // distinct payload fields. Response shape also differs — normalise
+      // via mapFocusResponse below.
+      const result = await this.request<Record<string, unknown>>(
+        'POST',
+        `/v2/nfe?ref=${encodeURIComponent(orderData.orderId)}`,
+        {
+          natureza_operacao: 'Venda',
+          data_emissao: new Date().toISOString(),
+          tipo_documento: 1, // saída
+          finalidade_emissao: 1, // NF-e normal
+          cnpj_emitente: orderData.sellerCnpj,
+          cpf_destinatario: orderData.buyerCpf,
+          uf_emitente: orderData.originState,
+          uf_destinatario: orderData.destinationState,
+          valor_produtos: orderData.itemPriceBrl,
+          valor_total: orderData.itemPriceBrl,
+          valor_icms: taxInfo.icms,
+          valor_iss: taxInfo.iss,
+          items: [
+            {
+              numero_item: 1,
+              codigo_produto: orderData.orderId,
+              descricao: orderData.itemDescription,
+              quantidade_comercial: 1,
+              valor_unitario_comercial: orderData.itemPriceBrl,
+              valor_bruto: orderData.itemPriceBrl,
+            },
+          ],
+        },
+      );
+      return this.mapFocusResponse(result);
+    }
+
+    // eNotas (legacy) path.
     const result = await this.request<NFeProviderResponse>('POST', '/nfe', {
       pedidoId: orderData.orderId,
       descricao: orderData.itemDescription,
@@ -192,6 +257,24 @@ export class NFeClient {
   }
 
   /**
+   * Focus NFe returns (after an async authorization step) fields like
+   * `caminho_xml_nota_fiscal`, `chave_nfe`, `status`, `numero`. Map
+   * into our stable NFeResponse shape. Status strings come back as
+   * 'autorizado' once SEFAZ clears the issuance.
+   */
+  private mapFocusResponse(r: Record<string, unknown>): NFeResponse {
+    const str = (k: string) => (typeof r[k] === 'string' ? (r[k] as string) : '');
+    return {
+      nfeId: str('ref') || str('numero') || '',
+      accessKey: str('chave_nfe'),
+      xml: str('caminho_xml_nota_fiscal'),
+      pdfUrl: str('caminho_danfe'),
+      status: this.mapStatus(str('status')),
+      issuedAt: str('data_emissao') || new Date().toISOString(),
+    };
+  }
+
+  /**
    * Retrieve existing NF-e by ID. Used by the status-polling cron to
    * promote PENDING rows once the provider moves them to authorized.
    */
@@ -201,6 +284,18 @@ export class NFeClient {
         throw new Error('NF-e service not configured — cannot operate in production');
       }
       return this.mockGetNFe(nfeId);
+    }
+
+    if (this.provider === 'focus') {
+      // Focus NFe lookup is by the `ref` we supplied on create — i.e.
+      // our orderId, NOT the autogenerated numero. Callers of getNFe
+      // pass the id we stored on NotaFiscal.nfeId, which is populated
+      // from mapFocusResponse (ref / numero).
+      const result = await this.request<Record<string, unknown>>(
+        'GET',
+        `/v2/nfe/${encodeURIComponent(nfeId)}`,
+      );
+      return this.mapFocusResponse(result);
     }
 
     const result = await this.request<NFeProviderResponse>(
@@ -226,11 +321,18 @@ export class NFeClient {
   ): 'authorized' | 'pending' | 'rejected' {
     switch (status.toLowerCase()) {
       case 'autorizada':
+      case 'autorizado':
       case 'authorized':
         return 'authorized';
       case 'rejeitada':
+      case 'rejeitado':
+      case 'cancelado':
+      case 'cancelada':
       case 'rejected':
         return 'rejected';
+      case 'processando_autorizacao':
+      case 'em_processamento':
+      case 'pendente':
       default:
         return 'pending';
     }

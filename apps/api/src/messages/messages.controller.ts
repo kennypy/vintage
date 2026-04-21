@@ -40,9 +40,9 @@ export class MessagesController {
   @ApiOperation({ summary: 'Enviar mensagem' })
   sendMessage(
     @Param('id') id: string,
-    @Body() body: { body: string },
+    @Body() body: { body: string; imageUrl?: string },
     @CurrentUser() user: AuthUser,
   ) {
-    return this.messagesService.sendMessage(id, user.id, body.body);
+    return this.messagesService.sendMessage(id, user.id, body.body, body.imageUrl);
   }
 }

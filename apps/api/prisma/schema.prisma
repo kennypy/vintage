@@ -173,6 +173,7 @@ model User {
   favoriteCollections    FavoriteCollection[]
   referralsMade          Referral[]          @relation("ReferralReferrer")
   referralReceived       Referral?           @relation("ReferralReferee")
+  supportTickets         SupportTicket[]     @relation("SupportTicketUser")
 
   @@index([email])
   // cpfLookupHash is already @unique (which implies an index) — no
@@ -344,6 +345,7 @@ model Order {
   dispute         Dispute?
   returnRequest   OrderReturn?
   payments        Payment[]
+  supportTickets  SupportTicket[]
   notaFiscal      NotaFiscal?
   paymentFlags    PaymentFlag[]
   listingSnapshot OrderListingSnapshot?
@@ -660,6 +662,74 @@ model FavoriteCollection {
   @@index([userId])
 }
 
+/// Internal help-desk ticket. When SUPPORT_CRM_WEBHOOK_URL is set,
+/// tickets are mirrored to the ops CRM (see kennypy/CRM) as a POST
+/// with the ticket payload + HMAC signature. Without the webhook,
+/// tickets stay in-house and are worked via /admin/support.
+model SupportTicket {
+  id               String                  @id @default(cuid())
+  userId           String
+  subject          String                  @db.VarChar(200)
+  body             String                  @db.Text
+  category         SupportTicketCategory   @default(OTHER)
+  priority         SupportTicketPriority   @default(NORMAL)
+  status           SupportTicketStatus     @default(OPEN)
+  orderId          String?
+  attachments      Json                    @default("[]") // array of S3 URLs
+  externalTicketId String? // id from the outbound CRM, if mirrored
+  assignedToUserId String?
+  resolvedAt       DateTime?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  user     User                    @relation("SupportTicketUser", fields: [userId], references: [id], onDelete: Cascade)
+  order    Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  messages SupportTicketMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model SupportTicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderId   String
+  senderRole String   @db.VarChar(16) // 'user' | 'agent'
+  body       String   @db.Text
+  createdAt  DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketCategory {
+  ORDER_ISSUE
+  PAYMENT
+  SHIPPING
+  REFUND
+  ACCOUNT
+  LISTING
+  FRAUD
+  OTHER
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 /// Referral code + reward ledger. Every user gets a stable code at
 /// registration (User.referralCode). When a new account signs up
 /// supplying that code, we write a Referral row linking referrer and
@@ -726,6 +796,11 @@ model Message {
   conversationId String
   senderId       String
   body           String
+  // Optional image attachment. S3 URL produced by the existing
+  // uploads pipeline (presigned PUT → permanent URL). Body stays
+  // required on the DB side even for image-only messages; clients
+  // are expected to send a short caption (or a space).
+  imageUrl       String?
   readAt         DateTime?
   createdAt      DateTime  @default(now())
 

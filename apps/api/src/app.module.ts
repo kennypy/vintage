@@ -50,6 +50,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { ReturnsModule } from './returns/returns.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { FavoriteCollectionsModule } from './favorite-collections/favorite-collections.module';
+import { SupportModule } from './support/support.module';
 import { TosVersionInterceptor } from './auth/tos-version.interceptor';
 
 @Module({
@@ -117,6 +118,7 @@ import { TosVersionInterceptor } from './auth/tos-version.interceptor';
     ReturnsModule,
     ReferralsModule,
     FavoriteCollectionsModule,
+    SupportModule,
   ],
   providers: [
     {

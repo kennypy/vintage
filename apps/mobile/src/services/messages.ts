@@ -46,6 +46,7 @@ export interface Message {
   conversationId: string;
   senderId: string;
   body: string;
+  imageUrl?: string | null;
   readAt: string | null;
   createdAt: string;
   // Offer fields (present only for offer-type messages)
@@ -74,12 +75,13 @@ export async function getMessages(
 export async function sendMessage(
   conversationId: string,
   body: string,
+  imageUrl?: string,
 ): Promise<Message> {
   return apiFetch<Message>(
     `/messages/conversations/${encodeURIComponent(conversationId)}/messages`,
     {
       method: 'POST',
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body, imageUrl }),
     },
   );
 }

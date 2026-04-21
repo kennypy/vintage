@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadListingImage } from '../../src/services/listings';
 import {
   View,
   Text,
+  Image,
   FlatList,
   TextInput,
   TouchableOpacity,
@@ -61,6 +64,7 @@ export default function ConversationScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [attaching, setAttaching] = useState(false);
   const [text, setText] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -212,6 +216,32 @@ export default function ConversationScreen() {
       }, 2000);
     }
   }, [id]);
+
+  const handleAttachImage = useCallback(async () => {
+    if (!id || attaching || sending) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permissão negada', 'Conceda acesso à galeria para anexar imagens.');
+        return;
+      }
+      const pick = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsEditing: false,
+      });
+      if (pick.canceled || !pick.assets?.[0]?.uri) return;
+      setAttaching(true);
+      const uploaded = await uploadListingImage(pick.assets[0].uri);
+      const sent = await sendMessage(id, '📷', uploaded.url);
+      setMessages((prev) => [...prev, sent]);
+      socketRef.current?.emit('sendMessage', { conversationId: id, body: '📷', imageUrl: uploaded.url });
+    } catch (err) {
+      Alert.alert('Erro ao enviar imagem', String(err).slice(0, 200));
+    } finally {
+      setAttaching(false);
+    }
+  }, [id, attaching, sending]);
 
   const handleSend = useCallback(async () => {
     if (!text.trim() || !id || sending) return;
@@ -392,6 +422,13 @@ export default function ConversationScreen() {
               isMine ? styles.bubbleMine : [styles.bubbleTheirs, { backgroundColor: theme.cardSecondary }],
             ]}
           >
+            {item.imageUrl && (
+              <Image
+                source={{ uri: item.imageUrl }}
+                style={styles.bubbleImage}
+                resizeMode="cover"
+              />
+            )}
             <Text
               style={[
                 styles.bubbleText,
@@ -529,6 +566,18 @@ export default function ConversationScreen() {
         </View>
       )}
       <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.card, borderTopColor: theme.border }]}>
+        <TouchableOpacity
+          style={styles.attachButton}
+          onPress={handleAttachImage}
+          disabled={sending || attaching}
+          accessibilityLabel="Anexar imagem"
+        >
+          <Ionicons
+            name={attaching ? 'hourglass-outline' : 'image-outline'}
+            size={22}
+            color={colors.primary[600]}
+          />
+        </TouchableOpacity>
         <TextInput
           style={[styles.textInput, { backgroundColor: theme.inputBg, color: theme.text }]}
           value={text}
@@ -645,6 +694,12 @@ const styles = StyleSheet.create({
   bubbleRowLeft: {
     alignSelf: 'flex-start',
   },
+  bubbleImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
   bubble: {
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -703,6 +758,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     maxHeight: 100,
+  },
+  attachButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sendButton: {
     marginLeft: 8,

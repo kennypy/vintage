@@ -14,6 +14,7 @@ import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ReferralsService } from '../referrals/referrals.service';
+import { SmsService } from '../sms/sms.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -98,6 +99,13 @@ describe('OrdersService', () => {
         {
           provide: ReferralsService,
           useValue: { creditIfEligible: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: SmsService,
+          useValue: {
+            sendSms: jest.fn().mockResolvedValue(undefined),
+            sendWhatsapp: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
