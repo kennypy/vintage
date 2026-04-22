@@ -63,6 +63,7 @@ function ListingsContent() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [search, setSearch] = useState(searchParams.get('q') ?? '');
   const [sort, setSort] = useState(searchParams.get('sort') ?? 'newest');
@@ -78,6 +79,7 @@ function ListingsContent() {
 
   const fetchListings = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
@@ -110,10 +112,17 @@ function ListingsContent() {
         setTotal(t);
         setTotalPages(tp);
       }
-    } catch (_err) {
+    } catch (err) {
+      // Don't pretend the API returned zero results — that hides 500s
+      // and misleads the user into thinking no items match.
       setListings([]);
       setTotal(0);
       setTotalPages(1);
+      setFetchError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível carregar os anúncios. Tente novamente.',
+      );
     } finally {
       setLoading(false);
     }
@@ -197,6 +206,17 @@ function ListingsContent() {
                   <div className="h-3 bg-gray-200 rounded w-16" />
                 </div>
               ))}
+            </div>
+          ) : fetchError ? (
+            <div className="col-span-full text-center py-12">
+              <p className="text-red-600 mb-3" role="alert">{fetchError}</p>
+              <button
+                type="button"
+                onClick={() => fetchListings()}
+                className="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700"
+              >
+                Tentar novamente
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">

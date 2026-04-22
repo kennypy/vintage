@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiPatch } from '@/lib/api';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface OrderReturn {
   id: string;
@@ -34,35 +35,42 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function ReturnDetailPage() {
   const params = useParams<{ id: string }>();
-  const [ret, setRet] = useState<OrderReturn | null>(null);
-  const [me, setMe] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const refresh = async () => {
-    if (!params?.id) return;
-    const data = await apiGet<OrderReturn>(`/returns/${params.id}`);
-    setRet(data);
-  };
+  const { data: ret, loading, error: fetchError, refetch } = useApiQuery<OrderReturn>(
+    params?.id ? `/returns/${params.id}` : null,
+    { requireAuth: true },
+  );
+  const { data: meData, error: meError } = useApiQuery<{ id: string }>('/users/me', {
+    requireAuth: true,
+  });
+  const me = meData?.id ?? null;
 
-  useEffect(() => {
-    apiGet<{ id: string }>('/users/me').then((u) => setMe(u.id)).catch(() => {});
-    refresh();
-  }, [params?.id]);
-
-  if (!ret) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (loading) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (fetchError) {
+    return (
+      <p className="p-6 text-sm text-red-600" role="alert">
+        Não foi possível carregar este retorno: {fetchError}
+      </p>
+    );
+  }
+  if (!ret) return null;
 
   const isBuyer = me === ret.order.buyer.id;
   const isSeller = me === ret.order.seller.id;
+  const error = actionError ?? meError;
 
   const doAction = async (path: string, body?: Record<string, unknown>) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await apiPatch(`/returns/${ret.id}/${path}`, body ?? {});
-      await refresh();
+      await refetch();
     } catch (err) {
-      setError(String(err).slice(0, 200));
+      setActionError(
+        err instanceof Error && err.message ? err.message : String(err).slice(0, 200),
+      );
     } finally {
       setBusy(false);
     }

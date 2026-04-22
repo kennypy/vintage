@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { apiPatch, apiPost } from '@/lib/api';
 import { formatBRL, ORDER_STATUS_PT, ORDER_STATUS_COLORS } from '@/lib/i18n';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface OrderDetail {
   id: string;
@@ -69,10 +70,30 @@ function formatDate(iso: string): string {
 export default function OrderDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+
+  const { data: me, error: meError } = useApiQuery<{ id: string }>('/users/me', {
+    requireAuth: true,
+  });
+  const { data: fetchedOrder, loading, error: orderError } = useApiQuery<OrderDetail>(
+    params.id ? `/orders/${params.id}` : null,
+    { requireAuth: true },
+  );
+  // Keep a local copy so action handlers can update status optimistically
+  // without waiting for refetch.
   const [order, setOrder] = useState<OrderDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  useEffect(() => { if (fetchedOrder) setOrder(fetchedOrder); }, [fetchedOrder]);
+
+  // If the order fetch fails (bad id / 404 / 500), bounce back to /orders
+  // instead of showing a blank page.
+  useEffect(() => {
+    if (orderError) router.push('/orders');
+  }, [orderError, router]);
+
+  const currentUserId = me?.id ?? null;
+  // meError is exposed to the UI so an auth failure on /users/me doesn't
+  // silently disable the buyer/seller permission checks.
+
   const [confirming, setConfirming] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showShipModal, setShowShipModal] = useState(false);
   const [selectedCarrier, setSelectedCarrier] = useState('');
   const [trackingCodeInput, setTrackingCodeInput] = useState('');
@@ -82,24 +103,6 @@ export default function OrderDetailPage() {
   const [disputeDescription, setDisputeDescription] = useState('');
   const [disputeSubmitting, setDisputeSubmitting] = useState(false);
   const [disputeError, setDisputeError] = useState('');
-
-  useEffect(() => {
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-
-    apiGet<{ id: string }>('/users/me')
-      .then((me) => setCurrentUserId(me.id))
-      .catch(() => {});
-
-    apiGet<OrderDetail>(`/orders/${params.id}`)
-      .then(setOrder)
-      .catch(() => router.push('/orders'))
-      .finally(() => setLoading(false));
-  }, [router, params.id]);
 
   const handleCancel = async () => {
     if (!order) return;
@@ -211,6 +214,12 @@ export default function OrderDetailPage() {
           ← Meus pedidos
         </Link>
       </div>
+
+      {meError && (
+        <div className="mb-4 p-3 rounded-xl border border-yellow-200 bg-yellow-50 text-sm text-yellow-800" role="alert">
+          Não foi possível verificar sua sessão. Alguns botões podem estar indisponíveis. {meError}
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-gray-900">

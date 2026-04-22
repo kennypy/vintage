@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet, apiDelete, apiPatch } from '@/lib/api';
+import { apiDelete, apiPatch } from '@/lib/api';
 import { formatBRL, LISTING_STATUS_PT, LISTING_STATUS_COLORS } from '@/lib/i18n';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Listing {
   id: string;
@@ -28,31 +28,22 @@ function getImageUrl(img: { url: string } | string): string {
 type StatusFilter = 'ALL' | 'ACTIVE' | 'PAUSED' | 'SOLD';
 
 export default function MyListingsPage() {
-  const router = useRouter();
-  const [listings, setListings] = useState<Listing[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>('ALL');
-  const [_userId, setUserId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-
-    // Get user profile first to get userId, then fetch listings
-    apiGet<{ id: string }>('/users/me')
-      .then((user) => {
-        setUserId(user.id);
-        return apiGet<Listing[] | { data: Listing[]; items: Listing[] }>(`/users/${encodeURIComponent(user.id)}/listings`);
-      })
-      .then((res) => {
-        setListings(Array.isArray(res) ? res : ((res as { items?: Listing[]; data?: Listing[] }).items ?? (res as { data?: Listing[] }).data ?? []));
-      })
-      .catch(() => setListings([]))
-      .finally(() => setLoading(false));
-  }, [router]);
+  const { data: me, error: meError } = useApiQuery<{ id: string }>('/users/me', {
+    requireAuth: true,
+  });
+  // Second query depends on the first — `enabled` blocks it until we
+  // have the user id. useApiQuery returns loading=false when disabled so
+  // the skeleton shows only when actually fetching.
+  const listingsPath = me?.id ? `/users/${encodeURIComponent(me.id)}/listings` : null;
+  const { data, loading, error: listError, refetch } = useApiQuery<Listing[]>(listingsPath, {
+    requireAuth: true,
+    enabled: !!me?.id,
+    transform: unwrapList<Listing>,
+  });
+  const listings = data ?? [];
+  const error = meError ?? listError;
 
   const filtered = filter === 'ALL' ? listings : listings.filter((l) => l.status === filter);
 
@@ -60,9 +51,9 @@ export default function MyListingsPage() {
     if (!confirm('Tem certeza que deseja excluir este anúncio?')) return;
     try {
       await apiDelete(`/listings/${encodeURIComponent(id)}`);
-      setListings((prev) => prev.filter((l) => l.id !== id));
-    } catch {
-      alert('Erro ao excluir anúncio.');
+      await refetch();
+    } catch (err) {
+      alert(err instanceof Error && err.message ? err.message : 'Erro ao excluir anúncio.');
     }
   };
 
@@ -70,9 +61,9 @@ export default function MyListingsPage() {
     const newStatus = listing.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
     try {
       await apiPatch(`/listings/${encodeURIComponent(listing.id)}`, { status: newStatus });
-      setListings((prev) => prev.map((l) => l.id === listing.id ? { ...l, status: newStatus } : l));
-    } catch {
-      alert('Erro ao atualizar status.');
+      await refetch();
+    } catch (err) {
+      alert(err instanceof Error && err.message ? err.message : 'Erro ao atualizar status.');
     }
   };
 
@@ -84,6 +75,12 @@ export default function MyListingsPage() {
           Novo anúncio
         </Link>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700" role="alert">
+          {error}
+        </div>
+      )}
 
       {/* Status filter */}
       <div className="flex gap-2 mb-6 overflow-x-auto">

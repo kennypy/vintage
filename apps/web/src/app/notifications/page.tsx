@@ -130,9 +130,13 @@ export default function NotificationsPage() {
           setUnreadCount(res.unreadCount ?? 0);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         setNotifications([]);
-        setError('Não foi possível carregar os dados. Tente novamente.');
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'Não foi possível carregar os dados. Tente novamente.',
+        );
       })
       .finally(() => setLoading(false));
 

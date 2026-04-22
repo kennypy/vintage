@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { useEffect, useState } from 'react';
+import { apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { formatCEP } from '@/lib/i18n';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Address {
   id: string;
@@ -46,10 +46,13 @@ interface ViaCEPResponse {
 }
 
 export default function AddressesPage() {
-  const router = useRouter();
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: fetched, loading, error: fetchError, refetch } = useApiQuery<Address[]>(
+    '/users/me/addresses',
+    { requireAuth: true, transform: unwrapList<Address> },
+  );
+  const addresses = fetched ?? [];
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError ?? fetchError;
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -57,24 +60,6 @@ export default function AddressesPage() {
   const [saving, setSaving] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
   const [cepError, setCepError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-    apiGet<Address[] | { items: Address[]; data: Address[] }>('/users/me/addresses')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res.items ?? res.data ?? []);
-        setAddresses(list);
-      })
-      .catch(() => {
-        setAddresses([]);
-        setError('Não foi possível carregar seus endereços.');
-      })
-      .finally(() => setLoading(false));
-  }, [router]);
 
   const resetForm = () => {
     setDraft(EMPTY_DRAFT);
@@ -127,30 +112,33 @@ export default function AddressesPage() {
   const handleSave = async () => {
     // Minimal validation — empty required fields abort silently.
     if (!draft.label || !draft.cep || !draft.street || !draft.number || !draft.city || !draft.state) {
-      setError('Preencha todos os campos obrigatórios.');
+      setMutationError('Preencha todos os campos obrigatórios.');
       return;
     }
     setSaving(true);
-    setError(null);
+    setMutationError(null);
     const payload = { ...draft, cep: draft.cep.replace(/\D/g, '') };
     try {
       if (editingId) {
-        const updated = await apiPatch<Address>(
+        await apiPatch<Address>(
           `/users/me/addresses/${encodeURIComponent(editingId)}`,
           payload,
         );
-        setAddresses((prev) => prev.map((a) => (a.id === editingId ? updated : a)));
       } else {
-        const created = await apiPost<Address>('/users/me/addresses', {
+        await apiPost<Address>('/users/me/addresses', {
           ...payload,
           isDefault: addresses.length === 0,
         });
-        setAddresses((prev) => [...prev, created]);
       }
+      await refetch();
       setFormOpen(false);
       resetForm();
-    } catch {
-      setError('Não foi possível salvar o endereço. Tente novamente.');
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível salvar o endereço. Tente novamente.',
+      );
     } finally {
       setSaving(false);
     }
@@ -160,18 +148,24 @@ export default function AddressesPage() {
     if (!confirm('Tem certeza que deseja remover este endereço?')) return;
     try {
       await apiDelete(`/users/me/addresses/${encodeURIComponent(id)}`);
-      setAddresses((prev) => prev.filter((a) => a.id !== id));
-    } catch {
-      setError('Não foi possível remover o endereço.');
+      await refetch();
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message ? err.message : 'Não foi possível remover o endereço.',
+      );
     }
   };
 
   const handleSetDefault = async (id: string) => {
     try {
       await apiPatch(`/users/me/addresses/${encodeURIComponent(id)}`, { isDefault: true });
-      setAddresses((prev) => prev.map((a) => ({ ...a, isDefault: a.id === id })));
-    } catch {
-      setError('Não foi possível definir este endereço como padrão.');
+      await refetch();
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível definir este endereço como padrão.',
+      );
     }
   };
 

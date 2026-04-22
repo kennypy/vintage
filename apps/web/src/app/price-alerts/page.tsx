@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { apiDelete, apiGet } from '@/lib/api';
+import { apiDelete } from '@/lib/api';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface PriceAlert {
   id: string;
@@ -23,28 +24,24 @@ const fmt = (v: number) =>
   `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function PriceAlertsPage() {
-  const [items, setItems] = useState<PriceAlert[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    apiGet<{ items: PriceAlert[] }>('/price-alerts')
-      .then((r) => setItems(r.items))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const { data, loading, error, refetch } = useApiQuery<PriceAlert[]>(
+    '/price-alerts',
+    { requireAuth: true, transform: unwrapList<PriceAlert> },
+  );
+  const items = data ?? [];
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const remove = async (id: string) => {
     if (!window.confirm('Remover este alerta?')) return;
-    setItems((p) => p.filter((a) => a.id !== id));
     try {
       await apiDelete(`/price-alerts/${encodeURIComponent(id)}`);
-    } catch {
-      load();
+      await refetch();
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível remover o alerta.',
+      );
     }
   };
 
@@ -56,9 +53,14 @@ export default function PriceAlertsPage() {
       </p>
 
       <div className="mt-6">
+        {(error || mutationError) && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+            {mutationError ?? error}
+          </div>
+        )}
         {loading ? (
           <p className="text-gray-500">Carregando…</p>
-        ) : items.length === 0 ? (
+        ) : error && items.length === 0 ? null : items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
             <p className="text-gray-600">Nenhum alerta ativo.</p>
             <p className="mt-2 text-sm text-gray-500">

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { apiGet, apiPatch, apiPost } from '@/lib/api';
+import { apiPatch, apiPost } from '@/lib/api';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface Offer {
   id: string;
@@ -17,36 +18,41 @@ interface Offer {
 
 export default function OfferThreadPage() {
   const params = useParams<{ id: string }>();
-  const [thread, setThread] = useState<Offer[]>([]);
-  const [me, setMe] = useState<string | null>(null);
   const [counterAmount, setCounterAmount] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const refresh = async () => {
-    if (!params?.id) return;
-    const data = await apiGet<Offer[]>(`/offers/${params.id}/thread`);
-    setThread(data);
-  };
+  const { data: thread, loading, error: threadError, refetch } = useApiQuery<Offer[]>(
+    params?.id ? `/offers/${params.id}/thread` : null,
+    { requireAuth: true },
+  );
+  const { data: meData, error: meError } = useApiQuery<{ id: string }>('/users/me', {
+    requireAuth: true,
+  });
+  const me = meData?.id ?? null;
+  const error = actionError ?? threadError ?? meError;
 
-  useEffect(() => {
-    apiGet<{ id: string }>('/users/me').then((u) => setMe(u.id)).catch(() => {});
-    refresh();
-  }, [params?.id]);
-
-  if (thread.length === 0) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (loading) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (threadError) {
+    return <p className="p-6 text-sm text-red-600" role="alert">{threadError}</p>;
+  }
+  if (!thread || thread.length === 0) {
+    return <p className="p-6 text-gray-500">Nenhuma oferta nesta negociação.</p>;
+  }
 
   const latest = thread[thread.length - 1];
   const canAct = latest.status === 'pending' && latest.counteredById !== me;
 
   const doAction = async (fn: () => Promise<unknown>) => {
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await fn();
-      await refresh();
+      await refetch();
     } catch (err) {
-      setError(String(err).slice(0, 200));
+      setActionError(
+        err instanceof Error && err.message ? err.message : String(err).slice(0, 200),
+      );
     } finally {
       setBusy(false);
     }

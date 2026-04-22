@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
 import { formatBRL, ORDER_STATUS_PT, ORDER_STATUS_COLORS } from '@/lib/i18n';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Order {
   id: string;
@@ -29,40 +28,16 @@ function formatDate(iso: string): string {
 }
 
 export default function OrdersPage() {
-  const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'compras' | 'vendas'>('compras');
-
-  useEffect(() => {
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-
-    const endpoint = tab === 'compras' ? '/orders?role=buyer' : '/orders?role=seller';
-    apiGet<Order[] | { data?: Order[]; items?: Order[] }>(endpoint)
-      .then((res) => {
-        // API returns { items, total, page, pageSize, hasMore } for the
-        // paginated list. `data` kept as a fallback for any legacy shape.
-        const list = Array.isArray(res) ? res : (res.items ?? res.data ?? []);
-        setOrders(list);
-      })
-      .catch(() => {
-        setOrders([]);
-        setError('Não foi possível carregar os dados. Tente novamente.');
-      })
-      .finally(() => setLoading(false));
-  }, [router, tab]);
+  const endpoint = tab === 'compras' ? '/orders?role=buyer' : '/orders?role=seller';
+  const { data: orders, loading, error } = useApiQuery<Order[]>(endpoint, {
+    requireAuth: true,
+    transform: unwrapList<Order>,
+  });
+  const list = orders ?? [];
 
   const handleTabChange = (newTab: 'compras' | 'vendas') => {
     setTab(newTab);
-    setLoading(true);
-    setOrders([]);
-    setError(null);
   };
 
   return (
@@ -105,7 +80,7 @@ export default function OrdersPage() {
             </div>
           ))}
         </div>
-      ) : orders.length === 0 ? (
+      ) : list.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500 mb-4">
             {tab === 'compras'
@@ -123,7 +98,7 @@ export default function OrdersPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {orders.map((order) => (
+          {list.map((order) => (
             <Link
               key={order.id}
               href={`/orders/${order.id}`}

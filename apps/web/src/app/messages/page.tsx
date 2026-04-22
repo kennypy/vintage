@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Conversation {
   id: string;
@@ -43,38 +42,18 @@ function formatTime(iso: string): string {
 }
 
 export default function MessagesPage() {
-  const router = useRouter();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refetch } = useApiQuery<Conversation[]>(
+    '/messages/conversations',
+    { requireAuth: true, transform: unwrapList<Conversation> },
+  );
+  const conversations = data ?? [];
 
+  // Poll for conversation list updates. Uses the Page Visibility API to pause
+  // polling when the tab is hidden, and backs off from 5s → 30s after 60s of
+  // inactivity to save battery/bandwidth. refetch() goes through useApiQuery
+  // so transient errors surface via the hook's `error` state instead of being
+  // silently swallowed.
   useEffect(() => {
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-
-    apiGet<Conversation[] | { data: Conversation[] }>('/messages/conversations')
-      .then((res) => {
-        setConversations(Array.isArray(res) ? res : (res.data ?? []));
-      })
-      .catch(() => {
-        setConversations([]);
-        setError('Não foi possível carregar os dados. Tente novamente.');
-      })
-      .finally(() => setLoading(false));
-  }, [router]);
-
-  // Poll for conversation list updates.
-  // Uses the Page Visibility API to pause polling when the tab is hidden, and
-  // backs off from 5s → 30s after 60s of user inactivity to save battery/bandwidth.
-  useEffect(() => {
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) return;
-
     const ACTIVE_INTERVAL_MS = 5000;
     const IDLE_INTERVAL_MS = 30000;
     const IDLE_AFTER_MS = 60000;
@@ -91,22 +70,11 @@ export default function MessagesPage() {
     };
 
     const tick = async () => {
-      // Skip the network call when the tab is not visible — reschedule a check.
       if (typeof document !== 'undefined' && document.hidden) {
         schedule(ACTIVE_INTERVAL_MS);
         return;
       }
-
-      try {
-        const res = await apiGet<Conversation[] | { data: Conversation[] }>(
-          '/messages/conversations',
-        );
-        const fetched = Array.isArray(res) ? res : (res.data ?? []);
-        setConversations(fetched);
-      } catch (_err) {
-        // Silently ignore polling errors to avoid disrupting the UI
-      }
-
+      await refetch();
       const idle = Date.now() - lastActivityAt > IDLE_AFTER_MS;
       schedule(idle ? IDLE_INTERVAL_MS : ACTIVE_INTERVAL_MS);
     };
@@ -114,11 +82,7 @@ export default function MessagesPage() {
     schedule(ACTIVE_INTERVAL_MS);
 
     const activityEvents: (keyof WindowEventMap)[] = [
-      'mousemove',
-      'keydown',
-      'scroll',
-      'click',
-      'touchstart',
+      'mousemove', 'keydown', 'scroll', 'click', 'touchstart',
     ];
     activityEvents.forEach((evt) => window.addEventListener(evt, markActive, { passive: true }));
     document.addEventListener('visibilitychange', markActive);
@@ -128,7 +92,7 @@ export default function MessagesPage() {
       activityEvents.forEach((evt) => window.removeEventListener(evt, markActive));
       document.removeEventListener('visibilitychange', markActive);
     };
-  }, []);
+  }, [refetch]);
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
