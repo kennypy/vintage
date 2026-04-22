@@ -5,22 +5,25 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { getOffers, acceptOffer, rejectOffer } from '../../src/services/offers';
-import type { Offer } from '../../src/services/offers';
+import type { Offer, OfferStatus } from '../../src/services/offers';
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pendente',
-  accepted: 'Aceita',
-  rejected: 'Recusada',
-  countered: 'Contraproposta',
-  expired: 'Expirada',
+// Keys must match the Prisma OfferStatus enum (UPPERCASE) — the API
+// returns these verbatim. Lowercase keys silently fell through to the
+// fallback, so the "Recebidas" tab never showed its Aceitar/Recusar row.
+const STATUS_LABELS: Record<OfferStatus, string> = {
+  PENDING: 'Pendente',
+  ACCEPTED: 'Aceita',
+  REJECTED: 'Recusada',
+  COUNTERED: 'Contraproposta',
+  EXPIRED: 'Expirada',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: colors.warning[500],
-  accepted: colors.success[500],
-  rejected: colors.error[500],
-  countered: colors.accent[500],
-  expired: colors.neutral[400],
+const STATUS_COLORS: Record<OfferStatus, string> = {
+  PENDING: colors.warning[500],
+  ACCEPTED: colors.success[500],
+  REJECTED: colors.error[500],
+  COUNTERED: colors.accent[500],
+  EXPIRED: colors.neutral[400],
 };
 
 const formatBrl = (value: number) =>
@@ -125,7 +128,7 @@ export default function OffersScreen() {
           : `Para: ${item.seller.name}`}
       </Text>
 
-      {activeTab === 'received' && item.status === 'pending' && (
+      {activeTab === 'received' && item.status === 'PENDING' && (
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={styles.rejectButton}

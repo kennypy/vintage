@@ -1,12 +1,21 @@
 import { apiFetch } from './api';
 
+// Mirrors the Prisma enum OfferStatus in apps/api/prisma/schema.prisma —
+// backend returns these as UPPERCASE strings.
+export type OfferStatus =
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'COUNTERED'
+  | 'EXPIRED';
+
 export interface Offer {
   id: string;
   listingId: string;
   listingTitle: string;
   listingImageUrl?: string;
   amountBrl: number;
-  status: 'pending' | 'accepted' | 'rejected' | 'countered' | 'expired';
+  status: OfferStatus;
   buyer: { id: string; name: string; avatarUrl?: string };
   seller: { id: string; name: string; avatarUrl?: string };
   createdAt: string;

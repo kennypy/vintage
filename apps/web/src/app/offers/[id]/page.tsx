@@ -41,7 +41,8 @@ export default function OfferThreadPage() {
   }
 
   const latest = thread[thread.length - 1];
-  const canAct = latest.status === 'pending' && latest.counteredById !== me;
+  // Status mirrors Prisma OfferStatus — API returns UPPERCASE.
+  const canAct = latest.status === 'PENDING' && latest.counteredById !== me;
 
   const doAction = async (fn: () => Promise<unknown>) => {
     setBusy(true);

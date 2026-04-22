@@ -15,18 +15,25 @@ const CARRIERS = [
   { value: 'KANGU', label: 'Kangu' },
 ] as const;
 
+// Keys must match the Prisma OrderStatus enum (UPPERCASE) — the API
+// returns these verbatim. Previously the keys were lowercase so every
+// label lookup and every status conditional below returned undefined
+// (timeline stuck at the start, action buttons never appeared).
 const STATUS_LABELS: Record<OrderStatus, string> = {
-  pending_payment: 'Aguardando pagamento',
-  paid: 'Pago',
-  shipped: 'Enviado',
-  delivered: 'Entregue',
-  held: 'Em custódia',
-  confirmed: 'Confirmado',
-  cancelled: 'Cancelado',
-  refunded: 'Reembolsado',
+  PENDING: 'Aguardando pagamento',
+  PAID: 'Pago',
+  SHIPPED: 'Enviado',
+  DELIVERED: 'Entregue',
+  HELD: 'Em custódia',
+  COMPLETED: 'Concluído',
+  DISPUTED: 'Em disputa',
+  REFUNDED: 'Reembolsado',
+  CANCELLED: 'Cancelado',
 };
 
-const STATUS_TIMELINE: OrderStatus[] = ['pending_payment', 'paid', 'shipped', 'delivered', 'held', 'confirmed'];
+// Timeline reflects the happy-path progression. DISPUTED/REFUNDED/CANCELLED
+// are terminal off-path states and deliberately omitted from the timeline.
+const STATUS_TIMELINE: OrderStatus[] = ['PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'HELD', 'COMPLETED'];
 
 const formatBrl = (value: number) =>
   value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -255,7 +262,7 @@ export default function OrderDetailScreen() {
       </View>
 
       {/* Actions */}
-      {order.status === 'pending_payment' && isBuyer && (
+      {order.status === 'PENDING' && isBuyer && (
         <>
           <TouchableOpacity
             style={[styles.actionButton, actionLoading && styles.actionDisabled]}
@@ -280,7 +287,7 @@ export default function OrderDetailScreen() {
         </>
       )}
 
-      {order.status === 'held' && order.escrowReleasesAt && (
+      {order.status === 'HELD' && order.escrowReleasesAt && (
         <View style={styles.holdBanner}>
           <Ionicons name="time-outline" size={18} color={colors.neutral[0]} />
           <Text style={styles.holdBannerText}>
@@ -290,7 +297,7 @@ export default function OrderDetailScreen() {
         </View>
       )}
 
-      {(order.status === 'delivered' || order.status === 'held' || order.status === 'confirmed') && isBuyer && (
+      {(order.status === 'DELIVERED' || order.status === 'HELD' || order.status === 'COMPLETED') && isBuyer && (
         <TouchableOpacity
           style={[styles.actionButton, styles.reviewButton]}
           onPress={() => router.push(`/returns/new?orderId=${order.id}`)}
@@ -300,7 +307,7 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
-      {order.status === 'paid' && isSeller && (
+      {order.status === 'PAID' && isSeller && (
         <TouchableOpacity
           style={[styles.actionButton, actionLoading && styles.actionDisabled]}
           onPress={handleOpenShipModal}
@@ -313,7 +320,7 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
-      {order.status === 'delivered' && isBuyer && (
+      {order.status === 'DELIVERED' && isBuyer && (
         <TouchableOpacity
           style={[styles.actionButton, styles.confirmButton, actionLoading && styles.actionDisabled]}
           onPress={handleConfirmReceipt}
@@ -326,7 +333,7 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
-      {order.status === 'confirmed' && isBuyer && (
+      {order.status === 'COMPLETED' && isBuyer && (
         <TouchableOpacity
           style={[styles.actionButton, styles.reviewButton]}
           onPress={() => router.push(`/reviews/write?orderId=${order.id}`)}
@@ -336,7 +343,7 @@ export default function OrderDetailScreen() {
         </TouchableOpacity>
       )}
 
-      {(order.status === 'delivered' || order.status === 'shipped') && isBuyer && (
+      {(order.status === 'DELIVERED' || order.status === 'SHIPPED') && isBuyer && (
         <TouchableOpacity
           style={[styles.actionButton, styles.disputeButton]}
           onPress={() => router.push(`/dispute/${order.id}`)}

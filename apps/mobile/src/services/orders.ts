@@ -27,15 +27,20 @@ export interface OrderShipping {
   deliveredAt?: string;
 }
 
+// Mirrors the Prisma enum OrderStatus in apps/api/prisma/schema.prisma —
+// backend returns these as UPPERCASE strings. Previously this union used
+// lowercase (`'paid'`, `'pending_payment'`, `'confirmed'`) which silently
+// broke every status-conditional in the order screens.
 export type OrderStatus =
-  | 'pending_payment'
-  | 'paid'
-  | 'shipped'
-  | 'delivered'
-  | 'held'
-  | 'confirmed'
-  | 'cancelled'
-  | 'refunded';
+  | 'PENDING'
+  | 'PAID'
+  | 'SHIPPED'
+  | 'DELIVERED'
+  | 'HELD'
+  | 'COMPLETED'
+  | 'DISPUTED'
+  | 'REFUNDED'
+  | 'CANCELLED';
 
 export interface Order {
   id: string;
