@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'crypto';
 
 export interface JadlogRate {
   serviceCode: string;
@@ -245,8 +246,11 @@ export class JadlogClient {
 
   private mockLabel(orderId: string): JadlogLabel {
     this.logger.warn('Using mock Jadlog label (JADLOG_TOKEN not set)');
+    // CLAUDE.md §Secret Management bans non-cryptographic RNG for any
+    // token generation — keep the mock aligned with the pattern.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const trackingCode =
-      'JD' + Array.from({ length: 11 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+      'JD' + Array.from(randomBytes(11)).map((b) => alphabet[b % 36]).join('');
     return {
       labelUrl: `https://vintage.br/labels/${orderId}-jadlog.pdf`,
       trackingCode,

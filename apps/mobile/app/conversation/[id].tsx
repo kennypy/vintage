@@ -83,8 +83,18 @@ export default function ConversationScreen() {
       const token = await getToken();
       if (!token || !id) return;
 
+      // `auth` is a function (not an object) so socket.io-client
+      // re-reads the token from SecureStore on every (re)connect. If
+      // we passed `{ token }` by value, a JWT refresh during the
+      // session would leave the socket stuck with the old token — it
+      // would keep reconnecting as the old identity until the JWT
+      // expired and the gateway started rejecting it. Gateway re-
+      // verifies tokenVersion + banned/deleted on every connect.
       socket = io(`${SOCKET_ORIGIN}/chat`, {
-        auth: { token },
+        auth: async (cb) => {
+          const fresh = await getToken();
+          cb({ token: fresh ?? token });
+        },
         transports: ['websocket'],
         reconnection: true,
         reconnectionAttempts: 10,
@@ -95,6 +105,23 @@ export default function ConversationScreen() {
 
       socket.on('connect', () => {
         socket?.emit('joinConversation', { conversationId: id });
+      });
+
+      // Server rejected us — most common cause is `tokenVersion stale`
+      // after a password change or logout on another device. Stop
+      // retrying so we don't spam the gateway; the user will get a
+      // stale UI but the REST poll-fallback still delivers messages,
+      // and re-entering the screen re-reads the token.
+      socket.on('connect_error', (err) => {
+        const msg = String((err as Error)?.message ?? err);
+        if (
+          msg.includes('Token') ||
+          msg.includes('Autenticação') ||
+          msg.includes('Sessão') ||
+          msg.includes('Conta')
+        ) {
+          socket?.disconnect();
+        }
       });
 
       socket.on('newMessage', (message: Message) => {

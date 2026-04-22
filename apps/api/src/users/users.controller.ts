@@ -11,6 +11,7 @@ import { UsersService } from './users.service';
 import { DataExportService } from './data-export.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
+import { UpdateAddressDto } from './dto/update-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 import { SetCpfDto } from './dto/set-cpf.dto';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
@@ -223,6 +224,18 @@ export class UsersController {
   @ApiOperation({ summary: 'Adicionar endereço' })
   createAddress(@Body() dto: CreateAddressDto, @CurrentUser() user: AuthUser) {
     return this.usersService.createAddress(user.id, dto);
+  }
+
+  @Patch('users/me/addresses/:addressId')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Atualizar endereço (campos parciais ou marcar como padrão)' })
+  updateAddress(
+    @Param('addressId') addressId: string,
+    @Body() dto: UpdateAddressDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.usersService.updateAddress(user.id, addressId, dto);
   }
 
   @Delete('users/me/addresses/:addressId')

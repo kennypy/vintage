@@ -12,12 +12,14 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
+import { UpdateAddressDto } from './dto/update-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
 import { isValidCPF } from '@vintage/shared';
 
@@ -292,6 +294,50 @@ export class UsersService {
     });
   }
 
+  async updateAddress(
+    userId: string,
+    addressId: string,
+    dto: UpdateAddressDto,
+  ) {
+    const address = await this.prisma.address.findFirst({
+      where: { id: addressId, userId },
+    });
+    if (!address) {
+      throw new NotFoundException('Endereço não encontrado');
+    }
+
+    // Default flip: clear any other default in the same tx so the
+    // user never sees two defaults between writes. If the caller is
+    // only flipping `isDefault: true`, no other field update happens.
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.isDefault === true && !address.isDefault) {
+        await tx.address.updateMany({
+          where: { userId, isDefault: true },
+          data: { isDefault: false },
+        });
+      }
+
+      await tx.address.update({
+        where: { id: addressId },
+        data: {
+          ...(dto.label !== undefined ? { label: dto.label } : {}),
+          ...(dto.street !== undefined ? { street: dto.street } : {}),
+          ...(dto.number !== undefined ? { number: dto.number } : {}),
+          ...(dto.complement !== undefined ? { complement: dto.complement ?? null } : {}),
+          ...(dto.neighborhood !== undefined ? { neighborhood: dto.neighborhood } : {}),
+          ...(dto.city !== undefined ? { city: dto.city } : {}),
+          ...(dto.state !== undefined ? { state: dto.state } : {}),
+          ...(dto.cep !== undefined
+            ? { cep: dto.cep.replace(/\D/g, '').replace(/(\d{5})(\d{3})/, '$1-$2') }
+            : {}),
+          ...(dto.isDefault !== undefined ? { isDefault: dto.isDefault } : {}),
+        },
+      });
+    });
+
+    return this.prisma.address.findUniqueOrThrow({ where: { id: addressId } });
+  }
+
   async deleteAddress(userId: string, addressId: string) {
     const address = await this.prisma.address.findFirst({
       where: { id: addressId, userId },
@@ -362,9 +408,7 @@ export class UsersService {
           { followerId },
           'followers',
         )
-        .catch(() => {
-          /* never let notification failure break a follow */
-        });
+        .catch(warnAndSwallow(this.logger, 'users.follow.notify'));
     }
 
     return { following: true };
@@ -584,7 +628,7 @@ export class UsersService {
       data: { status: toStatus },
     });
     for (const { id } of affected) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'users.search-sync'));
     }
 
     return user;
@@ -766,7 +810,7 @@ export class UsersService {
     // Evict now-DELETED listings from search. Fire-and-forget — the
     // DB state is already correct; the index is best-effort.
     for (const { id } of listingsToDelete) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'users.search-sync'));
     }
 
     this.logger.log(`Conta ${userId} soft-deleted (hard-delete em 30 dias)`);

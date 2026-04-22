@@ -16,6 +16,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { ApproveReturnDto, InspectReturnDto, RejectReturnDto } from './dto/approve-return.dto';
 import { RETURN_WINDOW_DAYS } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 /**
  * Buyer-initiated return flow. Distinct from Dispute: returns are a
@@ -108,7 +109,7 @@ export class ReturnsService {
         { returnId: created.id, orderId: dto.orderId },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return created;
   }
@@ -170,14 +171,27 @@ export class ReturnsService {
       );
     }
 
-    const updated = await this.prisma.orderReturn.update({
-      where: { id: returnId },
+    // Claim atomically: a concurrent approve/reject by a second
+    // tab/request could both pass the outer `status !== 'REQUESTED'`
+    // check (read outside any tx) and both fire. updateMany gated on
+    // status='REQUESTED' lets the first writer win and the second see
+    // count=0.
+    const claim = await this.prisma.orderReturn.updateMany({
+      where: { id: returnId, status: 'REQUESTED' },
       data: {
         status: 'APPROVED',
         returnCarrier: carrier,
         returnLabelUrl: labelUrl,
         returnTrackingCode: trackingCode,
       },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Esta devolução já foi atualizada por outra ação.',
+      );
+    }
+    const updated = await this.prisma.orderReturn.findUniqueOrThrow({
+      where: { id: returnId },
     });
 
     this.notifications
@@ -189,7 +203,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id, trackingCode },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -215,12 +229,20 @@ export class ReturnsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const updatedReturn = await tx.orderReturn.update({
-        where: { id: returnId },
+      const claim = await tx.orderReturn.updateMany({
+        where: { id: returnId, status: 'REQUESTED' },
         data: {
           status: 'REJECTED',
           rejectionReason: dto.reason,
         },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Esta devolução já foi atualizada por outra ação.',
+        );
+      }
+      const updatedReturn = await tx.orderReturn.findUniqueOrThrow({
+        where: { id: returnId },
       });
 
       // Escalate: create a Dispute row if one doesn't already exist.
@@ -257,7 +279,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -288,10 +310,19 @@ export class ReturnsService {
     const itemAmount = Number(ret.order.itemPriceBrl);
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.orderReturn.update({
-        where: { id: returnId },
+      // Claim the RECEIVED return atomically before any money moves.
+      // Two concurrent inspectApprove calls (e.g. seller clicks twice,
+      // or seller + ops both act) used to both pass the outer status
+      // check and both decrement/credit wallets — a double refund.
+      const claim = await tx.orderReturn.updateMany({
+        where: { id: returnId, status: 'RECEIVED' },
         data: { status: 'REFUNDED', inspectedAt: new Date() },
       });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Esta devolução já foi atualizada por outra ação.',
+        );
+      }
 
       await tx.order.update({
         where: { id: ret.order.id },
@@ -377,7 +408,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id, refundAmount },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return this.prisma.orderReturn.findUnique({ where: { id: returnId } });
   }
@@ -403,13 +434,21 @@ export class ReturnsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const updatedReturn = await tx.orderReturn.update({
-        where: { id: returnId },
+      const claim = await tx.orderReturn.updateMany({
+        where: { id: returnId, status: 'RECEIVED' },
         data: {
           status: 'DISPUTED',
           rejectionReason: dto.reason,
           inspectedAt: new Date(),
         },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Esta devolução já foi atualizada por outra ação.',
+        );
+      }
+      const updatedReturn = await tx.orderReturn.findUniqueOrThrow({
+        where: { id: returnId },
       });
 
       const existingDispute = await tx.dispute.findUnique({
@@ -442,7 +481,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -460,10 +499,14 @@ export class ReturnsService {
     if (!ret) return;
     if (ret.status !== 'SHIPPED') return;
 
-    await this.prisma.orderReturn.update({
-      where: { id: returnId },
+    // Tracking poller may fire twice for the same delivered event
+    // (multiple carrier event polls or cron overlap). Gate on SHIPPED
+    // so only the first transition emits a notification.
+    const claim = await this.prisma.orderReturn.updateMany({
+      where: { id: returnId, status: 'SHIPPED' },
       data: { status: 'RECEIVED', receivedAt: new Date() },
     });
+    if (claim.count === 0) return;
 
     this.notifications
       .createNotification(
@@ -474,7 +517,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
   }
 
   /**
@@ -495,10 +538,16 @@ export class ReturnsService {
     if (ret.status !== 'APPROVED') {
       throw new BadRequestException('Devolução precisa estar aprovada');
     }
-    return this.prisma.orderReturn.update({
-      where: { id: returnId },
+    const claim = await this.prisma.orderReturn.updateMany({
+      where: { id: returnId, status: 'APPROVED' },
       data: { status: 'SHIPPED', shippedAt: new Date() },
     });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Esta devolução já foi atualizada por outra ação.',
+      );
+    }
+    return this.prisma.orderReturn.findUniqueOrThrow({ where: { id: returnId } });
   }
 
   async findOne(returnId: string, userId: string) {

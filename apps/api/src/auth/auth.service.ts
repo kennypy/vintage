@@ -15,6 +15,7 @@ import * as crypto from 'crypto';
 import { TOTP, generateSecret as totpGenerateSecret, generateURI, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
 import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { EmailService } from '../email/email.service';
 import { SmsService } from '../sms/sms.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -322,7 +323,7 @@ export class AuthService {
               },
             },
           })
-          .catch(() => {});
+          .catch(warnAndSwallow(this.logger, 'auth.suspected-sibling-audit'));
       }
     }
 
@@ -1506,9 +1507,9 @@ export class AuthService {
       data: { userId: user.id, tokenHash, expiresAt },
     });
     // Fire-and-forget email — caller doesn't need to wait
-    this.emailService.sendPasswordResetEmail(user.email, user.name, rawToken).catch(() => {
-      // Logged inside the email service
-    });
+    this.emailService.sendPasswordResetEmail(user.email, user.name, rawToken).catch(
+      warnAndSwallow(this.logger, 'auth.password-reset-email'),
+    );
     return neutralResponse;
   }
 

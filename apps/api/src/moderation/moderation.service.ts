@@ -9,6 +9,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 export type ReviewAction = 'SUSPEND_LISTING' | 'BAN_USER' | 'DISMISS';
 
@@ -91,7 +92,7 @@ export class ModerationService {
     });
 
     // Drop from search — SUSPENDED must not surface in buyer queries.
-    this.listings.syncSearchIndex(listingId).catch(() => {});
+    this.listings.syncSearchIndex(listingId).catch(warnAndSwallow(this.logger, 'moderation.search-sync'));
 
     // Notify seller (non-critical)
     this.notifications.createNotification(
@@ -100,7 +101,7 @@ export class ModerationService {
       'Anúncio suspenso',
       `Seu anúncio "${listing.title.slice(0, 60)}" foi suspenso por violação das políticas da plataforma.`,
       { listingId, reason: String(reason).slice(0, 200), adminId },
-    ).catch(() => {/* non-critical */});
+    ).catch(warnAndSwallow(this.logger, 'moderation.notify'));
 
     return { suspended: true, listingId };
   }
@@ -121,7 +122,7 @@ export class ModerationService {
     });
 
     // Re-add to search now that it's ACTIVE again.
-    this.listings.syncSearchIndex(listingId).catch(() => {});
+    this.listings.syncSearchIndex(listingId).catch(warnAndSwallow(this.logger, 'moderation.search-sync'));
 
     return { unsuspended: true, listingId };
   }
@@ -167,7 +168,7 @@ export class ModerationService {
     // Drop every newly-suspended listing from search. syncSearchIndex
     // re-reads the row and removes it since status !== ACTIVE.
     for (const { id } of suspendedIds) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'moderation.search-sync'));
     }
 
     await this.auditLog.record({
@@ -316,7 +317,7 @@ export class ModerationService {
     // Post-tx: drop the now-SUSPENDED listings from Meilisearch so
     // buyers stop seeing them in search results.
     for (const id of suspendedListingIds) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'moderation.search-sync'));
     }
 
     this.logger.log(

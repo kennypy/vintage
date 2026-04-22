@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { containsProhibitedContent } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -261,9 +264,7 @@ export class MessagesService {
         { conversationId, messageId: message.id, senderId },
         'messages',
       )
-      .catch(() => {
-        /* notification failures must not break chat */
-      });
+      .catch(warnAndSwallow(this.logger, 'chat.notify'));
 
     return message;
   }

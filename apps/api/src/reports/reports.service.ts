@@ -9,6 +9,7 @@ import { ListingsService } from '../listings/listings.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateReportDto, ReportTargetType } from './dto/create-report.dto';
 import { ResolveReportDto, ResolveAction } from './dto/resolve-report.dto';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class ReportsService {
@@ -214,7 +215,9 @@ export class ReportsService {
           })
           .catch(() => undefined);
         // Drop the hidden listing from search.
-        this.listings.syncSearchIndex(report.targetId).catch(() => {});
+        this.listings.syncSearchIndex(report.targetId).catch(
+          warnAndSwallow(this.logger, 'reports.search-sync'),
+        );
       } else if (report.targetType === 'user') {
         await this.prisma.user
           .update({

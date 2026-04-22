@@ -4,8 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import { formatBRL } from '@/lib/i18n';
+import { CounterOfferModal } from '@/components/CounterOfferModal';
 
 interface Message {
   id: string;
@@ -38,6 +39,16 @@ function formatTime(iso: string): string {
   });
 }
 
+interface ActiveOffer {
+  id: string;
+  amountBrl: number;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COUNTERED' | 'EXPIRED';
+  counteredById: string | null;
+  buyerId: string;
+  listingId: string;
+  expiresAt: string;
+}
+
 export default function ConversationPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -46,6 +57,11 @@ export default function ConversationPage() {
   const [loading, setLoading] = useState(true);
   const [messageText, setMessageText] = useState('');
   const [sending, setSending] = useState(false);
+  const [offer, setOffer] = useState<ActiveOffer | null>(null);
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [counterOpen, setCounterOpen] = useState(false);
+  const [me, setMe] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -67,7 +83,36 @@ export default function ConversationPage() {
       })
       .catch(() => router.push('/messages'))
       .finally(() => setLoading(false));
+    apiGet<{ id: string }>('/users/me')
+      .then((u) => setMe(u.id))
+      .catch(() => {
+        /* current-user fetch failure is non-fatal for the chat view */
+      });
   }, [router, params.id]);
+
+  // Fetch the active offer for this listing whenever the conversation
+  // loads. Mirrors mobile's conversation screen: if the two parties
+  // have a PENDING offer on the listing, show the accept/reject/
+  // counter banner. Null listing (e.g. support chat) → no offer fetch.
+  const refetchOffer = useCallback(async () => {
+    const listingId = conversation?.listing?.id;
+    if (!listingId) {
+      setOffer(null);
+      return;
+    }
+    try {
+      const active = await apiGet<ActiveOffer | null>(
+        `/offers/for-listing/${listingId}`,
+      );
+      setOffer(active ?? null);
+    } catch {
+      /* 404 / network blip — leave the existing banner in place */
+    }
+  }, [conversation?.listing?.id]);
+
+  useEffect(() => {
+    refetchOffer();
+  }, [refetchOffer]);
 
   // Poll for new messages every 3 seconds
   useEffect(() => {
@@ -148,6 +193,33 @@ export default function ConversationPage() {
 
   if (!conversation || !conversation.otherUser) return null;
 
+  // Only the OTHER party can act on the pending offer — whoever made
+  // the latest move is waiting on the counterparty. Matches
+  // offers.service.ts counter() alternation rule.
+  const canActOnOffer =
+    !!offer &&
+    offer.status === 'PENDING' &&
+    me !== null &&
+    offer.counteredById !== me;
+
+  const runOfferAction = async (fn: () => Promise<unknown>) => {
+    if (!offer || offerBusy) return;
+    setOfferBusy(true);
+    setOfferError(null);
+    try {
+      await fn();
+      await refetchOffer();
+    } catch (err) {
+      setOfferError(
+        err instanceof Error && err.message
+          ? err.message
+          : String(err).slice(0, 200),
+      );
+    } finally {
+      setOfferBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>
       {/* Header */}
@@ -207,6 +279,70 @@ export default function ConversationPage() {
         </Link>
       )}
 
+      {/* Active offer banner — parity with mobile conversation screen */}
+      {offer && offer.status === 'PENDING' && (
+        <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-wide text-brand-700">
+                Oferta pendente
+              </p>
+              <p className="text-lg font-semibold text-gray-900">
+                {formatBRL(Number(offer.amountBrl))}
+              </p>
+            </div>
+            <Link
+              href={`/offers/${offer.id}`}
+              className="text-xs font-medium text-brand-700 hover:text-brand-800 whitespace-nowrap"
+            >
+              Ver negociação →
+            </Link>
+          </div>
+          {canActOnOffer && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={offerBusy}
+                onClick={() =>
+                  runOfferAction(() => apiPatch(`/offers/${offer.id}/accept`))
+                }
+                className="flex-1 min-w-[90px] rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+              >
+                Aceitar
+              </button>
+              <button
+                type="button"
+                disabled={offerBusy}
+                onClick={() =>
+                  runOfferAction(() => apiPatch(`/offers/${offer.id}/reject`))
+                }
+                className="flex-1 min-w-[90px] rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Recusar
+              </button>
+              <button
+                type="button"
+                disabled={offerBusy}
+                onClick={() => setCounterOpen(true)}
+                className="flex-1 min-w-[90px] rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"
+              >
+                Contrapor
+              </button>
+            </div>
+          )}
+          {!canActOnOffer && me !== null && offer.counteredById === me && (
+            <p className="mt-2 text-xs text-gray-600">
+              Aguardando resposta da outra parte…
+            </p>
+          )}
+          {offerError && (
+            <p className="mt-2 text-xs text-red-600" role="alert">
+              {offerError}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-3 pb-4">
         {messages.length === 0 ? (
@@ -240,6 +376,16 @@ export default function ConversationPage() {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      <CounterOfferModal
+        open={counterOpen}
+        offerId={offer?.id ?? null}
+        listingPriceBrl={
+          conversation.listing ? Number(conversation.listing.priceBrl) : null
+        }
+        onClose={() => setCounterOpen(false)}
+        onSuccess={refetchOffer}
+      />
 
       {/* Input */}
       <form onSubmit={handleSend} className="flex gap-2 pt-3 border-t border-gray-200">

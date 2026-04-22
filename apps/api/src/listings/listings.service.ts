@@ -12,6 +12,7 @@ import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
 import { MAX_LISTING_IMAGES, containsProhibitedContent } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { FraudService } from '../fraud/fraud.service';
 
 @Injectable()
@@ -188,7 +189,7 @@ export class ListingsService {
     });
 
     // Fire-and-forget: Meilisearch sync never blocks the response.
-    this.syncSearchIndex(created.id).catch(() => {});
+    this.syncSearchIndex(created.id).catch(warnAndSwallow(this.logger, 'listing.create.search-sync'));
 
     this.analytics.capture(sellerId, AnalyticsEvents.LISTING_CREATED, {
       listingId: created.id,
@@ -226,7 +227,7 @@ export class ListingsService {
     this.prisma.listing.update({
       where: { id },
       data: { viewCount: { increment: 1 } },
-    }).catch(() => {/* non-critical */});
+    }).catch(warnAndSwallow(this.logger, 'listing.viewcount-bump'));
 
     return listing;
   }
@@ -374,7 +375,7 @@ export class ListingsService {
       include: { images: { orderBy: { position: 'asc' } }, category: true, brand: true },
     });
 
-    this.syncSearchIndex(updated.id).catch(() => {});
+    this.syncSearchIndex(updated.id).catch(warnAndSwallow(this.logger, 'listing.update.search-sync'));
 
     if (isPriceDrop) {
       // Fire-and-forget so a slow notification batch doesn't block the
@@ -413,9 +414,7 @@ export class ListingsService {
             { listingId },
             'priceDrops',
           )
-          .catch(() => {
-            /* per-user notification failure must not block the batch */
-          }),
+          .catch(warnAndSwallow(this.logger, 'listing.price-drop-notify')),
       ),
     );
 
@@ -460,7 +459,7 @@ export class ListingsService {
     }
 
     await this.prisma.listing.update({ where: { id }, data: { status: 'DELETED' } });
-    this.syncSearchIndex(id).catch(() => {});
+    this.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'listing.search-sync'));
     return { deleted: true };
   }
 
@@ -481,7 +480,7 @@ export class ListingsService {
       // "unfavorite" implies "stop pinging me about this one".
       await this.prisma.priceDropAlert
         .deleteMany({ where: { userId, listingId } })
-        .catch(() => {});
+        .catch(warnAndSwallow(this.logger, 'listing.price-drop-alert-cleanup'));
       return { favorited: false };
     }
 
@@ -499,7 +498,7 @@ export class ListingsService {
         create: { listingId, userId, originalPriceBrl: listing.priceBrl },
         update: { originalPriceBrl: listing.priceBrl, notifiedAt: null },
       })
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'listing.price-drop-alert-upsert'));
 
     // Notify the seller unless they favourited their own item (impossible
     // today because toggleFavorite has no self-check, but cheap defence).
@@ -517,9 +516,7 @@ export class ListingsService {
           { listingId, favoriterId: userId },
           'favorites',
         )
-        .catch(() => {
-          /* never let notification failure break a favourite */
-        });
+        .catch(warnAndSwallow(this.logger, 'listing.favorite-notify'));
     }
 
     return { favorited: true };

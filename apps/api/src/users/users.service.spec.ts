@@ -46,6 +46,7 @@ const mockPrisma = {
   address: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
     update: jest.fn(),
@@ -516,6 +517,69 @@ describe('UsersService', () => {
           cpfChecksumValid: true,
         },
       });
+    });
+  });
+
+  describe('updateAddress', () => {
+    // PATCH /users/me/addresses/:id was added after the web addresses
+    // page was silently 405'ing. Pin the default-flip semantics (only
+    // clear OTHER defaults when switching TO default), the ownership
+    // check, and the CEP normalization so this doesn't regress.
+    beforeEach(() => {
+      mockPrisma.$transaction.mockImplementation(
+        async (fn: any) => fn(mockPrisma),
+      );
+    });
+
+    it('404s when the address belongs to another user', async () => {
+      mockPrisma.address.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateAddress('user-1', 'addr-x', { label: 'new' } as any),
+      ).rejects.toThrow('Endereço não encontrado');
+    });
+
+    it('flipping isDefault true clears other defaults exactly once', async () => {
+      mockPrisma.address.findFirst.mockResolvedValue({
+        id: 'addr-1',
+        userId: 'user-1',
+        isDefault: false,
+      });
+      mockPrisma.address.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.address.update.mockResolvedValue({});
+      mockPrisma.address.findUniqueOrThrow.mockResolvedValue({
+        id: 'addr-1',
+        isDefault: true,
+      });
+
+      await service.updateAddress('user-1', 'addr-1', { isDefault: true } as any);
+
+      expect(mockPrisma.address.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', isDefault: true },
+        data: { isDefault: false },
+      });
+      expect(mockPrisma.address.update).toHaveBeenCalledWith({
+        where: { id: 'addr-1' },
+        data: { isDefault: true },
+      });
+    });
+
+    it('normalizes CEP to NNNNN-NNN', async () => {
+      mockPrisma.address.findFirst.mockResolvedValue({
+        id: 'addr-1',
+        userId: 'user-1',
+        isDefault: true,
+      });
+      mockPrisma.address.update.mockResolvedValue({});
+      mockPrisma.address.findUniqueOrThrow.mockResolvedValue({ id: 'addr-1' });
+
+      await service.updateAddress('user-1', 'addr-1', { cep: '01234567' } as any);
+
+      expect(mockPrisma.address.update).toHaveBeenCalledWith({
+        where: { id: 'addr-1' },
+        data: { cep: '01234-567' },
+      });
+      // Already the default → must NOT wipe other defaults.
+      expect(mockPrisma.address.updateMany).not.toHaveBeenCalled();
     });
   });
 

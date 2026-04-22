@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { SearchService } from '../search/search.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class ListingsCronService {
@@ -62,7 +63,7 @@ export class ListingsCronService {
         });
 
         // Drop from search — PAUSED listings must not appear in results.
-        this.search.removeListing(listing.id).catch(() => {});
+        this.search.removeListing(listing.id).catch(warnAndSwallow(this.logger, 'listings-cron.search-remove'));
 
         await this.notifications
           .createNotification(
@@ -72,7 +73,7 @@ export class ListingsCronService {
             `Seu anúncio "${listing.title}" foi pausado por inatividade. Acesse "Meus anúncios" para reativar.`,
             { listingId: listing.id },
           )
-          .catch(() => {});
+          .catch(warnAndSwallow(this.logger, 'listings-cron.auto-pause-notify'));
       } catch (err) {
         this.logger.error(
           `Failed to auto-pause listing ${listing.id}: ${String(err).slice(0, 200)}`,
@@ -117,7 +118,7 @@ export class ListingsCronService {
         // Belt-and-braces: PAUSED listings should already be absent
         // from the index, but a failed earlier sync could leave a
         // stale doc behind. Issue the remove idempotently.
-        this.search.removeListing(listing.id).catch(() => {});
+        this.search.removeListing(listing.id).catch(warnAndSwallow(this.logger, 'listings-cron.search-remove'));
       } catch (err) {
         this.logger.error(
           `Failed to clean up listing ${listing.id}: ${String(err).slice(0, 200)}`,
@@ -195,9 +196,7 @@ export class ListingsCronService {
             // preference column.
             'favorites',
           )
-          .catch(() => {
-            /* per-user failure must not break the batch */
-          });
+          .catch(warnAndSwallow(this.logger, 'listings-cron.saved-search-notify'));
       } catch (err) {
         this.logger.error(
           `Saved search ${ss.id} notification failed: ${String(err).slice(0, 200)}`,
