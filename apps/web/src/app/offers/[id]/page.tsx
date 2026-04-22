@@ -109,7 +109,7 @@ export default function OfferThreadPage() {
               onClick={() => {
                 const amt = Number(counterAmount);
                 if (!amt || amt <= 0) {
-                  setError('Informe um valor válido');
+                  setActionError('Informe um valor válido');
                   return;
                 }
                 doAction(() =>

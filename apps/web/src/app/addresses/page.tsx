@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { formatCEP } from '@/lib/i18n';
 import { useApiQuery, unwrapList } from '@/lib/useApiQuery';

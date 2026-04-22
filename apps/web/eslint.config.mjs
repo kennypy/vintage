@@ -53,6 +53,8 @@ export default [
         MouseEvent: 'readonly',
         Node: 'readonly',
         HTMLFormElement: 'readonly',
+        Blob: 'readonly',
+        Event: 'readonly',
         alert: 'readonly',
         atob: 'readonly',
         confirm: 'readonly',
