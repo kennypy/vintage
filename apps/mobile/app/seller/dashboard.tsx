@@ -77,17 +77,28 @@ export default function SellerDashboardScreen() {
         />
       </View>
 
+      {data.overview.avgSalePriceBrl > 0 && (
+        <View style={styles.tilesRow}>
+          <Tile
+            icon="trending-up"
+            label="Preço médio"
+            value={`R$ ${formatBrl(data.overview.avgSalePriceBrl)}`}
+          />
+        </View>
+      )}
+
       {data.listingPerformance.length > 0 && (
         <>
           <Text style={styles.sectionTitle}>Seus anúncios</Text>
           {data.listingPerformance.slice(0, 20).map((l) => (
-            <View key={l.listingId} style={styles.listingRow}>
+            <View key={l.id} style={styles.listingRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.listingTitle} numberOfLines={1}>
                   {l.title}
                 </Text>
                 <Text style={styles.listingMeta}>
                   R$ {formatBrl(l.priceBrl)} · 👁 {l.viewCount} · ❤ {l.favoriteCount}
+                  {l.daysToSell != null ? ` · vendido em ${l.daysToSell}d` : ''}
                 </Text>
               </View>
               <View style={styles.scoreBadge}>
@@ -104,7 +115,7 @@ export default function SellerDashboardScreen() {
           {data.timeToSellByCategory.slice(0, 8).map((c) => (
             <View key={c.categoryId} style={styles.bar}>
               <Text style={styles.barLabel}>{c.categoryName}</Text>
-              <Text style={styles.barValue}>{c.avgDays.toFixed(1)} dias</Text>
+              <Text style={styles.barValue}>{c.avgDaysToSell} dias</Text>
             </View>
           ))}
         </>
@@ -116,7 +127,7 @@ export default function SellerDashboardScreen() {
           {data.topCategories.slice(0, 5).map((c) => (
             <View key={c.categoryId} style={styles.bar}>
               <Text style={styles.barLabel}>{c.categoryName}</Text>
-              <Text style={styles.barValue}>{Math.round(c.score)}</Text>
+              <Text style={styles.barValue}>{Math.round(c.demandScore)}</Text>
             </View>
           ))}
         </>

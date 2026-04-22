@@ -7,10 +7,11 @@ import { FraudModule } from '../fraud/fraud.module';
 import { ListingsController } from './listings.controller';
 import { ListingsService } from './listings.service';
 import { ListingsCronService } from './listings-cron.service';
+import { PriceAlertsController } from './price-alerts.controller';
 
 @Module({
   imports: [ConfigModule, PrismaModule, NotificationsModule, SearchModule, FraudModule],
-  controllers: [ListingsController],
+  controllers: [ListingsController, PriceAlertsController],
   providers: [ListingsService, ListingsCronService],
   exports: [ListingsService],
 })

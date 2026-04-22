@@ -826,8 +826,21 @@ model Review {
   order    Order @relation(fields: [orderId], references: [id])
   reviewer User  @relation("ReviewWriter", fields: [reviewerId], references: [id])
   reviewed User  @relation("ReviewReceiver", fields: [reviewedId], references: [id])
+  images   ReviewImage[]
 
   @@unique([orderId, reviewerId])
+}
+
+model ReviewImage {
+  id        String   @id @default(cuid())
+  reviewId  String
+  url       String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
 }
 
 // --- Reports ---

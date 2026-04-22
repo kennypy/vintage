@@ -63,6 +63,37 @@ export async function unfollowUser(id: string): Promise<{ following: boolean }> 
   );
 }
 
+export interface FollowListItem {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  ratingAvg: number;
+  ratingCount: number;
+  followerCount: number;
+  followedAt: string;
+}
+
+export interface FollowListResponse {
+  items: FollowListItem[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export async function getFollowers(userId: string, page = 1): Promise<FollowListResponse> {
+  return apiFetch<FollowListResponse>(
+    `/users/${encodeURIComponent(userId)}/followers?page=${page}`,
+    { authenticated: false },
+  );
+}
+
+export async function getFollowing(userId: string, page = 1): Promise<FollowListResponse> {
+  return apiFetch<FollowListResponse>(
+    `/users/${encodeURIComponent(userId)}/following?page=${page}`,
+    { authenticated: false },
+  );
+}
+
 export interface UpdateProfileData {
   name?: string;
   bio?: string;

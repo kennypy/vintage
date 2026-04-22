@@ -9,7 +9,13 @@ export class ReviewsService {
     private notifications: NotificationsService,
   ) {}
 
-  async create(reviewerId: string, orderId: string, rating: number, comment?: string) {
+  async create(
+    reviewerId: string,
+    orderId: string,
+    rating: number,
+    comment?: string,
+    imageUrls?: string[],
+  ) {
     if (rating !== 1 && rating !== 5) {
       throw new BadRequestException('Avaliação deve ser 1 ou 5 estrelas');
     }
@@ -28,6 +34,11 @@ export class ReviewsService {
     });
     if (existing) throw new BadRequestException('Você já avaliou este pedido');
 
+    const cleanImages = (imageUrls ?? [])
+      .map((u) => u.trim())
+      .filter((u) => /^https:\/\//i.test(u))
+      .slice(0, 4);
+
     const review = await this.prisma.review.create({
       data: {
         orderId,
@@ -35,7 +46,11 @@ export class ReviewsService {
         reviewedId: order.sellerId,
         rating,
         comment: comment ?? null,
+        images: cleanImages.length
+          ? { create: cleanImages.map((url, i) => ({ url, position: i })) }
+          : undefined,
       },
+      include: { images: { orderBy: { position: 'asc' } } },
     });
 
     // Update seller rating average
@@ -81,6 +96,7 @@ export class ReviewsService {
         where: { reviewedId: userId },
         include: {
           reviewer: { select: { id: true, name: true, avatarUrl: true } },
+          images: { orderBy: { position: 'asc' } },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -89,11 +105,12 @@ export class ReviewsService {
       this.prisma.review.count({ where: { reviewedId: userId } }),
     ]);
 
-    const items = rows.map(({ reviewer, ...r }) => ({
+    const items = rows.map(({ reviewer, images, ...r }) => ({
       ...r,
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,
       reviewerAvatarUrl: reviewer.avatarUrl ?? undefined,
+      imageUrls: images.map((i) => i.url),
     }));
 
     return { items, total, page, totalPages: Math.ceil(total / pageSize) };
