@@ -186,9 +186,22 @@ export class OffersService {
       throw new BadRequestException('Este anúncio não está disponível para transações');
     }
 
-    const updated = await this.prisma.offer.update({
-      where: { id: offerId },
+    // Claim the PENDING offer atomically. A concurrent counter()/reject()
+    // could both pass the outer status check (read happens OUTSIDE any
+    // tx); without updateMany gating, the second writer silently
+    // overwrites the first — e.g. an offer marked COUNTERED by the other
+    // party's counter could be retrograded to ACCEPTED.
+    const claim = await this.prisma.offer.updateMany({
+      where: { id: offerId, status: 'PENDING', expiresAt: { gt: new Date() } },
       data: { status: 'ACCEPTED' },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Esta oferta já foi atualizada por outra ação.',
+      );
+    }
+    const updated = await this.prisma.offer.findUniqueOrThrow({
+      where: { id: offerId },
       include: {
         listing: {
           include: {
@@ -388,9 +401,20 @@ export class OffersService {
       throw new BadRequestException('Esta oferta não está mais pendente');
     }
 
-    const updated = await this.prisma.offer.update({
-      where: { id: offerId },
+    // Same atomic claim as accept(): a concurrent counter() racing
+    // reject() used to let the REJECTED write stomp on the COUNTERED
+    // write (or vice-versa) depending on commit order.
+    const claim = await this.prisma.offer.updateMany({
+      where: { id: offerId, status: 'PENDING' },
       data: { status: 'REJECTED' },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Esta oferta já foi atualizada por outra ação.',
+      );
+    }
+    const updated = await this.prisma.offer.findUniqueOrThrow({
+      where: { id: offerId },
       include: {
         listing: {
           include: {

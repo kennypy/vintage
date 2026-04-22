@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'crypto';
 
 export interface CorreiosRate {
   serviceCode: string;
@@ -257,8 +258,12 @@ export class CorreiosClient {
 
   private mockLabel(orderId: string): CorreiosLabel {
     this.logger.warn('Using mock Correios label (CORREIOS_TOKEN not set)');
+    // CLAUDE.md §Secret Management bans non-cryptographic RNG for any
+    // token generation. Even though this is a dev-only mock, keep the
+    // pattern correct so it isn't copied into a prod codepath.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const trackingCode =
-      'BR' + Array.from({ length: 11 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+      'BR' + Array.from(randomBytes(11)).map((b) => alphabet[b % 36]).join('');
     return {
       labelUrl: `https://vintage.br/labels/${orderId}-correios.pdf`,
       trackingCode,

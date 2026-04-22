@@ -27,6 +27,7 @@ const mockPrisma: Record<string, any> = {
   offer: {
     create: jest.fn(),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -155,13 +156,15 @@ describe('OffersService', () => {
         listing: { sellerId: 'seller-1' },
       });
       const acceptedOffer = { id: 'offer-1', status: 'ACCEPTED' };
-      mockPrisma.offer.update.mockResolvedValue(acceptedOffer);
+      mockPrisma.offer.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.offer.findUniqueOrThrow.mockResolvedValue(acceptedOffer);
 
       const result = await service.accept('offer-1', 'seller-1');
 
       expect(result).toEqual(acceptedOffer);
-      expect(mockPrisma.offer.update).toHaveBeenCalledWith(
+      expect(mockPrisma.offer.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({ id: 'offer-1', status: 'PENDING' }),
           data: { status: 'ACCEPTED' },
         }),
       );
@@ -217,6 +220,28 @@ describe('OffersService', () => {
         service.accept('nonexistent', 'seller-1'),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('should throw ConflictException if a concurrent counter/reject already claimed the offer', async () => {
+      // Simulate: outer `status === 'PENDING'` read passes, but another
+      // party's counter() transaction commits first — our atomic
+      // updateMany gate then sees status != 'PENDING' and returns
+      // count=0. Without this gate the accept would silently overwrite
+      // COUNTERED with ACCEPTED (last-write-wins).
+      const futureDate = new Date();
+      futureDate.setHours(futureDate.getHours() + 24);
+      mockPrisma.offer.findUnique.mockResolvedValue({
+        id: 'offer-1',
+        status: 'PENDING',
+        expiresAt: futureDate,
+        listing: { sellerId: 'seller-1' },
+      });
+      mockPrisma.offer.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.accept('offer-1', 'seller-1')).rejects.toThrow(
+        /já foi atualizada/i,
+      );
+      expect(mockPrisma.offer.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
   });
 
   describe('reject', () => {
@@ -227,13 +252,15 @@ describe('OffersService', () => {
         listing: { sellerId: 'seller-1' },
       });
       const rejectedOffer = { id: 'offer-1', status: 'REJECTED' };
-      mockPrisma.offer.update.mockResolvedValue(rejectedOffer);
+      mockPrisma.offer.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.offer.findUniqueOrThrow.mockResolvedValue(rejectedOffer);
 
       const result = await service.reject('offer-1', 'seller-1');
 
       expect(result).toEqual(rejectedOffer);
-      expect(mockPrisma.offer.update).toHaveBeenCalledWith(
+      expect(mockPrisma.offer.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({ id: 'offer-1', status: 'PENDING' }),
           data: { status: 'REJECTED' },
         }),
       );

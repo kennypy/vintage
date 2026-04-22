@@ -175,7 +175,7 @@ describe('PromotionsService', () => {
 
       const createdPromo = { id: 'promo-1', type: 'BUMP', pricePaidBrl: new Decimal('5.00') };
       const mockTx = {
-        wallet: { update: jest.fn().mockResolvedValue({}) },
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         promotion: { create: jest.fn().mockResolvedValue(createdPromo) },
         listing: { update: jest.fn().mockResolvedValue({}) },
@@ -185,11 +185,40 @@ describe('PromotionsService', () => {
       const result = await service.createBump('listing-1', 'user-1');
 
       expect(result).toEqual(createdPromo);
-      expect(mockTx.wallet.update).toHaveBeenCalledWith(
+      expect(mockTx.wallet.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'wallet-1',
+            balanceBrl: { gte: 5.0 },
+          }),
           data: { balanceBrl: { decrement: 5.0 } },
         }),
       );
+    });
+
+    it('should throw BadRequestException if balance is depleted mid-transaction (race)', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(activeListing);
+      mockPrisma.promotion.findFirst.mockResolvedValue(null);
+      mockPrisma.wallet.findUnique.mockResolvedValue({
+        id: 'wallet-1', userId: 'user-1', balanceBrl: new Decimal('50.00'),
+      });
+
+      // Pre-flight passes but the conditional updateMany finds zero
+      // matching rows — i.e. another concurrent debit emptied the
+      // wallet between findUnique and $transaction.
+      const mockTx = {
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        walletTransaction: { create: jest.fn() },
+        promotion: { create: jest.fn() },
+        listing: { update: jest.fn() },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await expect(service.createBump('listing-1', 'user-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
+      expect(mockTx.promotion.create).not.toHaveBeenCalled();
     });
   });
 
@@ -223,7 +252,7 @@ describe('PromotionsService', () => {
 
       const createdPromo = { id: 'promo-1', type: 'SPOTLIGHT', pricePaidBrl: new Decimal('15.00') };
       const mockTx = {
-        wallet: { update: jest.fn().mockResolvedValue({}) },
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         walletTransaction: { create: jest.fn().mockResolvedValue({}) },
         listing: { updateMany: jest.fn().mockResolvedValue({}) },
         promotion: { create: jest.fn().mockResolvedValue(createdPromo) },
@@ -236,6 +265,14 @@ describe('PromotionsService', () => {
       expect(mockTx.listing.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { sellerId: 'user-1', status: 'ACTIVE' },
+        }),
+      );
+      expect(mockTx.wallet.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'wallet-1',
+            balanceBrl: { gte: 15.0 },
+          }),
         }),
       );
     });

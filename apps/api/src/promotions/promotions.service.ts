@@ -152,10 +152,19 @@ export class PromotionsService {
     endsAt.setDate(endsAt.getDate() + BUMP_DURATION_DAYS);
 
     const promotion = await this.prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { id: wallet.id },
+      // Authoritative debit with a conditional claim on balance.
+      // Without `balanceBrl >= price` in the WHERE clause, two
+      // concurrent createBump calls for the same user both pass the
+      // outer read-check and both decrement — balance can go negative.
+      const debit = await tx.wallet.updateMany({
+        where: { id: wallet.id, balanceBrl: { gte: BUMP_PRICE_BRL } },
         data: { balanceBrl: { decrement: BUMP_PRICE_BRL } },
       });
+      if (debit.count === 0) {
+        throw new BadRequestException(
+          `Saldo insuficiente. Necessário R$${BUMP_PRICE_BRL.toFixed(2)}`,
+        );
+      }
 
       await tx.walletTransaction.create({
         data: {
@@ -217,10 +226,17 @@ export class PromotionsService {
     endsAt.setDate(endsAt.getDate() + SPOTLIGHT_DURATION_DAYS);
 
     const promotion = await this.prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { id: wallet.id },
+      // Same conditional claim as createBump — two concurrent spotlight
+      // creates on the same wallet must not both debit.
+      const debit = await tx.wallet.updateMany({
+        where: { id: wallet.id, balanceBrl: { gte: SPOTLIGHT_PRICE_BRL } },
         data: { balanceBrl: { decrement: SPOTLIGHT_PRICE_BRL } },
       });
+      if (debit.count === 0) {
+        throw new BadRequestException(
+          `Saldo insuficiente. Necessário R$${SPOTLIGHT_PRICE_BRL.toFixed(2)}`,
+        );
+      }
 
       await tx.walletTransaction.create({
         data: {
