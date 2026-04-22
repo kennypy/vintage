@@ -111,6 +111,7 @@ export default function NotificationsPage() {
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_PREFS);
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -143,35 +144,61 @@ export default function NotificationsPage() {
   }, [router]);
 
   const handleMarkRead = async (id: string) => {
+    const before = notifications;
+    const beforeCount = unreadCount;
+    // Optimistic update first.
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+    setUnreadCount((c) => Math.max(0, c - 1));
     try {
       await apiPatch(`/notifications/${encodeURIComponent(id)}/read`);
-      setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
-      setUnreadCount((c) => Math.max(0, c - 1));
-    } catch {
-      // silently fail
+    } catch (err) {
+      // Revert and surface — the top-level `error` banner renders in every tab.
+      setNotifications(before);
+      setUnreadCount(beforeCount);
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível marcar como lida. Tente novamente.',
+      );
     }
   };
 
   const handleMarkAllRead = async () => {
+    const before = notifications;
+    const beforeCount = unreadCount;
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setUnreadCount(0);
     try {
       await apiPost('/notifications/read-all');
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      setUnreadCount(0);
-    } catch {
-      // silently fail
+    } catch (err) {
+      setNotifications(before);
+      setUnreadCount(beforeCount);
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível marcar todas como lidas.',
+      );
     }
   };
 
   const updatePref = async (patch: Partial<NotificationPreferences>) => {
+    const previous = prefs;
     const nextPrefs = { ...prefs, ...patch };
     setPrefs(nextPrefs);
     setPrefsSaving(true);
+    setPrefsError(null);
     try {
       await apiPatch('/users/me/notification-preferences', patch);
       setPrefsSaved(true);
       setTimeout(() => setPrefsSaved(false), 1500);
-    } catch {
-      // silently leave UI as-is.
+    } catch (err) {
+      // Revert the optimistic toggle so the UI reflects real server state.
+      setPrefs(previous);
+      setPrefsError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível salvar a preferência. Tente novamente.',
+      );
     } finally {
       setPrefsSaving(false);
     }
@@ -233,6 +260,11 @@ export default function NotificationsPage() {
           {prefsSaved && (
             <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700">
               Preferências atualizadas.
+            </div>
+          )}
+          {prefsError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700" role="alert">
+              {prefsError}
             </div>
           )}
 

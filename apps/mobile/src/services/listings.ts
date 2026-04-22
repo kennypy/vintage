@@ -173,33 +173,28 @@ export async function deleteListing(id: string): Promise<void> {
 }
 
 export async function toggleFavorite(id: string): Promise<{ favorited: boolean }> {
+  // Only use the demo store when demo mode is explicitly active. Falling back
+  // on API errors would make toggles "succeed" locally while the real DB
+  // never updates — the user sees a favorite that isn't there on reload.
   if (isDemoModeSync()) {
     const favorited = toggleDemoFavorite(id);
     return { favorited };
   }
-  try {
-    return await apiFetch<{ favorited: boolean }>(
-      `/listings/${encodeURIComponent(id)}/favorite`,
-      { method: 'POST' },
-    );
-  } catch (_error) {
-    const favorited = toggleDemoFavorite(id);
-    return { favorited };
-  }
+  return apiFetch<{ favorited: boolean }>(
+    `/listings/${encodeURIComponent(id)}/favorite`,
+    { method: 'POST' },
+  );
 }
 
 export async function getFavorites(page?: number): Promise<ListingsResponse> {
+  // Same reason: returning demo favorites on a network error would show
+  // the user items they don't actually own and let them try to "buy" them.
   if (isDemoModeSync()) {
     const items = getDemoFavorites() as unknown as Listing[];
     return { items, total: items.length, page: 1, totalPages: 1 };
   }
-  try {
-    const query = page ? `?page=${page}` : '';
-    return await apiFetch<ListingsResponse>(`/listings/favorites${query}`);
-  } catch (_error) {
-    const items = getDemoFavorites() as unknown as Listing[];
-    return { items, total: items.length, page: 1, totalPages: 1 };
-  }
+  const query = page ? `?page=${page}` : '';
+  return apiFetch<ListingsResponse>(`/listings/favorites${query}`);
 }
 
 export async function getCategories(): Promise<Category[]> {
