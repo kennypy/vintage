@@ -1,4 +1,32 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+// NEXT_PUBLIC_API_URL is inlined by Next at build time. If it is missing
+// the build still succeeds — the fallback below keeps local dev working
+// without any env setup — but shipping a production build that silently
+// points at localhost turns the entire site into a null-response wasteland
+// (every API call is a connection-refused in the user's browser).
+//
+// Match the mobile client's posture in apps/mobile/src/services/api.ts:
+//  • missing in non-prod → use the localhost default
+//  • missing in prod     → throw (fail the build before it ships)
+//  • http:// in prod     → throw (tokens and payment intents must be TLS)
+//
+// NODE_ENV is set to "production" by `next build` during the build step,
+// so this check runs at build time; if it ever runs at request time (e.g.
+// in a server component) the same logic still applies.
+const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL;
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+if (IS_PROD && !ENV_API_URL) {
+  throw new Error(
+    'NEXT_PUBLIC_API_URL must be set for production web builds. A localhost fallback would ship a broken app.',
+  );
+}
+if (IS_PROD && ENV_API_URL && ENV_API_URL.startsWith('http://')) {
+  throw new Error(
+    'NEXT_PUBLIC_API_URL must use https:// in production. Cleartext would expose session cookies and CSRF tokens.',
+  );
+}
+
+const API_URL = ENV_API_URL ?? 'http://localhost:3001/api/v1';
 
 interface RequestOptions {
   headers?: Record<string, string>;
