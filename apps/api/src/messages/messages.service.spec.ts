@@ -24,6 +24,7 @@ const mockPrisma = {
     count: jest.fn(),
     create: jest.fn(),
     updateMany: jest.fn(),
+    groupBy: jest.fn().mockResolvedValue([]),
   },
   user: {
     findMany: jest.fn().mockResolvedValue([]),
@@ -43,6 +44,7 @@ describe('MessagesService', () => {
     mockPrisma.user.findMany.mockResolvedValue([]);
     mockPrisma.userBlock.findMany.mockResolvedValue([]);
     mockPrisma.userBlock.findFirst.mockResolvedValue(null);
+    mockPrisma.message.groupBy.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -75,7 +77,8 @@ describe('MessagesService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].otherUser.id).toBe('user-2');
-      expect(result[0].lastMessage).toEqual({ id: 'msg-1', body: 'Olá' });
+      expect(result[0].lastMessage).toMatchObject({ id: 'msg-1', body: 'Olá' });
+      expect(result[0].unreadCount).toBe(0);
     });
 
     it('should return empty array when no conversations', async () => {

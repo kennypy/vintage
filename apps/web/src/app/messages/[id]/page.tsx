@@ -77,7 +77,7 @@ export default function ConversationPage() {
     const interval = setInterval(async () => {
       try {
         const conv = await apiGet<ConversationDetail>(
-          `/messages/conversations/${conversationId}`,
+          `/messages/conversations/${conversationId}/messages`,
         );
         const fetched = conv.messages ?? [];
         setMessages((prev) => {

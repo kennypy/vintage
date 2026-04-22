@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { apiGet } from '@/lib/api';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface BundleItem {
   id: string;
@@ -33,15 +32,11 @@ const fmt = (v: number) =>
   `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function BundlesPage() {
-  const [bundles, setBundles] = useState<Bundle[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiGet<Bundle[]>('/bundles')
-      .then(setBundles)
-      .catch(() => setBundles([]))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, loading, error } = useApiQuery<Bundle[]>('/bundles', {
+    requireAuth: true,
+    transform: unwrapList<Bundle>,
+  });
+  const bundles = data ?? [];
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -51,9 +46,14 @@ export default function BundlesPage() {
       </p>
 
       <div className="mt-6">
+        {error && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+            {error}
+          </div>
+        )}
         {loading ? (
           <p className="text-gray-500">Carregando…</p>
-        ) : bundles.length === 0 ? (
+        ) : error && bundles.length === 0 ? null : bundles.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
             <p className="text-gray-600">Você ainda não tem pacotes.</p>
             <p className="mt-2 text-sm text-gray-500">

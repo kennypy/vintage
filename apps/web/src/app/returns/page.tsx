@@ -1,18 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface ReturnItem {
   id: string;
   status: string;
   createdAt: string;
   order?: { listing: { title: string } };
-}
-
-interface ReturnsResponse {
-  items: ReturnItem[];
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -27,16 +23,11 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function ReturnsPage() {
   const [tab, setTab] = useState<'sent' | 'received'>('sent');
-  const [items, setItems] = useState<ReturnItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    apiGet<ReturnsResponse>(`/returns?type=${tab}`)
-      .then((resp) => setItems(resp.items ?? []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }, [tab]);
+  const { data, loading, error } = useApiQuery<ReturnItem[]>(
+    `/returns?type=${tab}`,
+    { requireAuth: true, transform: unwrapList<ReturnItem> },
+  );
+  const items = data ?? [];
 
   return (
     <main className="mx-auto max-w-3xl p-6">
@@ -54,9 +45,14 @@ export default function ReturnsPage() {
           </button>
         ))}
       </div>
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+          {error}
+        </div>
+      )}
       {loading ? (
         <p className="text-gray-500">Carregando…</p>
-      ) : items.length === 0 ? (
+      ) : error && items.length === 0 ? null : items.length === 0 ? (
         <p className="text-center text-gray-500">Nenhuma devolução ainda.</p>
       ) : (
         <ul className="space-y-3">

@@ -12,15 +12,17 @@ export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('vintage_token');
-    setIsAuthenticated(!!token);
-
-    const handleStorage = () => {
-      const t = localStorage.getItem('vintage_token');
-      setIsAuthenticated(!!t);
+    const read = () => setIsAuthenticated(!!localStorage.getItem('vintage_token'));
+    read();
+    // `storage` fires only on OTHER tabs; `vintage-auth-change` is
+    // dispatched by setAuthToken/clearAuthToken so the current tab
+    // also re-reads after login, logout, or token refresh.
+    window.addEventListener('storage', read);
+    window.addEventListener('vintage-auth-change', read);
+    return () => {
+      window.removeEventListener('storage', read);
+      window.removeEventListener('vintage-auth-change', read);
     };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {

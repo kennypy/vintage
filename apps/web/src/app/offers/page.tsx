@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { apiGet, apiPatch } from '@/lib/api';
+import { apiPatch } from '@/lib/api';
 import { formatBRL } from '@/lib/i18n';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Offer {
   id: string;
@@ -42,45 +42,28 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function OffersPage() {
-  const router = useRouter();
   const [tab, setTab] = useState<'received' | 'sent'>('received');
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
-    }
-    fetchOffers(tab);
-  }, [router, tab]);
-
-  const fetchOffers = (type: 'received' | 'sent') => {
-    setLoading(true);
-    apiGet<{ items: Offer[] } | Offer[]>(`/offers?type=${type}`)
-      .then((res) => {
-        setOffers(Array.isArray(res) ? res : (res.items ?? []));
-      })
-      .catch(() => setOffers([]))
-      .finally(() => setLoading(false));
-  };
+  const { data, loading, error, refetch } = useApiQuery<Offer[]>(
+    `/offers?type=${tab}`,
+    { requireAuth: true, transform: unwrapList<Offer> },
+  );
+  const offers = data ?? [];
 
   const handleAccept = async (id: string) => {
     try {
       await apiPatch(`/offers/${encodeURIComponent(id)}/accept`);
-      setOffers((prev) => prev.map((o) => o.id === id ? { ...o, status: 'accepted' as const } : o));
-    } catch {
-      alert('Erro ao aceitar oferta.');
+      await refetch();
+    } catch (err) {
+      alert(err instanceof Error && err.message ? err.message : 'Erro ao aceitar oferta.');
     }
   };
 
   const handleReject = async (id: string) => {
     try {
       await apiPatch(`/offers/${encodeURIComponent(id)}/reject`);
-      setOffers((prev) => prev.map((o) => o.id === id ? { ...o, status: 'rejected' as const } : o));
-    } catch {
-      alert('Erro ao recusar oferta.');
+      await refetch();
+    } catch (err) {
+      alert(err instanceof Error && err.message ? err.message : 'Erro ao recusar oferta.');
     }
   };
 
@@ -88,13 +71,19 @@ export default function OffersPage() {
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Ofertas</h1>
 
+      {error && (
+        <div className="mb-4 p-3 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700" role="alert">
+          {error}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <div className="flex gap-6">
           {(['received', 'sent'] as const).map((t) => (
             <button
               key={t}
-              onClick={() => { setTab(t); setOffers([]); }}
+              onClick={() => setTab(t)}
               className={`pb-3 text-sm font-medium border-b-2 transition ${
                 tab === t
                   ? 'border-brand-600 text-brand-600'

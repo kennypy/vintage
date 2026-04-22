@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
 import ListingCard from '@/components/ListingCard';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface Listing {
   id: string;
@@ -23,31 +22,20 @@ function getImageUrl(img: { url: string } | string): string {
 }
 
 export default function FavoritesPage() {
-  const router = useRouter();
+  const { data: fetched, loading, error } = useApiQuery<Listing[]>('/listings/favorites', {
+    requireAuth: true,
+    transform: unwrapList<Listing>,
+  });
+  // Local copy so the unfavorite toggle can remove items without refetching.
   const [listings, setListings] = useState<Listing[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      router.push('/auth/login');
-      return;
+    if (fetched) {
+      setListings(fetched);
+      setFavoritedIds(new Set(fetched.map((l) => l.id)));
     }
-
-    apiGet<Listing[] | { data: Listing[]; items: Listing[] }>('/listings/favorites')
-      .then((res) => {
-        const list = Array.isArray(res) ? res : (res.items ?? res.data ?? []);
-        setListings(list);
-        setFavoritedIds(new Set(list.map((l) => l.id)));
-      })
-      .catch(() => {
-        setListings([]);
-        setError('Não foi possível carregar os dados. Tente novamente.');
-      })
-      .finally(() => setLoading(false));
-  }, [router]);
+  }, [fetched]);
 
   const handleToggleFavorite = (id: string, favorited: boolean) => {
     setFavoritedIds((prev) => {
@@ -56,7 +44,7 @@ export default function FavoritesPage() {
         next.add(id);
       } else {
         next.delete(id);
-        setListings((prev) => prev.filter((l) => l.id !== id));
+        setListings((curr) => curr.filter((l) => l.id !== id));
       }
       return next;
     });

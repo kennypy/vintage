@@ -102,7 +102,23 @@ export default function VerificacaoPage() {
         '/users/me/verify-identity-document',
       );
       if (result.redirectUrl) {
-        window.open(result.redirectUrl, '_blank', 'noopener,noreferrer');
+        // Defence in depth: the API is expected to return a vetted Caf URL,
+        // but never hand an unknown scheme to window.open — javascript:/data:/
+        // blob: all execute in the current origin's context. Require https://.
+        let parsed: URL;
+        try {
+          parsed = new URL(result.redirectUrl);
+        } catch {
+          setNotice({ kind: 'error', text: 'URL de verificação inválida. Tente novamente.' });
+          setDocSubmitting(false);
+          return;
+        }
+        if (parsed.protocol !== 'https:') {
+          setNotice({ kind: 'error', text: 'URL de verificação inválida. Tente novamente.' });
+          setDocSubmitting(false);
+          return;
+        }
+        window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
         setNotice({
           kind: 'info',
           text: 'Abrimos o fluxo de verificação por documento em uma nova aba. Volte aqui depois de concluir.',

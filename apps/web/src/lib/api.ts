@@ -161,6 +161,10 @@ export function setAuthToken(_token: string): void {
     } catch {
       /* private mode / storage disabled — server-side cookie still works */
     }
+    // `storage` events only fire on OTHER tabs, so Header can't see a
+    // same-tab login via that channel. Emit a custom event so any
+    // component subscribed to auth-state changes can react immediately.
+    window.dispatchEvent(new Event('vintage-auth-change'));
   }
 }
 
@@ -185,5 +189,6 @@ export async function clearAuthToken(): Promise<void> {
     } catch {
       /* ignore */
     }
+    window.dispatchEvent(new Event('vintage-auth-change'));
   }
 }

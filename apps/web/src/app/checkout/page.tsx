@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -80,6 +80,7 @@ function CheckoutPage() {
   const imageUrl = isSafeImageUrl(rawImage) ? rawImage : '';
 
   const [addresses, setAddresses] = useState<Address[]>([]);
+  const [addressesError, setAddressesError] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
   const [installments, setInstallments] = useState(1);
@@ -107,13 +108,19 @@ function CheckoutPage() {
       return;
     }
 
-    apiGet<Address[] | { data: Address[] }>('/users/me/addresses')
+    apiGet<Address[] | { data?: Address[]; items?: Address[] }>('/users/me/addresses')
       .then((res) => {
-        const list = Array.isArray(res) ? res : (res.data ?? []);
+        const list = Array.isArray(res) ? res : (res.items ?? res.data ?? []);
         setAddresses(list);
+        setAddressesError(false);
         setSelectedAddress(list.find((a) => a.isDefault) ?? list[0] ?? null);
       })
-      .catch(() => {})
+      .catch(() => {
+        // Distinguish fetch failure from "user has no addresses yet" so we
+        // don't mislead the user into thinking they need to add an address
+        // when the API was actually down.
+        setAddressesError(true);
+      })
       .finally(() => setLoading(false));
   }, [router, listingId]);
 
@@ -137,24 +144,37 @@ function CheckoutPage() {
     }
   };
 
+  // Ref guard blocks double-submits that happen in the same tick before the
+  // `paying` state update has propagated to disable the button. Critical for
+  // /orders because the backend idempotency key is optional here.
+  const payingRef = useRef(false);
+
   const handlePay = async () => {
+    if (payingRef.current) return;
     if (!selectedAddress) {
       alert('Selecione um endereco de entrega.');
       return;
     }
+    payingRef.current = true;
     setPaying(true);
     try {
       await apiPost('/orders', {
         listingId,
         addressId: selectedAddress.id,
-        paymentMethod,
+        // API's CreateOrderDto uses the uppercase Prisma enum (PIX /
+        // CREDIT_CARD / BOLETO); class-validator rejects lowercase.
+        paymentMethod: paymentMethod.toUpperCase() as 'PIX' | 'CREDIT_CARD' | 'BOLETO',
         installments: paymentMethod === 'credit_card' ? installments : undefined,
         couponCode: couponResult?.code,
       });
       router.push('/orders');
-    } catch {
-      alert('Erro ao processar pagamento. Tente novamente.');
+    } catch (err) {
+      const msg = err instanceof Error && err.message
+        ? err.message
+        : 'Erro ao processar pagamento. Tente novamente.';
+      alert(msg);
     } finally {
+      payingRef.current = false;
       setPaying(false);
     }
   };
@@ -201,7 +221,11 @@ function CheckoutPage() {
             <h2 className="text-sm font-semibold text-gray-900">Endereco de entrega</h2>
             <Link href="/profile" className="text-xs text-brand-600 hover:text-brand-700">Gerenciar</Link>
           </div>
-          {addresses.length === 0 ? (
+          {addressesError ? (
+            <div className="p-4 border border-red-200 bg-red-50 rounded-xl text-sm text-red-700">
+              Não foi possível carregar seus endereços. Recarregue a página ou tente novamente em instantes.
+            </div>
+          ) : addresses.length === 0 ? (
             <Link
               href="/profile"
               className="flex items-center gap-3 p-4 border-2 border-dashed border-brand-400 rounded-xl hover:bg-brand-50 transition"

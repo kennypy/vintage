@@ -163,11 +163,20 @@ describe('ListingsPage', () => {
   });
 
   it('handles API error gracefully', async () => {
+    // Before the useApiQuery refactor, the listings page caught errors
+    // and rendered "Nenhum resultado encontrado." — indistinguishable
+    // from a legitimate empty result. This hid 500s and made the user
+    // think nothing matched their filters. The fetchError banner + retry
+    // button is the new correct behavior: surface the error, let the
+    // user retry. Asserting the old behavior would regress the fix.
     global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
     render(<ListingsPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Nenhum resultado encontrado.')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
     });
+    expect(screen.getByText(/Network error/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tentar novamente/i })).toBeInTheDocument();
+    expect(screen.queryByText('Nenhum resultado encontrado.')).not.toBeInTheDocument();
   });
 });

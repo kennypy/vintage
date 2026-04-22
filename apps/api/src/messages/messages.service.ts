@@ -44,6 +44,17 @@ export class MessagesService {
           participant1: { select: { id: true, name: true, avatarUrl: true } },
           participant2: { select: { id: true, name: true, avatarUrl: true } },
           messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+          order: {
+            select: {
+              listing: {
+                select: {
+                  id: true,
+                  title: true,
+                  images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+                },
+              },
+            },
+          },
         },
         orderBy: { lastMessageAt: 'desc' },
       }),
@@ -60,26 +71,72 @@ export class MessagesService {
       hiddenIds.add(b.blockerId === userId ? b.blockedId : b.blockerId);
     }
 
-    return conversations
-      .filter((c) => {
-        const other = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
-        return !hiddenIds.has(other);
-      })
-      .map((c) => {
-        const otherUser = c.participant1Id === userId ? c.participant2 : c.participant1;
-        return {
-          id: c.id,
-          otherUser,
-          lastMessage: c.messages[0] ?? null,
-          lastMessageAt: c.lastMessageAt,
-          orderId: c.orderId,
-        };
+    const visible = conversations.filter((c) => {
+      const other = c.participant1Id === userId ? c.participant2Id : c.participant1Id;
+      return !hiddenIds.has(other);
+    });
+
+    // Batch unread counts: one aggregate grouped by conversationId instead
+    // of N+1 queries. Counts unread messages (readAt null) not sent by the
+    // current user, across all the conversations we're about to return.
+    const unreadByConvo = new Map<string, number>();
+    if (visible.length > 0) {
+      const rows = await this.prisma.message.groupBy({
+        by: ['conversationId'],
+        where: {
+          conversationId: { in: visible.map((c) => c.id) },
+          senderId: { not: userId },
+          readAt: null,
+        },
+        _count: { _all: true },
       });
+      for (const r of rows) unreadByConvo.set(r.conversationId, r._count._all);
+    }
+
+    return visible.map((c) => {
+      const otherUser = c.participant1Id === userId ? c.participant2 : c.participant1;
+      const last = c.messages[0] ?? null;
+      const lastMessage = last
+        ? { ...last, isOwn: last.senderId === userId }
+        : null;
+      const listing = c.order?.listing
+        ? {
+            id: c.order.listing.id,
+            title: c.order.listing.title,
+            imageUrl: c.order.listing.images[0]?.url,
+          }
+        : null;
+      return {
+        id: c.id,
+        otherUser,
+        lastMessage,
+        lastMessageAt: c.lastMessageAt,
+        orderId: c.orderId,
+        listing,
+        unreadCount: unreadByConvo.get(c.id) ?? 0,
+      };
+    });
   }
 
   async getMessages(conversationId: string, userId: string, page: number = 1, pageSize: number = 50) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
+      include: {
+        participant1: { select: { id: true, name: true, avatarUrl: true } },
+        participant2: { select: { id: true, name: true, avatarUrl: true } },
+        order: {
+          select: {
+            listing: {
+              select: {
+                id: true,
+                title: true,
+                priceBrl: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!conversation) throw new NotFoundException('Conversa não encontrada');
@@ -90,7 +147,7 @@ export class MessagesService {
     page = Math.max(1, Number(page) || 1);
     pageSize = Math.min(100, Math.max(1, Number(pageSize) || 50));
     const skip = (page - 1) * pageSize;
-    const [items, total] = await Promise.all([
+    const [raw, total] = await Promise.all([
       this.prisma.message.findMany({
         where: { conversationId },
         include: { sender: { select: { id: true, name: true, avatarUrl: true } } },
@@ -107,7 +164,36 @@ export class MessagesService {
       data: { readAt: new Date() },
     });
 
-    return { items: items.reverse(), total, page, pageSize, hasMore: skip + items.length < total };
+    const messages = raw.reverse().map((m) => ({ ...m, isOwn: m.senderId === userId }));
+
+    const otherUser =
+      conversation.participant1Id === userId ? conversation.participant2 : conversation.participant1;
+
+    const listing = conversation.order?.listing
+      ? {
+          id: conversation.order.listing.id,
+          title: conversation.order.listing.title,
+          priceBrl: Number(conversation.order.listing.priceBrl),
+          imageUrl: conversation.order.listing.images[0]?.url,
+        }
+      : null;
+
+    const pageSizeOut = pageSize;
+    return {
+      id: conversation.id,
+      otherUser,
+      listing,
+      // `messages` is what the web conversation page reads;
+      // `items` is kept as an alias so the mobile client's
+      // MessagesResponse shape continues to work unchanged.
+      messages,
+      items: messages,
+      total,
+      page,
+      pageSize: pageSizeOut,
+      totalPages: Math.ceil(total / pageSizeOut) || 1,
+      hasMore: skip + raw.length < total,
+    };
   }
 
   async sendMessage(

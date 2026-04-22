@@ -31,6 +31,50 @@ export default function SegurancaPage() {
 
   // TOTP state
   const [totpSetup, setTotpSetup] = useState<TwoFaSetup | null>(null);
+  // Blob URL for the QR code. The API returns it as a data: URL, but the
+  // CSP blocks data: in img-src (see apps/web/next.config.mjs), so we
+  // convert to a same-origin blob: URL which the CSP does allow.
+  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!totpSetup?.qrCodeDataUrl) {
+      setQrBlobUrl(null);
+      return;
+    }
+    // Decode the data URL manually. fetch(dataUrl) would be blocked by
+    // the CSP's connect-src (which also excludes data:), so we parse
+    // the base64 payload directly — pure client-side math, no network.
+    const dataUrl = totpSetup.qrCodeDataUrl;
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx < 0) {
+      setQrBlobUrl(null);
+      return;
+    }
+    const header = dataUrl.slice(0, commaIdx);
+    const payload = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/^data:([^;,]+)/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const isBase64 = header.includes(';base64');
+    let url: string | null = null;
+    try {
+      let blob: Blob;
+      if (isBase64) {
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        blob = new Blob([bytes], { type: mime });
+      } else {
+        blob = new Blob([decodeURIComponent(payload)], { type: mime });
+      }
+      url = URL.createObjectURL(blob);
+      setQrBlobUrl(url);
+    } catch {
+      setQrBlobUrl(null);
+    }
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [totpSetup?.qrCodeDataUrl]);
 
   // SMS state
   const [phoneInput, setPhoneInput] = useState('+55');
@@ -280,7 +324,13 @@ export default function SegurancaPage() {
                 1. Abra seu app autenticador (Google Authenticator, Authy…) e escaneie:
               </p>
               <div className="flex items-center justify-center bg-gray-50 p-4 rounded-lg">
-                <img src={totpSetup.qrCodeDataUrl} alt="QR code 2FA" width={180} height={180} />
+                {qrBlobUrl ? (
+                  <img src={qrBlobUrl} alt="QR code 2FA" width={180} height={180} />
+                ) : (
+                  <div className="w-[180px] h-[180px] flex items-center justify-center text-xs text-gray-400">
+                    Gerando QR…
+                  </div>
+                )}
               </div>
               <div className="text-sm text-gray-600">
                 Ou informe manualmente:

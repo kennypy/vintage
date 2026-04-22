@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { apiDelete, apiGet, apiPatch } from '@/lib/api';
+import { apiDelete, apiPatch } from '@/lib/api';
+import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
 
 interface SavedSearch {
   id: string;
@@ -13,38 +14,38 @@ interface SavedSearch {
 }
 
 export default function SavedSearchesPage() {
-  const [items, setItems] = useState<SavedSearch[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(() => {
-    setLoading(true);
-    apiGet<{ items: SavedSearch[] }>('/saved-searches')
-      .then((r) => setItems(r.items))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const { data, loading, error, refetch } = useApiQuery<SavedSearch[]>(
+    '/saved-searches',
+    { requireAuth: true, transform: unwrapList<SavedSearch> },
+  );
+  const items = data ?? [];
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   const toggleNotify = async (item: SavedSearch) => {
     const next = !item.notify;
-    setItems((prev) => prev.map((s) => (s.id === item.id ? { ...s, notify: next } : s)));
     try {
       await apiPatch(`/saved-searches/${encodeURIComponent(item.id)}`, { notify: next });
-    } catch {
-      setItems((prev) => prev.map((s) => (s.id === item.id ? { ...s, notify: item.notify } : s)));
+      await refetch();
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível atualizar a notificação.',
+      );
     }
   };
 
   const remove = async (id: string) => {
     if (!window.confirm('Remover esta busca salva?')) return;
-    setItems((prev) => prev.filter((s) => s.id !== id));
     try {
       await apiDelete(`/saved-searches/${encodeURIComponent(id)}`);
-    } catch {
-      refresh();
+      await refetch();
+    } catch (err) {
+      setMutationError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Não foi possível remover a busca salva.',
+      );
     }
   };
 
@@ -56,9 +57,14 @@ export default function SavedSearchesPage() {
       </p>
 
       <div className="mt-6">
+        {(error || mutationError) && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+            {mutationError ?? error}
+          </div>
+        )}
         {loading ? (
           <p className="text-gray-500">Carregando…</p>
-        ) : items.length === 0 ? (
+        ) : error && items.length === 0 ? null : items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
             <p className="text-gray-600">Nenhuma busca salva ainda.</p>
             <p className="mt-2 text-sm text-gray-500">

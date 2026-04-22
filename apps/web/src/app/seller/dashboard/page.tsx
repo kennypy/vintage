@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface Overview {
   totalSales: number;
@@ -56,17 +55,12 @@ const fmtBrl = (v: number) =>
   `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function SellerDashboardPage() {
-  const [data, setData] = useState<SellerDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiGet<SellerDashboard>('/seller-insights')
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, loading, error } = useApiQuery<SellerDashboard>('/seller-insights', {
+    requireAuth: true,
+  });
 
   if (loading) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (error) return <p className="p-6 text-sm text-red-600" role="alert">{error}</p>;
   if (!data) return <p className="p-6 text-gray-500">Não foi possível carregar o painel.</p>;
 
   return (

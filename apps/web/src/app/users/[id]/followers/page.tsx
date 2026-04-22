@@ -1,9 +1,9 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { apiGet } from '@/lib/api';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface FollowListItem {
   id: string;
@@ -24,17 +24,12 @@ interface FollowListResponse {
 
 export default function FollowersPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<FollowListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiGet<FollowListResponse>(`/users/${encodeURIComponent(id)}/followers`)
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [id]);
+  const { data, loading, error } = useApiQuery<FollowListResponse>(
+    `/users/${encodeURIComponent(id)}/followers`,
+  );
 
   if (loading) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (error) return <p className="p-6 text-sm text-red-600" role="alert">{error}</p>;
   if (!data) return <p className="p-6 text-gray-500">Não foi possível carregar.</p>;
 
   return (

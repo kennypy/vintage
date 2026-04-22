@@ -5,9 +5,12 @@ import {
   Headers,
   HttpCode,
   Post,
+  RawBodyRequest,
+  Req,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { CafClient, CafWebhookPayload } from './caf.client';
 import { IdentityService } from './identity.service';
 
@@ -27,12 +30,12 @@ import { IdentityService } from './identity.service';
  *   - Dedup via ProcessedWebhook (same pattern as MP, f663e72).
  *     Service-layer catches P2002 and returns { duplicate: true }.
  *
- * Signature is computed against `JSON.stringify(body)` — matches
- * the MercadoPago webhook pattern already in use
- * (payments.service.ts:128). Minor risk: a Caf-side field-order
- * change could break verification. Mitigation is flipping to
- * raw-body capture (`NestFactory.create(..., { rawBody: true })`)
- * if we ever see signature drift in practice.
+ * Signature is computed against the raw request bytes captured by
+ * `NestFactory.create(..., { rawBody: true })` in main.ts. We do NOT
+ * re-stringify the parsed body — field-order / spacing differences
+ * would break verification or, worse, accept a forged payload whose
+ * stringified form happened to match an older signature. Same pattern
+ * as payments.controller.ts:93.
  */
 @ApiTags('webhooks')
 @Controller('webhooks/caf')
@@ -46,13 +49,25 @@ export class CafWebhookController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Webhook de resultado do Caf (HMAC-verified)' })
   async handle(
+    @Req() req: RawBodyRequest<Request>,
     @Headers('x-caf-signature') signature: string | undefined,
     @Body() body: CafWebhookPayload,
   ) {
     if (!body) {
       throw new BadRequestException('Payload do webhook ausente.');
     }
-    const payloadStr = JSON.stringify(body);
+    const raw = req.rawBody;
+    if (!raw) {
+      throw new BadRequestException('Webhook body not captured.');
+    }
+    // Nest's RawBodyRequest types rawBody as Buffer. verifyWebhookSignature
+    // wants a string, so decode the exact bytes Caf signed as UTF-8 — any
+    // other coercion (re-stringifying the parsed body, JSON.stringify)
+    // would let a field-order change break verification or accept a forged
+    // payload whose serialised form happened to match.
+    const payloadStr: string = Buffer.isBuffer(raw)
+      ? raw.toString('utf-8')
+      : String(raw);
     if (!this.caf.verifyWebhookSignature(payloadStr, signature)) {
       throw new UnauthorizedException('Assinatura do webhook inválida.');
     }

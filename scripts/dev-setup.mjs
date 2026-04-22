@@ -277,7 +277,7 @@ function summary() {
   log(`  ${C.cyan}npm run dev:mobile${C.reset}       start mobile only\n`);
 
   log(`${C.bold}URLs (after npm run dev):${C.reset}\n`);
-  log(`  API health     ${C.dim}http://localhost:3001/health${C.reset}`);
+  log(`  API health     ${C.dim}http://localhost:3001/api/v1/health${C.reset}`);
   log(`  API docs       ${C.dim}http://localhost:3001/docs${C.reset}`);
   log(`  Web app        ${C.dim}http://localhost:3000${C.reset}`);
   log(`  Mobile (LAN)   ${C.dim}${lanIp ? `http://${lanIp}:3001/api/v1` : 'edit apps/mobile/.env'}${C.reset}`);

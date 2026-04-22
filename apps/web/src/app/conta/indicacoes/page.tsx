@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { apiGet } from '@/lib/api';
+import { useState } from 'react';
+import { useApiQuery } from '@/lib/useApiQuery';
 
 interface ReferralEntry {
   id: string;
@@ -23,14 +23,14 @@ const formatBrl = (v: number) =>
   v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ReferralsPage() {
-  const [data, setData] = useState<MyReferrals | null>(null);
+  const { data, loading, error } = useApiQuery<MyReferrals>('/referrals/me', {
+    requireAuth: true,
+  });
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    apiGet<MyReferrals>('/referrals/me').then(setData).catch(() => setData(null));
-  }, []);
-
-  if (!data) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (loading) return <p className="p-6 text-gray-500">Carregando…</p>;
+  if (error) return <p className="p-6 text-sm text-red-600" role="alert">{error}</p>;
+  if (!data) return <p className="p-6 text-gray-500">Não foi possível carregar suas indicações.</p>;
 
   const copy = async () => {
     try {
