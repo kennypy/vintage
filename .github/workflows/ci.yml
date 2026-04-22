@@ -36,9 +36,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Every turbo command below carries `--force` to defeat the local
+      # turbo cache. CLAUDE.md mandates byte-for-byte parity with
+      # scripts/ci-parity.sh, which always runs with --force; without
+      # it, CI can replay a stale PASS from a prior run and mask real
+      # source failures. See the anti-pattern table in CLAUDE.md
+      # ("Trusted turbo's cached result").
+
       # Step 1: Build shared packages
       - name: Build shared packages
-        run: npx turbo build --filter=@vintage/shared
+        run: npx turbo build --filter=@vintage/shared --force
 
       # Step 2: Generate Prisma client
       - name: Generate Prisma client
@@ -47,7 +54,7 @@ jobs:
 
       # Step 3: Lint all packages
       - name: Lint
-        run: npx turbo lint
+        run: npx turbo lint --force
 
       # Step 4: Type-check API
       - name: Type-check API
@@ -59,15 +66,15 @@ jobs:
           DATABASE_URL: postgresql://vintage:vintage@localhost:5432/vintage_test
           JWT_SECRET: test-secret-do-not-use-in-production
           NODE_ENV: test
-        run: npx turbo test
+        run: npx turbo test --force
 
       # Step 6: Build API
       - name: Build API
-        run: npx turbo build --filter=@vintage/api
+        run: npx turbo build --filter=@vintage/api --force
 
       # Step 7: Build Web
       - name: Build Web
-        run: npx turbo build --filter=@vintage/web
+        run: npx turbo build --filter=@vintage/web --force
 
   security-audit:
     runs-on: ubuntu-latest
@@ -82,10 +89,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Launch gate: block the build on HIGH or higher. Wave 3A cleared the
-      # dep tree — NestJS 10→11, multer v2, nodemailer v8, bcrypt v6 — so
-      # there are currently 0 high vulns in prod AND dev. If this fails,
-      # check DEPENDENCY_UPGRADE_PLAN.md before loosening the gate.
+      # Launch gate: block the build on HIGH or higher on every branch.
+      # Previously this was a soft gate on non-main branches, which let
+      # high-severity CVEs land on `develop` unchallenged and surface only
+      # at the main promotion — by which point the offending dependency
+      # was entrenched across multiple PRs. Wave 3A cleared the tree
+      # (NestJS 10→11, multer v2, nodemailer v8, bcrypt v6) so hard-blocking
+      # on HIGH is currently achievable; if a new transitive CVE breaks
+      # this, check DEPENDENCY_UPGRADE_PLAN.md before loosening the gate.
       - name: Security audit (high gate)
         run: npm audit --audit-level=high
-        continue-on-error: ${{ github.ref != 'refs/heads/main' }}

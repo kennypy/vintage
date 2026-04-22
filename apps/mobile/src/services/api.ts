@@ -183,27 +183,45 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   return response.json();
 }
 
+// Single-flight guard. When several screens re-fetch at once (e.g. the
+// user returns to the app after a sleep and three tabs simultaneously
+// hit 401), each apiFetch would otherwise call attemptRefresh()
+// independently. The first call rotates the refresh token server-side;
+// every subsequent call then POSTs an already-revoked token and fails,
+// so the user is logged out despite having a valid session moments ago.
+// Collapsing concurrent callers onto one in-flight promise preserves the
+// retry semantics without racing the rotation.
+let refreshInFlight: Promise<boolean> | null = null;
+
 async function attemptRefresh(): Promise<boolean> {
-  try {
-    const refreshToken = await secureGet(REFRESH_KEY);
-    if (!refreshToken) return false;
-
-    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${refreshToken}`,
-      },
-    });
-
-    if (!response.ok) return false;
-
-    const data = await response.json();
-    await setTokens(data.accessToken, data.refreshToken);
-    return true;
-  } catch {
-    return false;
+  if (refreshInFlight) {
+    return refreshInFlight;
   }
+  refreshInFlight = (async () => {
+    try {
+      const refreshToken = await secureGet(REFRESH_KEY);
+      if (!refreshToken) return false;
+
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${refreshToken}`,
+        },
+      });
+
+      if (!response.ok) return false;
+
+      const data = await response.json();
+      await setTokens(data.accessToken, data.refreshToken);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
 }
 
 async function safeParseError(response: Response): Promise<string> {
