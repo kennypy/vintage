@@ -69,13 +69,28 @@ describe('ReviewsService', () => {
       expect(result).toEqual(createdReview);
     });
 
-    it('should reject rating that is not 1 or 5', async () => {
-      await expect(service.create('buyer-1', 'order-1', 3)).rejects.toThrow(
-        BadRequestException,
+    it('should reject rating outside 1–5 or non-integer', async () => {
+      for (const bad of [0, 6, -1, 3.5, Number.NaN]) {
+        await expect(service.create('buyer-1', 'order-1', bad)).rejects.toThrow(
+          BadRequestException,
+        );
+      }
+      await expect(service.create('buyer-1', 'order-1', 0)).rejects.toThrow(
+        'Avaliação deve ser de 1 a 5 estrelas',
       );
-      await expect(service.create('buyer-1', 'order-1', 3)).rejects.toThrow(
-        'Avaliação deve ser 1 ou 5 estrelas',
-      );
+    });
+
+    it.each([1, 2, 3, 4, 5])('should accept rating %i', async (rating) => {
+      mockPrisma.order.findUnique.mockResolvedValue(mockOrder);
+      mockPrisma.review.findUnique.mockResolvedValue(null);
+      mockPrisma.review.create.mockResolvedValue({ id: 'r', rating, orderId: 'order-1' });
+      mockPrisma.review.aggregate.mockResolvedValue({
+        _avg: { rating },
+        _count: { rating: 1 },
+      });
+      mockPrisma.user.update.mockResolvedValue({});
+
+      await expect(service.create('buyer-1', 'order-1', rating)).resolves.toBeDefined();
     });
 
     it('should reject if order is not COMPLETED', async () => {

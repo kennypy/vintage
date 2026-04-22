@@ -1,6 +1,12 @@
 import { apiFetch } from './api';
 import { uploadListingImage } from './listings';
 
+// The backend currently validates rating ∈ {1, 5} (thumbs-down / thumbs-up;
+// see apps/api/src/reviews/reviews.service.ts:19), but the mobile
+// write-review screen uses a 1–5 star picker. That contradiction is a
+// product-level decision, not a type problem — narrowing to `1 | 5` here
+// would just move the error from runtime to compile time in the star
+// picker. The type stays loose until the product direction is settled.
 export interface Review {
   id: string;
   orderId: string;

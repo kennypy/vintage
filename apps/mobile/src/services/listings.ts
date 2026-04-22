@@ -318,7 +318,7 @@ export async function uploadListingVideo(uri: string): Promise<UploadVideoRespon
     `${API_BASE_URL}/uploads/listing-video`,
     uri,
     {
-      uploadType: 1 as unknown as FileSystem.FileSystemUploadType,
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
       fieldName: 'file',
       httpMethod: 'POST',
       headers: {

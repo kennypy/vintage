@@ -328,6 +328,41 @@ Usamos o **Expo Push API** (apps/api → `push/` module). Tokens são salvos na
 tabela `DeviceToken`. Crie a env `EXPO_ACCESS_TOKEN` no Fly para evitar
 rate limit do endpoint anônimo.
 
+### 7.4. Submissão automática nas lojas — EAS Submit (pendente)
+
+`apps/mobile/eas.json` já tem o bloco `submit.production` mas os três
+campos iOS estão em branco:
+
+```json
+"ios": {
+  "appleId": "",
+  "ascAppId": "",
+  "appleTeamId": ""
+}
+```
+
+Enquanto estiverem vazios, `eas submit --platform ios` falha sem prompt
+interativo — não bloqueia build, bloqueia **apenas** a submissão
+automática para o App Store Connect. Se o fluxo de release iOS hoje é
+"build via EAS + upload manual pelo Transporter/Xcode", dá para ignorar.
+
+Para habilitar submissão headless (ex.: em CI antes do primeiro
+lançamento), preencher:
+
+- `appleId` — email da conta Apple Developer (ex.: `ops@vintage.br`).
+- `ascAppId` — App Store Connect App ID numérico. Encontrado em
+  **App Store Connect → My Apps → Vintage.br → App Information →
+  General → Apple ID**.
+- `appleTeamId` — Apple Developer Team ID (10 chars, mesmo valor de
+  `APPLE_TEAM_ID` da §5). **Developer Portal → Membership**.
+
+Android já está com `./play-store-service-account.json` no mesmo
+arquivo; gerar esse JSON seguindo
+https://docs.expo.dev/submit/android/#creating-a-google-service-account-key.
+
+> **Status**: deferido até o primeiro release iOS real. Ver PR
+> `claude/codebase-audit-repair-6AucW` para contexto.
+
 ---
 
 ## 8. Busca — Meilisearch

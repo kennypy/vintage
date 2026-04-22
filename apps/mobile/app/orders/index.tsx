@@ -7,24 +7,31 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { getOrders } from '../../src/services/orders';
 import type { Order, OrderStatus } from '../../src/services/orders';
 
+// Keys must match the Prisma OrderStatus enum (UPPERCASE) — the API
+// returns these verbatim. Every member is listed so the Record type
+// catches missing cases at compile time if the backend enum grows.
 const STATUS_LABELS: Record<OrderStatus, string> = {
-  pending_payment: 'Aguardando pagamento',
-  paid: 'Pago',
-  shipped: 'Enviado',
-  delivered: 'Entregue',
-  confirmed: 'Confirmado',
-  cancelled: 'Cancelado',
-  refunded: 'Reembolsado',
+  PENDING: 'Aguardando pagamento',
+  PAID: 'Pago',
+  SHIPPED: 'Enviado',
+  DELIVERED: 'Entregue',
+  HELD: 'Em custódia',
+  COMPLETED: 'Concluído',
+  DISPUTED: 'Em disputa',
+  REFUNDED: 'Reembolsado',
+  CANCELLED: 'Cancelado',
 };
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
-  pending_payment: colors.warning[500],
-  paid: colors.primary[500],
-  shipped: colors.accent[500],
-  delivered: colors.success[500],
-  confirmed: colors.success[600],
-  cancelled: colors.error[500],
-  refunded: colors.neutral[500],
+  PENDING: colors.warning[500],
+  PAID: colors.primary[500],
+  SHIPPED: colors.accent[500],
+  DELIVERED: colors.success[500],
+  HELD: colors.accent[600],
+  COMPLETED: colors.success[600],
+  DISPUTED: colors.warning[600],
+  REFUNDED: colors.neutral[500],
+  CANCELLED: colors.error[500],
 };
 
 const formatBrl = (value: number) =>

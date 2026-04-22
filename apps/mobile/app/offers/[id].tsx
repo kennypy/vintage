@@ -38,7 +38,7 @@ export default function OfferThreadScreen() {
 
   const latest = thread[thread.length - 1];
   const canAct =
-    latest.status === 'pending' &&
+    latest.status === 'PENDING' &&
     latest.counteredById !== user?.id;
 
   const doAction = async (fn: () => Promise<unknown>, msg: string) => {

@@ -4,8 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { apiPatch } from '@/lib/api';
-import { formatBRL } from '@/lib/i18n';
+import { formatBRL, OFFER_STATUS_PT, OFFER_STATUS_COLORS } from '@/lib/i18n';
 import { useApiQuery, unwrapList } from '@/lib/useApiQuery';
+
+// Status mirrors the Prisma OfferStatus enum — API returns UPPERCASE.
+type OfferStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COUNTERED' | 'EXPIRED';
 
 interface Offer {
   id: string;
@@ -13,7 +16,7 @@ interface Offer {
   listingTitle: string;
   listingImageUrl?: string;
   amountBrl: number;
-  status: 'pending' | 'accepted' | 'rejected' | 'countered' | 'expired';
+  status: OfferStatus;
   buyer: { id: string; name: string };
   seller: { id: string; name: string };
   createdAt: string;
@@ -24,22 +27,6 @@ interface Offer {
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pendente',
-  accepted: 'Aceita',
-  rejected: 'Recusada',
-  countered: 'Contraproposta',
-  expired: 'Expirada',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  accepted: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  countered: 'bg-orange-100 text-orange-800',
-  expired: 'bg-gray-100 text-gray-600',
-};
 
 export default function OffersPage() {
   const [tab, setTab] = useState<'received' | 'sent'>('received');
@@ -145,10 +132,10 @@ export default function OffersPage() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[offer.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                    {STATUS_LABELS[offer.status] ?? offer.status}
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${OFFER_STATUS_COLORS[offer.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {OFFER_STATUS_PT[offer.status] ?? offer.status}
                   </span>
-                  {tab === 'received' && offer.status === 'pending' && (
+                  {tab === 'received' && offer.status === 'PENDING' && (
                     <div className="flex gap-2 mt-1">
                       <button
                         type="button"

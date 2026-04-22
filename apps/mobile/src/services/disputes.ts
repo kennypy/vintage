@@ -18,7 +18,9 @@ export interface Dispute {
   orderId: string;
   reason: DisputeReason;
   description: string;
-  status: 'OPEN' | 'RESOLVED';
+  // Mirrors Prisma enum DisputeStatus — ESCALATED is what the backend
+  // returns once the ops team flags a dispute for manual review.
+  status: 'OPEN' | 'RESOLVED' | 'ESCALATED';
   resolution?: string;
   createdAt: string;
   order?: {

@@ -16,8 +16,8 @@ export class ReviewsService {
     comment?: string,
     imageUrls?: string[],
   ) {
-    if (rating !== 1 && rating !== 5) {
-      throw new BadRequestException('Avaliação deve ser 1 ou 5 estrelas');
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new BadRequestException('Avaliação deve ser de 1 a 5 estrelas');
     }
 
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
@@ -68,15 +68,24 @@ export class ReviewsService {
       },
     });
 
-    // Notify the seller that they just got a new review.
+    // Notify the seller that they just got a new review. Copy splits the
+    // 1–5 range into three buckets so the preview text still hints at the
+    // sentiment without demanding the seller open the review.
+    const titleCopy =
+      rating >= 4
+        ? 'Você recebeu uma avaliação positiva'
+        : rating === 3
+          ? 'Você recebeu uma nova avaliação'
+          : 'Você recebeu uma avaliação negativa';
+    const bodyCopy =
+      comment?.slice(0, 140) ??
+      `${rating} ${rating === 1 ? 'estrela' : 'estrelas'}.`;
     this.notifications
       .createNotification(
         order.sellerId,
         'REVIEW_RECEIVED',
-        rating === 5
-          ? 'Você recebeu uma avaliação positiva'
-          : 'Você recebeu uma nova avaliação',
-        comment?.slice(0, 140) ?? `${rating} ${rating === 1 ? 'estrela' : 'estrelas'}.`,
+        titleCopy,
+        bodyCopy,
         { reviewId: review.id, orderId, rating: String(rating) },
         'reviews',
       )
