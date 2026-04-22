@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { apiFetch, getToken, clearTokens } from '../services/api';
 import {
   login as loginService,
+  logout as logoutService,
   confirmLoginTwoFa as confirmLoginTwoFaService,
   register as registerService,
   signInWithGoogle as signInWithGoogleService,
@@ -257,11 +258,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [demoActive]);
 
   const signOut = useCallback(async () => {
-    await clearTokens();
+    // logoutService hits /auth/logout (revokes the refresh token server-side)
+    // and then clears the local secure-store keys. Bypass it for demo-only
+    // sessions — there's no server refresh token to revoke.
+    if (demoActive) {
+      await clearTokens();
+    } else {
+      await logoutService();
+    }
     await disableDemoMode();
     setDemoActive(false);
     setUser(null);
-  }, []);
+  }, [demoActive]);
 
   return (
     <AuthContext.Provider

@@ -1,4 +1,4 @@
-import { apiFetch, setTokens, clearTokens } from './api';
+import { apiFetch, setTokens, clearTokens, revokeRefreshTokenOnServer } from './api';
 
 export interface AuthTokens {
   accessToken: string;
@@ -170,6 +170,14 @@ export async function register(
 }
 
 export async function logout(): Promise<void> {
+  // Revoke the server-side refresh token BEFORE wiping local storage.
+  // Without this, a stolen refresh token (backup extract, malware,
+  // shared device) stays mintable for the full 7-day refresh window
+  // even after the user pressed "sign out". revokeRefreshTokenOnServer
+  // does a bare fetch that presents the REFRESH token (not the access
+  // JWT apiFetch attaches — refresh tokens are the only thing the
+  // server-side revoke can resolve against the RefreshToken table).
+  await revokeRefreshTokenOnServer();
   await clearTokens();
 }
 
