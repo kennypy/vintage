@@ -29,11 +29,23 @@ export interface AgentReplyInput {
   agentName: string;
   body: string;
   attachmentUrls?: string[];
+  /**
+   * Client-supplied idempotency key — Vintage guarantees that two calls
+   * with the same key never produce two `SupportTicketMessage` rows.
+   * Intended to be the CRM outbound job UUID.
+   */
+  idempotencyKey?: string;
 }
 
 export interface AgentResolveInput {
   agentName: string;
   note?: string;
+  /**
+   * Idempotency key for the optional note message. Not needed for the
+   * status transition itself (setting RESOLVED is naturally idempotent);
+   * this protects against duplicate note rows on retry.
+   */
+  idempotencyKey?: string;
 }
 
 /** Shape of every outbound CRM webhook event. */
@@ -49,6 +61,17 @@ type CrmEvent =
  */
 const SUPPORT_SYSTEM_EMAIL = 'support@vintage.br';
 const SUPPORT_SYSTEM_NAME = 'Suporte Vintage';
+
+/**
+ * Narrow detector for Prisma's "unique constraint violated" error
+ * (code P2002). We avoid importing Prisma.PrismaClientKnownRequestError
+ * directly because ts-jest's Prisma mock in the support unit tests
+ * doesn't carry the error class — duck-typing keeps the service
+ * testable without coupling it to the generated client.
+ */
+function isPrismaUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
+}
 
 /**
  * In-house support / help-desk pipeline. Tickets are stored locally in
@@ -179,6 +202,12 @@ export class SupportService {
    * agent's display name is stored on the message row. Optional
    * CRM-hosted attachment URLs are stored as-is — we never fetch or
    * re-host them.
+   *
+   * Idempotent when `idempotencyKey` is supplied: a second call with
+   * the same key returns the existing row (and re-applies the status
+   * transition, which is naturally idempotent). Protects the CRM's
+   * at-least-once retry loop from producing duplicate user-visible
+   * messages on response-side timeouts.
    */
   async agentReply(ticketId: string, input: AgentReplyInput) {
     const body = (input.body ?? '').trim();
@@ -195,33 +224,55 @@ export class SupportService {
 
     const systemUserId = await this.getSystemUserId();
     const attachmentUrls = this.sanitizeAttachmentUrls(input.attachmentUrls);
+    const idempotencyKey = input.idempotencyKey?.trim() || null;
 
-    const message = await this.prisma.supportTicketMessage.create({
-      data: {
-        ticketId,
-        senderId: systemUserId,
-        senderRole: 'agent',
-        senderDisplayName: agentName,
-        body,
-        attachmentUrls,
-      },
-    });
-
-    if (ticket.status === 'OPEN') {
-      await this.prisma.supportTicket.update({
-        where: { id: ticketId },
-        data: { status: 'IN_PROGRESS' },
+    // Fast path for retries: if the caller already committed this exact
+    // message (same idempotency key), return the prior row so the CRM
+    // client sees a 200 identical to the original response.
+    if (idempotencyKey) {
+      const existing = await this.prisma.supportTicketMessage.findUnique({
+        where: { idempotencyKey },
       });
-    } else if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
-      // An agent reply on a closed ticket re-opens it — same rule
-      // we apply when the user replies on a closed ticket.
-      await this.prisma.supportTicket.update({
-        where: { id: ticketId },
-        data: { status: 'IN_PROGRESS', resolvedAt: null },
-      });
+      if (existing) {
+        // Still re-run the status transition — covers the crash-between-
+        // insert-and-update window. Both updates below are no-ops if
+        // the status is already in the target state.
+        await this.applyAgentStatusTransition(ticket);
+        return existing;
+      }
     }
 
-    // Notify the user out-of-band regardless of prior status.
+    let message;
+    try {
+      message = await this.prisma.supportTicketMessage.create({
+        data: {
+          ticketId,
+          senderId: systemUserId,
+          senderRole: 'agent',
+          senderDisplayName: agentName,
+          body,
+          attachmentUrls,
+          idempotencyKey,
+        },
+      });
+    } catch (err) {
+      // Unique-violation race: two concurrent retries slipped past the
+      // findUnique above. Resolve by reading the winning row.
+      if (idempotencyKey && isPrismaUniqueViolation(err)) {
+        const existing = await this.prisma.supportTicketMessage.findUnique({
+          where: { idempotencyKey },
+        });
+        if (existing) {
+          await this.applyAgentStatusTransition(ticket);
+          return existing;
+        }
+      }
+      throw err;
+    }
+
+    await this.applyAgentStatusTransition(ticket);
+
+    // Notify the user out-of-band — only on the first (winning) insert.
     this.notifications
       .createNotification(
         ticket.userId,
@@ -237,8 +288,34 @@ export class SupportService {
   }
 
   /**
+   * Apply the status transition for an agent reply. OPEN → IN_PROGRESS;
+   * RESOLVED/CLOSED → IN_PROGRESS (re-opens the thread, same rule as
+   * when a user replies on a closed ticket). Safe to call multiple
+   * times — acts as a no-op if the status is already where it needs
+   * to be.
+   */
+  private async applyAgentStatusTransition(ticket: { id: string; status: string }): Promise<void> {
+    if (ticket.status === 'OPEN') {
+      await this.prisma.supportTicket.update({
+        where: { id: ticket.id },
+        data: { status: 'IN_PROGRESS' },
+      });
+    } else if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+      await this.prisma.supportTicket.update({
+        where: { id: ticket.id },
+        data: { status: 'IN_PROGRESS', resolvedAt: null },
+      });
+    }
+  }
+
+  /**
    * Agent-driven resolve from CRM. Optional final note is posted as a
    * visible message, credited to the agent's display name.
+   *
+   * Idempotent when `idempotencyKey` is supplied: the note row is
+   * de-duplicated via the unique key, and the status transition itself
+   * is naturally idempotent (resolvedAt is only stamped once — retries
+   * don't push the timestamp forward).
    */
   async agentResolve(ticketId: string, input: AgentResolveInput) {
     const agentName = (input.agentName ?? '').trim();
@@ -254,23 +331,48 @@ export class SupportService {
     if (!ticket) throw new NotFoundException('Ticket não encontrado.');
 
     const systemUserId = await this.getSystemUserId();
+    const idempotencyKey = input.idempotencyKey?.trim() || null;
 
     if (note) {
-      await this.prisma.supportTicketMessage.create({
-        data: {
-          ticketId,
-          senderId: systemUserId,
-          senderRole: 'agent',
-          senderDisplayName: agentName,
-          body: note,
-        },
-      });
+      // Dedupe the note on idempotencyKey so retries don't leave
+      // multiple resolution notes in the thread. If no key is supplied
+      // we fall back to a plain insert — callers opting out of
+      // idempotency own the deduplication themselves.
+      const existing = idempotencyKey
+        ? await this.prisma.supportTicketMessage.findUnique({
+            where: { idempotencyKey },
+          })
+        : null;
+      if (!existing) {
+        try {
+          await this.prisma.supportTicketMessage.create({
+            data: {
+              ticketId,
+              senderId: systemUserId,
+              senderRole: 'agent',
+              senderDisplayName: agentName,
+              body: note,
+              idempotencyKey,
+            },
+          });
+        } catch (err) {
+          if (!(idempotencyKey && isPrismaUniqueViolation(err))) throw err;
+          // Race: another retry won. Idempotent outcome, keep going.
+        }
+      }
     }
 
-    return this.prisma.supportTicket.update({
-      where: { id: ticketId },
-      data: { status: 'RESOLVED', resolvedAt: new Date() },
-    });
+    // Only stamp resolvedAt on the first resolve — subsequent retries
+    // must not shift the timestamp forward.
+    if (!ticket.resolvedAt) {
+      return this.prisma.supportTicket.update({
+        where: { id: ticketId },
+        data: { status: 'RESOLVED', resolvedAt: new Date() },
+      });
+    }
+    // Already resolved; return the row as-is so the caller sees a 200
+    // identical in shape to the winning request.
+    return this.prisma.supportTicket.findUniqueOrThrow({ where: { id: ticketId } });
   }
 
   async getMyTickets(userId: string, page = 1, pageSize = 20) {
