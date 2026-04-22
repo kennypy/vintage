@@ -13,7 +13,7 @@ export const PROHIBITED_KEYWORDS: string[] = [
   // COCAINE
   // =====================================================================
   // English — formal & slang
-  'cocaine', 'cocaine', 'cokaine', 'kokaine', 'coacine',
+  'cocaine', 'cokaine', 'kokaine', 'coacine',
   'coke',
   'snow',        // most common EN slang
   'blow',

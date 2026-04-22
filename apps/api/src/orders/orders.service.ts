@@ -509,7 +509,7 @@ export class OrdersService {
       data: {
         status: 'SHIPPED',
         trackingCode: dto.trackingCode,
-        carrier: dto.carrier as string as import('@prisma/client').Carrier,
+        carrier: dto.carrier,
         shippedAt: new Date(),
       },
       include: {
@@ -529,7 +529,7 @@ export class OrdersService {
         updated.buyerId,
         'order',
         'Pedido enviado!',
-        `Seu pedido "${(updated as any).listing?.title ?? 'item'}" foi enviado. Rastreio: ${dto.trackingCode}`,
+        `Seu pedido "${updated.listing.title}" foi enviado. Rastreio: ${dto.trackingCode}`,
         { orderId: updated.id, trackingCode: dto.trackingCode },
         'orders',
       )
@@ -540,7 +540,7 @@ export class OrdersService {
     // additional channel BR users expect for logistics updates.
     this.sendShippingAlert(
       updated.buyerId,
-      `Vintage.br: seu pedido "${(updated as any).listing?.title ?? 'item'}" foi enviado. Código de rastreio: ${dto.trackingCode}`,
+      `Vintage.br: seu pedido "${updated.listing.title}" foi enviado. Código de rastreio: ${dto.trackingCode}`,
     ).catch(() => {});
 
     return updated;
