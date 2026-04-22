@@ -1,15 +1,19 @@
 import { login, register, logout, refreshToken } from '../auth';
-import { apiFetch, setTokens, clearTokens } from '../api';
+import { apiFetch, setTokens, clearTokens, revokeRefreshTokenOnServer } from '../api';
 
 jest.mock('../api', () => ({
   apiFetch: jest.fn(),
   setTokens: jest.fn(),
   clearTokens: jest.fn(),
+  revokeRefreshTokenOnServer: jest.fn(),
 }));
 
 const mockApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 const mockSetTokens = setTokens as jest.MockedFunction<typeof setTokens>;
 const mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
+const mockRevoke = revokeRefreshTokenOnServer as jest.MockedFunction<
+  typeof revokeRefreshTokenOnServer
+>;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -73,9 +77,15 @@ describe('register', () => {
 });
 
 describe('logout', () => {
-  it('calls clearTokens', async () => {
+  it('revokes the server-side refresh token before clearing local tokens', async () => {
     await logout();
+    // Server revocation must run BEFORE local cleanup — otherwise a
+    // stolen refresh token stays valid for the full 7-day window.
+    expect(mockRevoke).toHaveBeenCalled();
     expect(mockClearTokens).toHaveBeenCalled();
+    const revokeOrder = mockRevoke.mock.invocationCallOrder[0];
+    const clearOrder = mockClearTokens.mock.invocationCallOrder[0];
+    expect(revokeOrder).toBeLessThan(clearOrder);
   });
 });
 

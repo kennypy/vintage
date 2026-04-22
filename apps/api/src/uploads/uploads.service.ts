@@ -114,9 +114,26 @@ export class UploadsService {
       'S3_BUCKET',
       'vintage-uploads',
     );
-    this.presignedUrlExpiry = Number(
+    // Presigned URL lifetime. Clamped to [60s, 24h]. A misconfigured
+    // env (e.g. `PRESIGNED_URL_EXPIRY=31536000`) would otherwise ship
+    // year-long links harvestable from logs / email threads / chat
+    // message history — listing photos are low-value, but identity
+    // document scans (kyc/*) reuse the same S3 client, and a leaked
+    // year-long URL to a CPF scan is a reportable incident.
+    const PRESIGNED_URL_MAX_SECONDS = 24 * 60 * 60; // 24h
+    const PRESIGNED_URL_MIN_SECONDS = 60;
+    const rawExpiry = Number(
       this.configService.get<string>('PRESIGNED_URL_EXPIRY', '3600'),
     );
+    const safeExpiry = Number.isFinite(rawExpiry) && rawExpiry > 0
+      ? Math.min(Math.max(rawExpiry, PRESIGNED_URL_MIN_SECONDS), PRESIGNED_URL_MAX_SECONDS)
+      : 3600;
+    if (safeExpiry !== rawExpiry) {
+      this.logger.warn(
+        `PRESIGNED_URL_EXPIRY=${rawExpiry} clamped to ${safeExpiry}s (allowed range: ${PRESIGNED_URL_MIN_SECONDS}–${PRESIGNED_URL_MAX_SECONDS}s).`,
+      );
+    }
+    this.presignedUrlExpiry = safeExpiry;
 
     // S3 is only usable when real credentials are provided
     this.s3Configured = !!(accessKeyId && secretAccessKey && this.bucket !== 'vintage-uploads');

@@ -311,7 +311,13 @@ export class ListingsCronService {
     if (!(await this.cronLock.acquire('listings:priceDropsRearm'))) return;
     // Set notifiedAt=null where current price >= baseline. That way the
     // hourly cron will fire again when a new drop occurs.
-    await this.prisma.$executeRawUnsafe(`
+    // Tagged $executeRaw (not $executeRawUnsafe) — the body is a
+    // fixed literal with zero interpolation, but the Unsafe variant
+    // is a footgun: future edits that drop a Prisma value into the
+    // string would become silent SQL injection without a lint/diff
+    // flag. Tagged templates refuse to compile with Prisma values,
+    // so the invariant is enforced by the type system.
+    await this.prisma.$executeRaw`
       UPDATE "PriceDropAlert" pda
       SET "notifiedAt" = NULL,
           "originalPriceBrl" = l."priceBrl"
@@ -319,6 +325,6 @@ export class ListingsCronService {
       WHERE pda."listingId" = l.id
         AND pda."notifiedAt" IS NOT NULL
         AND l."priceBrl" >= pda."originalPriceBrl";
-    `);
+    `;
   }
 }

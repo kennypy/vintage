@@ -2,16 +2,22 @@ import React from 'react';
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { AuthProvider, useAuth } from '../AuthContext';
 import { getToken, clearTokens } from '../../services/api';
-import { login as loginService, register as registerService } from '../../services/auth';
+import {
+  login as loginService,
+  logout as logoutService,
+  register as registerService,
+} from '../../services/auth';
 import { getProfile } from '../../services/users';
 
 jest.mock('../../services/api', () => ({
+  apiFetch: jest.fn(),
   getToken: jest.fn(),
   clearTokens: jest.fn(),
 }));
 
 jest.mock('../../services/auth', () => ({
   login: jest.fn(),
+  logout: jest.fn(),
   register: jest.fn(),
 }));
 
@@ -22,6 +28,7 @@ jest.mock('../../services/users', () => ({
 const mockGetToken = getToken as jest.MockedFunction<typeof getToken>;
 const mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
 const mockLogin = loginService as jest.MockedFunction<typeof loginService>;
+const mockLogout = logoutService as jest.MockedFunction<typeof logoutService>;
 const mockRegister = registerService as jest.MockedFunction<typeof registerService>;
 const mockGetProfile = getProfile as jest.MockedFunction<typeof getProfile>;
 
@@ -145,13 +152,14 @@ describe('signUp', () => {
 });
 
 describe('signOut', () => {
-  it('clears tokens and sets user to null', async () => {
+  it('revokes the server-side session and clears local state', async () => {
     const loginResponse = {
       user: { id: '1', name: 'Ana', email: 'ana@test.com', cpf: '123', createdAt: '2024-01-01' },
       accessToken: 'at',
       refreshToken: 'rt',
     };
     mockLogin.mockResolvedValue(loginResponse);
+    mockLogout.mockResolvedValue();
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -170,7 +178,10 @@ describe('signOut', () => {
       await result.current.signOut();
     });
 
-    expect(mockClearTokens).toHaveBeenCalled();
+    // For a real (non-demo) session the context MUST delegate to
+    // logoutService so the server-side refresh token is revoked.
+    // clearTokens is only called directly in the demo-mode branch.
+    expect(mockLogout).toHaveBeenCalled();
     expect(result.current.user).toBeNull();
     expect(result.current.isAuthenticated).toBe(false);
   });

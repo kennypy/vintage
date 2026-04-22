@@ -48,7 +48,12 @@ const FETCH_TIMEOUT_MS = 10000;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-// CSRF token cache — tokens are valid for 24 h on the server; refresh after 23 h
+// CSRF token cache. Server TTL is 7 days (see CsrfMiddleware:
+// CSRF_TOKEN_TTL_MS). Cache conservatively for 23h to stay well
+// inside that window even if the app stays resident across a
+// daylight-savings roll and to guarantee a rotation per calendar
+// day. Rotation also happens eagerly on a 403-CSRF response (see
+// invalidateCsrfToken below), so the worst-case wait is one retry.
 let csrfTokenCache: string | null = null;
 let csrfTokenFetchedAt = 0;
 const CSRF_CACHE_TTL_MS = 23 * 60 * 60 * 1000;
@@ -85,6 +90,44 @@ export async function getCsrfToken(): Promise<string> {
 export function invalidateCsrfToken(): void {
   csrfTokenCache = null;
   csrfTokenFetchedAt = 0;
+}
+
+/**
+ * Revoke the current refresh token on the server. The /auth/logout
+ * endpoint hashes the presented token and marks the matching
+ * RefreshToken row revoked. Critically, the REFRESH token (not the
+ * access token) must be the one presented — refresh tokens are opaque
+ * random strings tracked server-side, while access tokens are stateless
+ * JWTs that never land in the RefreshToken table. apiFetch() always
+ * attaches the access token, which would be a silent no-op here; this
+ * helper does a bare fetch with the refresh token in Authorization so
+ * the revoke actually takes effect.
+ *
+ * Best-effort: swallows network / server errors so the local signout
+ * flow always completes. Also clears the CSRF cache because server-side
+ * state has changed.
+ */
+export async function revokeRefreshTokenOnServer(): Promise<void> {
+  const refreshToken = await secureGet(REFRESH_KEY);
+  if (!refreshToken) return;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${refreshToken}`,
+      },
+      signal: controller.signal,
+    });
+  } catch {
+    /* best-effort — a stolen local copy of the refresh token is the
+       real concern, not a transient network failure */
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  invalidateCsrfToken();
 }
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {

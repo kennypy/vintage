@@ -134,6 +134,10 @@ function AppShell() {
         <Stack.Screen name="conta/verificacao-documento" options={{ title: 'Verificação por documento' }} />
         <Stack.Screen name="(auth)/forgot-password" options={{ title: 'Esqueci a senha' }} />
         <Stack.Screen name="(auth)/reset-password" options={{ title: 'Nova senha' }} />
+        <Stack.Screen
+          name="(auth)/2fa-challenge"
+          options={{ title: 'Verificação em 2 etapas', headerShown: false }}
+        />
         <Stack.Screen name="listing/edit/[id]" options={{ title: 'Editar anúncio' }} />
         <Stack.Screen name="dispute/[orderId]" options={{ title: 'Abrir disputa' }} />
         {/* Routes added in later feature batches — Expo Router already

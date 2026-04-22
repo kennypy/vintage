@@ -7,6 +7,20 @@ import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { SHIPPING_DEADLINE_DAYS, RETURN_INSPECTION_DAYS } from '@vintage/shared';
 
+/**
+ * Thrown inside the auto-cancel $transaction when the conditional
+ * status flip finds the order has moved on (seller shipped, another
+ * instance already cancelled). Rolls the whole side-effect batch back
+ * — the outer catch swallows it silently because it's a routine race,
+ * not an error. Anything else surfaces normally.
+ */
+class OrderStateRaceSignal extends Error {
+  constructor(public readonly orderId: string) {
+    super(`order state changed during auto-cancel: ${orderId}`);
+    this.name = 'OrderStateRaceSignal';
+  }
+}
+
 @Injectable()
 export class OrdersCronService {
   private readonly logger = new Logger(OrdersCronService.name);
@@ -126,11 +140,24 @@ export class OrdersCronService {
         const refundAmount = Number(order.totalBrl);
 
         await this.prisma.$transaction(async (tx) => {
-          // Cancel the order
-          await tx.order.update({
-            where: { id: order.id },
+          // Conditional cancel: only flip PAID→CANCELLED. updateMany
+          // returns the affected-row count; zero means the order left
+          // PAID between the findMany() above and this write (the
+          // seller shipped in that window, or another cron instance
+          // beat us to it because the distributed lock fell through
+          // to its single-instance fallback). In either case, the
+          // rest of the transaction — wallet reversal, refund,
+          // listing reactivation, snapshot purge — must NOT fire, or
+          // we'd double-refund or resurrect a sold listing. Throwing
+          // the sentinel rolls the transaction back to a clean no-op
+          // and the outer catch swallows it silently.
+          const res = await tx.order.updateMany({
+            where: { id: order.id, status: 'PAID', shippedAt: null },
             data: { status: 'CANCELLED' },
           });
+          if (res.count === 0) {
+            throw new OrderStateRaceSignal(order.id);
+          }
 
           // Reverse escrow hold on seller's wallet
           const sellerWallet = await tx.wallet.findUnique({
@@ -194,6 +221,15 @@ export class OrdersCronService {
 
         this.logger.log(`Auto-cancelled order ${order.id} — buyer refunded R$${refundAmount.toFixed(2)}`);
       } catch (err) {
+        if (err instanceof OrderStateRaceSignal) {
+          // Expected race — seller shipped or another instance
+          // already cancelled between findMany and the conditional
+          // update. Log at debug so a noisy DB doesn't spam ops.
+          this.logger.debug(
+            `auto-cancel skipped — order ${err.orderId} state changed under us`,
+          );
+          continue;
+        }
         this.logger.error(
           `Failed to auto-cancel order ${order.id}: ${String(err).slice(0, 200)}`,
         );
