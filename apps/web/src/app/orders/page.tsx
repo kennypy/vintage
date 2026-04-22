@@ -44,9 +44,12 @@ export default function OrdersPage() {
     }
 
     const endpoint = tab === 'compras' ? '/orders?role=buyer' : '/orders?role=seller';
-    apiGet<Order[] | { data: Order[] }>(endpoint)
+    apiGet<Order[] | { data?: Order[]; items?: Order[] }>(endpoint)
       .then((res) => {
-        setOrders(Array.isArray(res) ? res : (res.data ?? []));
+        // API returns { items, total, page, pageSize, hasMore } for the
+        // paginated list. `data` kept as a fallback for any legacy shape.
+        const list = Array.isArray(res) ? res : (res.items ?? res.data ?? []);
+        setOrders(list);
       })
       .catch(() => {
         setOrders([]);
