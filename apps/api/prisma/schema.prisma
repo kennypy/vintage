@@ -707,6 +707,12 @@ model SupportTicketMessage {
   // Attachment URLs. Agent attachments are hosted on the CRM side; we
   // just store the URLs string-wise. User attachments use our S3.
   attachmentUrls     String[] @default([])
+  // Idempotency key supplied by the CRM partner endpoints (usually the
+  // outbound job UUID). Makes retry-after-timeout safe — a second POST
+  // with the same key returns the existing row instead of creating a
+  // duplicate visible to the user. Nullable because user-authored
+  // messages from the in-app client don't need it.
+  idempotencyKey     String?  @unique
   createdAt          DateTime @default(now())
 
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
