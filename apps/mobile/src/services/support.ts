@@ -5,7 +5,9 @@ export interface TicketMessage {
   ticketId: string;
   senderId: string;
   senderRole: 'user' | 'agent';
+  senderDisplayName?: string | null;
   body: string;
+  attachmentUrls?: string[];
   createdAt: string;
 }
 
