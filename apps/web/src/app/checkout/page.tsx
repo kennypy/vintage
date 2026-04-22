@@ -147,13 +147,18 @@ function CheckoutPage() {
       await apiPost('/orders', {
         listingId,
         addressId: selectedAddress.id,
-        paymentMethod,
+        // API's CreateOrderDto uses the uppercase Prisma enum (PIX /
+        // CREDIT_CARD / BOLETO); class-validator rejects lowercase.
+        paymentMethod: paymentMethod.toUpperCase() as 'PIX' | 'CREDIT_CARD' | 'BOLETO',
         installments: paymentMethod === 'credit_card' ? installments : undefined,
         couponCode: couponResult?.code,
       });
       router.push('/orders');
-    } catch {
-      alert('Erro ao processar pagamento. Tente novamente.');
+    } catch (err) {
+      const msg = err instanceof Error && err.message
+        ? err.message
+        : 'Erro ao processar pagamento. Tente novamente.';
+      alert(msg);
     } finally {
       setPaying(false);
     }
