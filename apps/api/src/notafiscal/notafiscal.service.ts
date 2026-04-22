@@ -8,6 +8,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { CronLockService } from '../common/services/cron-lock.service';
 import { NFeClient } from './nfe.client';
 import { Decimal } from '@prisma/client/runtime/client';
 
@@ -69,6 +70,7 @@ export class NotaFiscalService {
     private prisma: PrismaService,
     private readonly nfeClient: NFeClient,
     private readonly cpfVault: CpfVaultService,
+    private readonly cronLock: CronLockService,
   ) {}
 
   async generateNFe(orderId: string, userId: string): Promise<NFeData> {
@@ -287,6 +289,14 @@ export class NotaFiscalService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async pollPendingNFeStatus(): Promise<void> {
+    // EVERY_MINUTE on a multi-instance deployment means N copies
+    // hitting the same `take: 25` window every 60 s — 60 × N wasted
+    // NF-e lookups/hour straight into the provider's rate-limit
+    // bucket, and N concurrent update() calls racing on the same
+    // rows. The lock TTL (5 min default) is longer than a single
+    // sweep so the laggard instances skip cleanly. Same pattern as
+    // orders-cron / retention-cron / listings-cron.
+    if (!(await this.cronLock.acquire('notafiscal:pollPending'))) return;
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const pending = await this.prisma.notaFiscal.findMany({
       where: {

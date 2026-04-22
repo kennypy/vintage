@@ -29,14 +29,42 @@ export async function getConversations(page?: number): Promise<ConversationsResp
   return apiFetch<ConversationsResponse>(`/messages/conversations${query}`);
 }
 
+/**
+ * Open (or reuse) a 1:1 conversation with another user. The API
+ * contract is `{ otherUserId }` — it keys conversations by the pair
+ * of participant ids, not by listing, and the server dedupes on
+ * Conversation.@@unique([participant1Id, participant2Id]). Mobile
+ * used to post `{ listingId, message }`, which the controller body
+ * type has never accepted: `body.otherUserId` was `undefined` every
+ * time, the Prisma findUnique-by-participant-pair resolved to the
+ * other side of a `{ undefined, user.id }` lookup, and the call
+ * either 404'd or crashed deep inside MessagesService.
+ *
+ * `firstMessage` is an optional convenience — if supplied, we post
+ * it onto the newly-created (or looked-up) conversation via the
+ * normal sendMessage endpoint so listing detail's "Fazer oferta" /
+ * "Enviar mensagem" CTAs remain a single service call from the UI
+ * perspective. Failures on the follow-up send are swallowed: the
+ * conversation row already exists, and the user can retry from the
+ * thread screen without losing the shell.
+ */
 export async function startConversation(
-  listingId: string,
-  message: string,
+  otherUserId: string,
+  firstMessage?: string,
 ): Promise<Conversation> {
-  return apiFetch<Conversation>('/messages/conversations', {
+  const conv = await apiFetch<Conversation>('/messages/conversations', {
     method: 'POST',
-    body: JSON.stringify({ listingId, message }),
+    body: JSON.stringify({ otherUserId }),
   });
+  if (firstMessage && firstMessage.trim().length > 0) {
+    try {
+      await sendMessage(conv.id, firstMessage);
+    } catch {
+      /* The conversation is already created; surface the thread and
+       * let the user retry the send from the conversation screen. */
+    }
+  }
+  return conv;
 }
 
 export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'countered';

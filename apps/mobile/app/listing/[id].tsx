@@ -138,7 +138,10 @@ export default function ListingDetailScreen() {
       let conv;
       const offerBody = `💰 Oferta: R$ ${formatBrl(amount)}\n\nOlá! Gostaria de comprar "${listing.title}" por R$ ${formatBrl(amount)}.`;
       try {
-        conv = await startConversation(listing.id, offerBody);
+        // Conversation is keyed on the OTHER participant's user id,
+        // not the listing id. See startConversation() in messages.ts
+        // for the contract + the bug this fixed.
+        conv = await startConversation(listing.seller.id, offerBody);
       } catch {
         conv = startDemoConversation(listing.id, listing.title, listing.seller.id, listing.seller.name, offerBody);
       }
@@ -157,7 +160,7 @@ export default function ListingDetailScreen() {
     if (!listing) return;
     const firstMsg = `Olá! Tenho interesse no "${listing.title}".`;
     try {
-      const conv = await startConversation(listing.id, firstMsg);
+      const conv = await startConversation(listing.seller.id, firstMsg);
       router.push(`/conversation/${conv.id}?participantName=${encodeURIComponent(listing.seller.name)}`);
     } catch {
       const conv = startDemoConversation(listing.id, listing.title, listing.seller.id, listing.seller.name, firstMsg);

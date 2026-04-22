@@ -4,6 +4,7 @@ import { NotaFiscalService } from './notafiscal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NFeClient } from './nfe.client';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { CronLockService } from '../common/services/cron-lock.service';
 
 const mockPrisma = {
   order: {
@@ -35,6 +36,16 @@ describe('NotaFiscalService', () => {
         NotaFiscalService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NFeClient, useValue: mockNFeClient },
+        {
+          // pollPendingNFeStatus now holds a distributed lock so
+          // EVERY_MINUTE runs don't duplicate across API instances.
+          // Tests don't exercise the lock, but DI needs the provider.
+          provide: CronLockService,
+          useValue: {
+            acquire: jest.fn().mockResolvedValue(true),
+            release: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 

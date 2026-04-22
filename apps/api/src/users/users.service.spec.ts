@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { CronLockService } from '../common/services/cron-lock.service';
 
 jest.mock('bcrypt');
 
@@ -85,6 +86,17 @@ describe('UsersService', () => {
         {
           provide: NotificationsService,
           useValue: { createNotification: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          // UsersService now guards hardDeleteExpiredAccounts with a
+          // distributed lock (prevents multi-instance 03:00-UTC races).
+          // The test bootstrap never runs the cron, but DI still needs
+          // the provider to instantiate UsersService.
+          provide: CronLockService,
+          useValue: {
+            acquire: jest.fn().mockResolvedValue(true),
+            release: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();
