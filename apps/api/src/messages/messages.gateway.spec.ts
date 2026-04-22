@@ -312,6 +312,7 @@ describe('MessagesGateway', () => {
         'conv-1',
         'user-1',
         'Hello!',
+        undefined,
       );
       expect(gateway.server.to).toHaveBeenCalledWith('conversation:conv-1');
       expect(result).toEqual(mockMessage);
@@ -358,6 +359,7 @@ describe('MessagesGateway', () => {
         'conv-1',
         'user-1',
         '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;Hello &amp; goodbye',
+        undefined,
       );
     });
 

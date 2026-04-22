@@ -110,9 +110,26 @@ export class MessagesService {
     return { items: items.reverse(), total, page, pageSize, hasMore: skip + items.length < total };
   }
 
-  async sendMessage(conversationId: string, senderId: string, body: string) {
+  async sendMessage(
+    conversationId: string,
+    senderId: string,
+    body: string,
+    imageUrl?: string,
+  ) {
     if (containsProhibitedContent(body).matched) {
       throw new BadRequestException('Sua mensagem contém termos não permitidos na plataforma.');
+    }
+
+    // Image attachments must come from our S3 upload pipeline. Rejecting
+    // arbitrary URLs here is a cheap SSRF / phishing-link-in-chat defence
+    // — the UI is expected to upload first, then send the resulting URL.
+    if (imageUrl !== undefined) {
+      if (typeof imageUrl !== 'string' || imageUrl.length > 1024) {
+        throw new BadRequestException('URL de imagem inválida');
+      }
+      if (!/^https:\/\//i.test(imageUrl)) {
+        throw new BadRequestException('Imagem deve ser carregada pelo app antes de enviar');
+      }
     }
 
     const conversation = await this.prisma.conversation.findUnique({
@@ -137,7 +154,7 @@ export class MessagesService {
 
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
-        data: { conversationId, senderId, body },
+        data: { conversationId, senderId, body, imageUrl },
         include: { sender: { select: { id: true, name: true, avatarUrl: true } } },
       }),
       this.prisma.conversation.update({

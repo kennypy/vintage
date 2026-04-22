@@ -15,6 +15,7 @@ import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { ReferralsService } from '../referrals/referrals.service';
+import { SmsService } from '../sms/sms.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ShipOrderDto } from './dto/ship-order.dto';
 import {
@@ -35,7 +36,33 @@ export class OrdersService {
     private analytics: AnalyticsService,
     private configService: ConfigService,
     private referrals: ReferralsService,
+    private sms: SmsService,
   ) {}
+
+  /**
+   * Best-effort transactional WhatsApp (falls back to SMS) for a
+   * shipping/order update. Never throws — the bell notification is the
+   * source of truth; this channel is additive. Skips when the buyer
+   * has no verified phone on file.
+   */
+  private async sendShippingAlert(userId: string, body: string): Promise<void> {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { phone: true, pushEnabled: true },
+      });
+      if (!user?.phone) return;
+      // Normalise to E.164 — User.phone is stored as digits after
+      // batch 2 (55...) so we prepend the + ourselves.
+      const digits = user.phone.replace(/\D/g, '');
+      if (digits.length < 10) return;
+      const to = digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
+      if (!SmsService.isValidE164(to)) return;
+      await this.sms.sendWhatsapp(to, body);
+    } catch {
+      // never let transport failure break the order flow
+    }
+  }
 
   private getEscrowHoldDays(): number {
     const raw = this.configService.get<string | number>('ESCROW_HOLD_DAYS');
@@ -508,6 +535,14 @@ export class OrdersService {
       )
       .catch(() => {});
 
+    // WhatsApp-first shipping alert. Fire-and-forget — the bell
+    // notification above is the source of truth; WhatsApp is an
+    // additional channel BR users expect for logistics updates.
+    this.sendShippingAlert(
+      updated.buyerId,
+      `Vintage.br: seu pedido "${(updated as any).listing?.title ?? 'item'}" foi enviado. Código de rastreio: ${dto.trackingCode}`,
+    ).catch(() => {});
+
     return updated;
   }
 
@@ -581,6 +616,12 @@ export class OrdersService {
         'orders',
       )
       .catch(() => {});
+
+    // WhatsApp delivery alert.
+    this.sendShippingAlert(
+      updated.buyerId,
+      `Vintage.br: seu pedido "${updated.listing.title}" foi entregue! Confirme o recebimento no app.`,
+    ).catch(() => {});
 
     this.analytics.capture(updated.buyerId, AnalyticsEvents.ORDER_DELIVERED, {
       orderId: updated.id,
