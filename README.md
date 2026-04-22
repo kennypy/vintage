@@ -97,30 +97,34 @@ Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch m
 
 ### Setup
 
+Apenas dois comandos. O primeiro faz tudo (env files, docker, npm ci,
+build do shared, prisma generate, migrate, seed) e é seguro re-rodar.
+
 ```bash
-# 1. Instalar dependências
-npm install
-
-# 2. Subir banco de dados, Redis e Meilisearch
-docker compose up -d
-
-# 3. Gerar Prisma client
-cd apps/api && npx prisma generate
-
-# 4. Rodar migrations
-npx prisma migrate dev
-
-# 5. Popular banco com categorias e marcas
-npx ts-node prisma/seed.ts
-
-# 6. Voltar pra raiz e rodar tudo
-cd ../..
-npm run dev
+npm run setup        # configura tudo — leva ~3-5 min na primeira vez
+npm run dev          # sobe API + web + mobile em paralelo
 ```
 
-> **Windows**: se `cd apps/api && ...` falhar no PowerShell antigo, rode
-> cada comando separadamente. `&&` funciona em PowerShell 7+ e cmd.exe
-> por padrão. Nenhum passo depende de bash.
+Flags úteis:
+
+```bash
+npm run setup -- --reset    # apaga o banco e re-popula do zero
+npm run setup -- --fresh    # apaga node_modules e reinstala antes de tudo
+```
+
+O `npm run setup`:
+- Cria `apps/api/.env`, `apps/web/.env.local`, `apps/mobile/.env` a partir
+  dos `.env.example` (preserva valores existentes)
+- Gera secrets de dev válidos (CPF keys de 64-hex, JWT_SECRET, CSRF_SECRET,
+  REDIS_PASSWORD casando com o docker-compose, MEILI_MASTER_KEY)
+- Detecta seu IP de LAN e configura `EXPO_PUBLIC_API_URL` no mobile
+  automaticamente (necessário pra testar em celular físico via Expo Go)
+- Sobe Docker (postgres, redis, meilisearch) e espera ficarem `healthy`
+- Roda `npm ci`, `turbo build @vintage/shared`, `prisma generate`,
+  `prisma migrate deploy`, e seeda o banco (idempotente — pula se já
+  estiver populado)
+
+Funciona em PowerShell, cmd.exe, git-bash, WSL, macOS e Linux.
 
 ### Acessos locais
 
