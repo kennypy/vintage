@@ -60,7 +60,14 @@ export class CafWebhookController {
     if (!raw) {
       throw new BadRequestException('Webhook body not captured.');
     }
-    const payloadStr = raw instanceof Buffer ? raw.toString('utf-8') : raw;
+    // Nest's RawBodyRequest types rawBody as Buffer. verifyWebhookSignature
+    // wants a string, so decode the exact bytes Caf signed as UTF-8 — any
+    // other coercion (re-stringifying the parsed body, JSON.stringify)
+    // would let a field-order change break verification or accept a forged
+    // payload whose serialised form happened to match.
+    const payloadStr: string = Buffer.isBuffer(raw)
+      ? raw.toString('utf-8')
+      : String(raw);
     if (!this.caf.verifyWebhookSignature(payloadStr, signature)) {
       throw new UnauthorizedException('Assinatura do webhook inválida.');
     }
