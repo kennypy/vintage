@@ -30,7 +30,12 @@ export async function markRead(id: string): Promise<void> {
 }
 
 export async function markAllRead(): Promise<void> {
+  // NotificationsController registers this route as @Post('read-all')
+  // (apps/api/src/notifications/notifications.controller.ts) to stay
+  // verb-consistent with the web client's apiPost call. Using PATCH
+  // here previously returned 405 Method Not Allowed on every mobile
+  // "Marcar todas como lidas" tap.
   await apiFetch<void>('/notifications/read-all', {
-    method: 'PATCH',
+    method: 'POST',
   });
 }

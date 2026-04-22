@@ -32,16 +32,50 @@ describe('getConversations', () => {
 });
 
 describe('startConversation', () => {
-  it('calls POST /messages/conversations with listingId and message', async () => {
-    const conv = { id: 'c1', listingId: 'l1' };
+  it('calls POST /messages/conversations with otherUserId only', async () => {
+    const conv = { id: 'c1' };
     mockApiFetch.mockResolvedValue(conv);
 
-    const result = await startConversation('l1', 'Olá, ainda disponível?');
+    const result = await startConversation('seller-1');
 
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
     expect(mockApiFetch).toHaveBeenCalledWith('/messages/conversations', {
       method: 'POST',
-      body: JSON.stringify({ listingId: 'l1', message: 'Olá, ainda disponível?' }),
+      body: JSON.stringify({ otherUserId: 'seller-1' }),
     });
+    expect(result).toEqual(conv);
+  });
+
+  it('fires a follow-up sendMessage when an initial message is supplied', async () => {
+    const conv = { id: 'c1' };
+    // First call: conversation creation. Second: sendMessage on the new conv.
+    mockApiFetch.mockResolvedValueOnce(conv);
+    mockApiFetch.mockResolvedValueOnce({
+      id: 'm1', conversationId: 'c1', senderId: 'u1', body: 'Olá',
+    });
+
+    await startConversation('seller-1', 'Olá, ainda disponível?');
+
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/messages/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ otherUserId: 'seller-1' }),
+    });
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2,
+      '/messages/conversations/c1/messages',
+      {
+        method: 'POST',
+        body: JSON.stringify({ body: 'Olá, ainda disponível?' }),
+      },
+    );
+  });
+
+  it('returns the conversation even when the follow-up message send fails', async () => {
+    const conv = { id: 'c1' };
+    mockApiFetch.mockResolvedValueOnce(conv);
+    mockApiFetch.mockRejectedValueOnce(new Error('network'));
+
+    const result = await startConversation('seller-1', 'Primeiro contato');
+
     expect(result).toEqual(conv);
   });
 });

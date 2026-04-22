@@ -15,6 +15,7 @@ import { ListingsService } from '../listings/listings.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
+import { CronLockService } from '../common/services/cron-lock.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { DeleteAccountDto } from './dto/delete-account.dto';
@@ -42,6 +43,7 @@ export class UsersService {
     private auditLog: AuditLogService,
     private cpfVault: CpfVaultService,
     private notifications: NotificationsService,
+    private cronLock: CronLockService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -777,6 +779,15 @@ export class UsersService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async hardDeleteExpiredAccounts() {
+    // Distributed lock — without it, every running API instance will
+    // fire this sweep at 03:00 UTC simultaneously. Each pass is
+    // already defensive (idempotent updateMany on deletionAuditLog
+    // keyed by hardDeletedAt: null) but the parallel $transaction
+    // calls still compete for the same cascading deletes and produce
+    // noisy Prisma P2025 / constraint-race errors in the logs. Other
+    // cron jobs in this repo all follow the same acquire-early-
+    // return pattern (see apps/api/src/orders/orders-cron.service.ts).
+    if (!(await this.cronLock.acquire('users:hardDeleteExpired'))) return;
     const cutoff = new Date(Date.now() - this.HARD_DELETE_GRACE_MS);
     const expired = await this.prisma.user.findMany({
       where: {

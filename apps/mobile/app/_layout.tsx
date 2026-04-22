@@ -136,6 +136,39 @@ function AppShell() {
         <Stack.Screen name="(auth)/reset-password" options={{ title: 'Nova senha' }} />
         <Stack.Screen name="listing/edit/[id]" options={{ title: 'Editar anúncio' }} />
         <Stack.Screen name="dispute/[orderId]" options={{ title: 'Abrir disputa' }} />
+        {/* Routes added in later feature batches — Expo Router already
+            registers them from the file system, but declaring them here
+            keeps header titles (and the presentation mode for modals)
+            in pt-BR instead of the default humanised file path. */}
+        <Stack.Screen name="returns/index" options={{ title: 'Devoluções' }} />
+        <Stack.Screen name="returns/[id]" options={{ title: 'Detalhes da devolução' }} />
+        <Stack.Screen name="returns/new" options={{ title: 'Nova devolução', presentation: 'modal' }} />
+        <Stack.Screen name="offers/[id]" options={{ title: 'Detalhes da oferta' }} />
+        <Stack.Screen name="bundles/index" options={{ title: 'Pacotes' }} />
+        <Stack.Screen name="bundles/[id]" options={{ title: 'Detalhes do pacote' }} />
+        <Stack.Screen name="saved-searches/index" options={{ title: 'Buscas salvas' }} />
+        <Stack.Screen name="favorites/collections" options={{ title: 'Coleções' }} />
+        <Stack.Screen name="price-alerts/index" options={{ title: 'Alertas de preço' }} />
+        <Stack.Screen name="orders/retry-payment" options={{ title: 'Tentar pagamento', presentation: 'modal' }} />
+        <Stack.Screen name="seller/dashboard" options={{ title: 'Painel do vendedor' }} />
+        <Stack.Screen name="report/[targetType]/[targetId]" options={{ title: 'Denunciar', presentation: 'modal' }} />
+        <Stack.Screen name="support/[id]" options={{ title: 'Ticket de suporte' }} />
+        <Stack.Screen name="users/[id]/followers" options={{ title: 'Seguidores' }} />
+        <Stack.Screen name="users/[id]/following" options={{ title: 'Seguindo' }} />
+        <Stack.Screen name="welcome/onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="welcome/verify" options={{ title: 'Verificar conta' }} />
+        <Stack.Screen name="legal/termos" options={{ title: 'Termos de Uso' }} />
+        <Stack.Screen name="legal/privacidade" options={{ title: 'Política de Privacidade' }} />
+        <Stack.Screen name="legal/diretrizes-comunidade" options={{ title: 'Diretrizes da comunidade' }} />
+        <Stack.Screen name="legal/sobre" options={{ title: 'Sobre' }} />
+        <Stack.Screen name="legal/press" options={{ title: 'Imprensa' }} />
+        <Stack.Screen name="conta/alterar-email" options={{ title: 'Alterar email' }} />
+        <Stack.Screen name="conta/notificacoes" options={{ title: 'Notificações' }} />
+        <Stack.Screen name="conta/payout-methods" options={{ title: 'Métodos de recebimento' }} />
+        <Stack.Screen name="conta/cpf" options={{ title: 'Verificar CPF' }} />
+        <Stack.Screen name="conta/blocked-users" options={{ title: 'Usuários bloqueados' }} />
+        <Stack.Screen name="conta/indicacoes" options={{ title: 'Indique e ganhe' }} />
+        <Stack.Screen name="conta/suporte" options={{ title: 'Suporte' }} />
       </Stack>
     </NavThemeProvider>
   );

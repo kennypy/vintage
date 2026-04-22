@@ -129,7 +129,18 @@ import { TosVersionInterceptor } from './auth/tos-version.interceptor';
       provide: APP_INTERCEPTOR,
       useClass: TosVersionInterceptor,
     },
-    CsrfMiddleware,
+    // CsrfMiddleware used to be re-declared here, but AuthModule
+    // already provides and exports it (apps/api/src/auth/auth.module.ts).
+    // Listing it again in AppModule.providers created a SECOND
+    // instance; `consumer.apply(CsrfMiddleware)` below then resolved
+    // through AppModule's local provider while AuthController's
+    // injection resolved through AuthModule's — two singletons, each
+    // with its own `crypto.randomBytes(32)` dev-fallback secret when
+    // CSRF_SECRET is unset. Tokens minted by the getCsrfToken endpoint
+    // therefore never validated against the middleware (every
+    // mutating request 403'd with "Token CSRF inválido") in dev.
+    // Relying on the imported AuthModule export gives a single
+    // singleton shared across both sites.
   ],
 })
 export class AppModule implements NestModule {
@@ -160,6 +171,22 @@ export class AppModule implements NestModule {
         // applicable — the tempToken is the anti-forgery factor.
         { path: 'auth/2fa/sms/login-resend', method: RequestMethod.POST },
         { path: 'auth/apple/callback', method: RequestMethod.POST },
+        // Token rotation + logout are pre-/post-session credential
+        // presentations, conceptually identical to /auth/login and
+        // /auth/register: the caller hands over a credential (refresh
+        // token or session cookie) and gets back fresh tokens / a
+        // cleared session. CSRF cannot protect anything here — the
+        // refresh cookie is SameSite=Strict and cross-origin callers
+        // can't read the new Set-Cookie response, so a forged request
+        // would just churn the victim's own session with no gain to
+        // the attacker. Crucially, mobile's attemptRefresh in
+        // apps/mobile/src/services/api.ts is a bare fetch using the
+        // refresh token as Authorization: Bearer and does NOT carry
+        // X-CSRF-Token; leaving these routes inside the CSRF net made
+        // every mobile refresh 403 and logged every mobile user out
+        // the moment their 15-minute access token expired.
+        { path: 'auth/refresh', method: RequestMethod.POST },
+        { path: 'auth/logout', method: RequestMethod.POST },
         // Partner API endpoints use X-Partner-Key (authenticated
         // separately by AdPartnerAuthGuard). CSRF makes no sense for
         // them — they're server-to-server.
