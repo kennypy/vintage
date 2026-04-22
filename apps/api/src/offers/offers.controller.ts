@@ -82,4 +82,17 @@ export class OffersController {
   thread(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.offersService.findThread(id, user.id);
   }
+
+  @Get('for-listing/:listingId')
+  @ApiOperation({
+    summary: 'Ver a oferta ativa entre o usuário atual e esse anúncio',
+    description:
+      'Retorna a oferta PENDING mais recente em que o usuário é parte (comprador ou vendedor). Usado pelo chat para exibir o banner aceitar / recusar / contrapropor sem baixar toda a lista de ofertas.',
+  })
+  findActiveForListing(
+    @CurrentUser() user: AuthUser,
+    @Param('listingId') listingId: string,
+  ) {
+    return this.offersService.findActiveForListing(user.id, listingId);
+  }
 }

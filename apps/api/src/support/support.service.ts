@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { assertSafeUrl } from '../common/services/url-validator';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 export interface CreateTicketInput {
   subject: string;
@@ -137,9 +138,9 @@ export class SupportService {
     });
 
     // Fire-and-forget outbound mirror to the ops CRM.
-    this.emitCrmEvent('ticket.opened', ticket.id).catch(() => {
-      /* emitCrmEvent handles its own logging + AuditLog trail */
-    });
+    this.emitCrmEvent('ticket.opened', ticket.id).catch(
+      warnAndSwallow(this.logger, 'support.crm.ticket-opened'),
+    );
 
     return ticket;
   }
@@ -171,10 +172,12 @@ export class SupportService {
         where: { id: ticketId },
         data: { status: 'OPEN', resolvedAt: null },
       });
-      this.emitCrmEvent('ticket.user_reopened', ticketId, { messageId: message.id }).catch(() => {});
+      this.emitCrmEvent('ticket.user_reopened', ticketId, { messageId: message.id }).catch(
+        warnAndSwallow(this.logger, 'support.crm.user-reopened'),
+      );
     } else if (!isAgent) {
       this.emitCrmEvent('ticket.user_replied', ticketId, { messageId: message.id, body }).catch(
-        () => {},
+        warnAndSwallow(this.logger, 'support.crm.user-replied'),
       );
     } else if (isAgent && ticket.status === 'OPEN') {
       await this.prisma.supportTicket.update({
@@ -190,7 +193,7 @@ export class SupportService {
           { ticketId },
           'news',
         )
-        .catch(() => {});
+        .catch(warnAndSwallow(this.logger, 'support.notify'));
     }
 
     return message;
@@ -282,7 +285,7 @@ export class SupportService {
         { ticketId },
         'news',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'support.notify'));
 
     return message;
   }

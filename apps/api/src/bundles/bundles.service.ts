@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -12,9 +13,12 @@ import {
   BUYER_PROTECTION_FIXED_BRL,
   BUYER_PROTECTION_RATE,
 } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class BundlesService {
+  private readonly logger = new Logger(BundlesService.name);
+
   constructor(
     private prisma: PrismaService,
     private listings: ListingsService,
@@ -297,7 +301,7 @@ export class BundlesService {
 
     // All bundled listings transitioned ACTIVE → SOLD; drop them from search.
     for (const item of bundle.items) {
-      this.listings.syncSearchIndex(item.listingId).catch(() => {});
+      this.listings.syncSearchIndex(item.listingId).catch(warnAndSwallow(this.logger, 'bundles.search-sync'));
     }
 
     return {

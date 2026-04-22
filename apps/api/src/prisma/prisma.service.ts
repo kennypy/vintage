@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -6,6 +6,8 @@ import { Pool } from 'pg';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PrismaService.name);
+
   constructor(config: ConfigService) {
     const databaseUrl = config.get<string>('DATABASE_URL', '');
     const nodeEnv = config.get<string>('NODE_ENV', 'development');
@@ -51,9 +53,13 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     pool.on('connect', (client) => {
       client
         .query(`SET statement_timeout = ${statementTimeoutMs}`)
-        .catch(() => {
-          // Never fail a connection handshake on this — worst case is no
-          // timeout, which matches the prior behaviour.
+        .catch((err) => {
+          // Never fail a connection handshake on this — worst case is
+          // no timeout, which matches the prior behaviour — but log so
+          // ops can tell statement-timeout isn't actually in effect.
+          this.logger.warn(
+            `swallowed=prisma.statement-timeout ${String(err).slice(0, 200)}`,
+          );
         });
     });
 

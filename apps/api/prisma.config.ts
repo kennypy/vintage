@@ -28,14 +28,27 @@ export default defineConfig({
     async adapter() {
       const { PrismaPg } = await import('@prisma/adapter-pg');
 
+      // If Postgres sits behind a transaction-mode pooler (pgbouncer,
+      // Supabase's 6543 port, RDS Proxy in transaction mode), running
+      // `prisma migrate deploy` against the pool hangs on advisory
+      // locks because migrations need a direct connection. DIRECT_URL
+      // is the standard Prisma escape hatch for that — if it's set,
+      // prefer it for the CLI adapter; otherwise fall back to
+      // DATABASE_URL, which is correct for direct-connection setups.
+      // Ops never has to know which topology they're on: set both if
+      // pooled, set only DATABASE_URL if direct, migrations work in
+      // either case.
+      const directUrl = process.env.DIRECT_URL;
       const databaseUrl = process.env.DATABASE_URL;
-      if (!databaseUrl) {
+      const migrateUrl = directUrl || databaseUrl;
+
+      if (!migrateUrl) {
         throw new Error(
-          'DATABASE_URL environment variable is required for Prisma CLI commands',
+          'DATABASE_URL (or DIRECT_URL if Postgres is behind a pooler) environment variable is required for Prisma CLI commands',
         );
       }
 
-      return new PrismaPg(databaseUrl);
+      return new PrismaPg(migrateUrl);
     },
   },
 });

@@ -3,6 +3,7 @@ import {
   Logger,
   UnauthorizedException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { MercadoPagoClient } from './mercadopago.client';
@@ -261,10 +263,16 @@ export class PaymentsService {
         `Order ${orderId} hit MAX_PAYMENT_ATTEMPTS (${MAX_PAYMENT_ATTEMPTS}); auto-cancelling.`,
       );
       await this.prisma.$transaction(async (tx) => {
-        await tx.order.update({
-          where: { id: orderId },
+        // Only claim the listing-reactivation if the order actually
+        // moves from PENDING → CANCELLED. If a concurrent retry or
+        // webhook already PAID the order between our attempt-count
+        // check and this tx, we must NOT reactivate the listing
+        // (that would resurrect a sold item).
+        const claim = await tx.order.updateMany({
+          where: { id: orderId, status: 'PENDING' },
           data: { status: 'CANCELLED', paymentId: null },
         });
+        if (claim.count === 0) return;
         await tx.listing.update({
           where: { id: order.listingId },
           data: { status: 'ACTIVE' },
@@ -277,24 +285,33 @@ export class PaymentsService {
     }
 
     // Mark the most-recent Payment row as FAILED so webhook + ledger
-    // state stays consistent. Idempotent — if it's already FAILED we
-    // leave it alone. If it was actually SUCCEEDED the order status
-    // check above would have rejected us so that branch is unreachable.
+    // state stays consistent. Idempotent — updateMany gated on
+    // status='PENDING' means a concurrent retry (or webhook landing
+    // mid-retry) that already moved this row to FAILED/SUCCEEDED
+    // returns count=0 and we leave it alone. Plain update() raced
+    // the webhook and used to overwrite SUCCEEDED with FAILED.
     const lastAttempt = order.payments[0];
     if (lastAttempt && lastAttempt.status === 'PENDING') {
-      await this.prisma.payment.update({
-        where: { id: lastAttempt.id },
+      await this.prisma.payment.updateMany({
+        where: { id: lastAttempt.id, status: 'PENDING' },
         data: { status: 'FAILED', failureReason: 'Buyer retried payment' },
       });
     }
 
-    // Clear the active paymentId so getAndValidateOrder in the delegate
-    // create call doesn't reject with "já existe um pagamento em
-    // andamento".
-    await this.prisma.order.update({
-      where: { id: orderId },
+    // Atomic paymentId claim: two concurrent retryPayment calls for
+    // the same order used to both clear paymentId (both pass the
+    // outer `order.paymentId === prevPaymentId` read) and both
+    // invoke the MP create helper → duplicate MP charge. updateMany
+    // gated on the exact paymentId we saw rejects the loser.
+    const claim = await this.prisma.order.updateMany({
+      where: { id: orderId, paymentId: order.paymentId ?? null },
       data: { paymentId: null },
     });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Outro retry de pagamento já está em andamento para este pedido.',
+      );
+    }
 
     // Delegate to the right create helper based on requested method.
     if (dto.method === RetryPaymentMethod.PIX) {
@@ -548,7 +565,7 @@ export class PaymentsService {
                 reason,
                 { orderId: order.id, paymentId },
               )
-              .catch(() => {});
+              .catch(warnAndSwallow(this.logger, 'payments.admin-flag-notify'));
           }
         } catch {
           // never let admin notification failure affect webhook response

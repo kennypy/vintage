@@ -6,6 +6,7 @@ import { OrdersService } from './orders.service';
 import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { SHIPPING_DEADLINE_DAYS, RETURN_INSPECTION_DAYS } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 /**
  * Thrown inside the auto-cancel $transaction when the conditional
@@ -217,7 +218,9 @@ export class OrdersCronService {
         });
 
         // Listing is ACTIVE again — re-add it to search.
-        this.listings.syncSearchIndex(order.listingId).catch(() => {});
+        this.listings.syncSearchIndex(order.listingId).catch(
+          warnAndSwallow(this.logger, 'orders-cron.search-sync'),
+        );
 
         this.logger.log(`Auto-cancelled order ${order.id} — buyer refunded R$${refundAmount.toFixed(2)}`);
       } catch (err) {

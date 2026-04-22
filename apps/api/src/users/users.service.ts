@@ -12,6 +12,7 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { ListingsService } from '../listings/listings.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
@@ -407,9 +408,7 @@ export class UsersService {
           { followerId },
           'followers',
         )
-        .catch(() => {
-          /* never let notification failure break a follow */
-        });
+        .catch(warnAndSwallow(this.logger, 'users.follow.notify'));
     }
 
     return { following: true };
@@ -629,7 +628,7 @@ export class UsersService {
       data: { status: toStatus },
     });
     for (const { id } of affected) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'users.search-sync'));
     }
 
     return user;
@@ -811,7 +810,7 @@ export class UsersService {
     // Evict now-DELETED listings from search. Fire-and-forget — the
     // DB state is already correct; the index is best-effort.
     for (const { id } of listingsToDelete) {
-      this.listings.syncSearchIndex(id).catch(() => {});
+      this.listings.syncSearchIndex(id).catch(warnAndSwallow(this.logger, 'users.search-sync'));
     }
 
     this.logger.log(`Conta ${userId} soft-deleted (hard-delete em 30 dias)`);

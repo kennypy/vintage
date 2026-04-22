@@ -10,6 +10,7 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { REFERRAL_REWARD_BRL } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 /**
  * Invite-a-friend reward loop.
@@ -162,7 +163,7 @@ export class ReferralsService {
           { referralId: referral.id },
           'news',
         )
-        .catch(() => {});
+        .catch(warnAndSwallow(this.logger, 'referrals.notify'));
       this.notifications
         .createNotification(
           refereeId,
@@ -172,7 +173,7 @@ export class ReferralsService {
           { referralId: referral.id },
           'news',
         )
-        .catch(() => {});
+        .catch(warnAndSwallow(this.logger, 'referrals.notify'));
     } catch (err) {
       this.logger.warn(
         `creditIfEligible failed for referee ${refereeId}: ${String(err).slice(0, 200)}`,

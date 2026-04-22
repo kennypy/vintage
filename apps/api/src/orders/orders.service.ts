@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -24,9 +25,12 @@ import {
   DISPUTE_WINDOW_DAYS,
   ESCROW_HOLD_DAYS,
 } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private prisma: PrismaService,
     private coupons: CouponsService,
@@ -325,11 +329,11 @@ export class OrdersService {
         { orderId: order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // Listing is now SOLD — remove it from search so other shoppers
     // don't see a purchased item in results.
-    this.listings.syncSearchIndex(dto.listingId).catch(() => {});
+    this.listings.syncSearchIndex(dto.listingId).catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     this.analytics.capture(buyerId, AnalyticsEvents.ORDER_CREATED, {
       orderId: order.id,
@@ -446,10 +450,19 @@ export class OrdersService {
     // Prevents resurrecting a listing the seller has since DELETED or that
     // a concurrent flow has moved to another terminal state.
     const updated = await this.prisma.$transaction(async (tx) => {
-      const next = await tx.order.update({
-        where: { id: orderId },
+      // Cancel is only allowed for PENDING orders (checked outside
+      // the tx). Two concurrent cancels on the same order must not
+      // both reactivate the listing — claim atomically.
+      const claim = await tx.order.updateMany({
+        where: { id: orderId, status: 'PENDING' },
         data: { status: 'CANCELLED' },
       });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Este pedido já foi atualizado por outra ação.',
+        );
+      }
+      const next = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
 
       const listing = await tx.listing.findUnique({
         where: { id: order.listingId },
@@ -470,7 +483,7 @@ export class OrdersService {
 
     // Listing may have transitioned SOLD → ACTIVE inside the tx; re-add
     // it to search so buyers can find it again.
-    this.listings.syncSearchIndex(order.listingId).catch(() => {});
+    this.listings.syncSearchIndex(order.listingId).catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // Notify seller (fire-and-forget)
     this.notifications
@@ -482,7 +495,7 @@ export class OrdersService {
         { orderId: order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     return updated;
   }
@@ -504,14 +517,24 @@ export class OrdersService {
       throw new BadRequestException('Pedido precisa estar pago para ser enviado');
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
+    // Claim PAID → SHIPPED. Two concurrent markShipped requests
+    // otherwise overwrite each other's trackingCode/carrier fields.
+    const claim = await this.prisma.order.updateMany({
+      where: { id: orderId, status: 'PAID' },
       data: {
         status: 'SHIPPED',
         trackingCode: dto.trackingCode,
         carrier: dto.carrier,
         shippedAt: new Date(),
       },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Este pedido já foi atualizado por outra ação.',
+      );
+    }
+    const updated = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
       include: {
         listing: {
           include: {
@@ -533,7 +556,7 @@ export class OrdersService {
         { orderId: updated.id, trackingCode: dto.trackingCode },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // WhatsApp-first shipping alert. Fire-and-forget — the bell
     // notification above is the source of truth; WhatsApp is an
@@ -541,7 +564,7 @@ export class OrdersService {
     this.sendShippingAlert(
       updated.buyerId,
       `Vintage.br: seu pedido "${updated.listing.title}" foi enviado. Código de rastreio: ${dto.trackingCode}`,
-    ).catch(() => {});
+    ).catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     return updated;
   }
@@ -587,13 +610,26 @@ export class OrdersService {
     const disputeDeadline = new Date(now);
     disputeDeadline.setDate(disputeDeadline.getDate() + DISPUTE_WINDOW_DAYS);
 
-    const updated = await this.prisma.order.update({
-      where: { id: orderId },
+    // SHIPPED → DELIVERED race: buyer clicks "marcar como entregue"
+    // and the tracking-poller concurrently fires, or two parallel
+    // buyer requests. Unconditional update used to re-stamp
+    // deliveredAt and reset disputeDeadline on the second call. The
+    // claim silences the no-op second call instead of bumping state.
+    const claim = await this.prisma.order.updateMany({
+      where: { id: orderId, status: 'SHIPPED' },
       data: {
         status: 'DELIVERED',
         deliveredAt: now,
         disputeDeadline,
       },
+    });
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'Este pedido já foi atualizado por outra ação.',
+      );
+    }
+    const updated = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
       include: {
         listing: {
           include: {
@@ -615,13 +651,13 @@ export class OrdersService {
         { orderId: updated.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // WhatsApp delivery alert.
     this.sendShippingAlert(
       updated.buyerId,
       `Vintage.br: seu pedido "${updated.listing.title}" foi entregue! Confirme o recebimento no app.`,
-    ).catch(() => {});
+    ).catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     this.analytics.capture(updated.buyerId, AnalyticsEvents.ORDER_DELIVERED, {
       orderId: updated.id,
@@ -675,13 +711,26 @@ export class OrdersService {
     const releasesAt = new Date(now);
     releasesAt.setDate(releasesAt.getDate() + holdDays);
 
-    const result = await this.prisma.order.update({
-      where: { id: orderId },
+    // Claim-gate: buyer double-clicks confirmReceipt, or cron +
+    // admin both trigger hold entry, must NOT double-set
+    // escrowReleasesAt (which would reset the release timer) or
+    // double-fire the seller notification below. Only DELIVERED
+    // orders can transition to HELD.
+    const claim = await this.prisma.order.updateMany({
+      where: { id: orderId, status: 'DELIVERED' },
       data: {
         status: 'HELD',
         confirmedAt: now,
         escrowReleasesAt: releasesAt,
       },
+    });
+    if (claim.count === 0) {
+      throw new BadRequestException(
+        'Pedido já foi processado por outra ação.',
+      );
+    }
+    const result = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
       include: {
         listing: {
           include: {
@@ -703,7 +752,7 @@ export class OrdersService {
         { orderId: result.id, escrowReleasesAt: releasesAt.toISOString() },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // Zero-day hold: finalize immediately. Keeps ops override simple
     // (ESCROW_HOLD_DAYS=0 is equivalent to "no hold").
@@ -722,13 +771,43 @@ export class OrdersService {
    */
   async finalizeEscrow(orderId: string) {
     const result = await this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.update({
-        where: { id: orderId },
+      // MONEY-CRITICAL claim: finalizeEscrow has three callers — the
+      // releaseHeldEscrow cron, the enterHold zero-day path, and the
+      // admin force-release button. An admin clicking twice, or the
+      // cron firing while an admin fires manually, used to land on
+      // unconditional update + wallet move → seller wallet credited
+      // TWICE out of the same escrow hold. Claim-gate on status='HELD'
+      // (the only legal entry state; confirmReceipt moves DELIVERED→
+      // HELD via enterHold BEFORE calling this) so the race loser
+      // returns a stale-but-valid row and does nothing.
+      const claim = await tx.order.updateMany({
+        where: { id: orderId, status: 'HELD' },
         data: {
           status: 'COMPLETED',
           confirmedAt: new Date(),
           escrowReleasesAt: null,
         },
+      });
+      if (claim.count === 0) {
+        // Another actor already released this escrow. Return the
+        // current row so callers that want the shape can still render
+        // a sane response; they MUST NOT move money based on this
+        // return value — the wallet mutation below is skipped.
+        return tx.order.findUniqueOrThrow({
+          where: { id: orderId },
+          include: {
+            listing: {
+              include: {
+                images: { orderBy: { position: 'asc' }, take: 1 },
+              },
+            },
+            buyer: { select: { id: true, name: true } },
+            seller: { select: { id: true, name: true } },
+          },
+        });
+      }
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
         include: {
           listing: {
             include: {
@@ -784,13 +863,13 @@ export class OrdersService {
         { orderId: result.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     // Referral reward fires on the buyer's first completed order.
     // creditIfEligible is a no-op for everyone else (no Referral row,
     // or reward already credited). Fire-and-forget — a referral
     // credit failure must not roll back the escrow release.
-    this.referrals.creditIfEligible(result.buyerId).catch(() => {});
+    this.referrals.creditIfEligible(result.buyerId).catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
     return result;
   }

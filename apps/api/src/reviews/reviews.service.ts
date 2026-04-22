@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
 export class ReviewsService {
+  private readonly logger = new Logger(ReviewsService.name);
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -89,9 +92,7 @@ export class ReviewsService {
         { reviewId: review.id, orderId, rating: String(rating) },
         'reviews',
       )
-      .catch(() => {
-        /* never let notification failure break the review commit */
-      });
+      .catch(warnAndSwallow(this.logger, 'review.notify'));
 
     return review;
   }

@@ -31,6 +31,8 @@ const mockTx = {
   order: {
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    findUniqueOrThrow: jest.fn(),
   },
   wallet: {
     upsert: jest.fn(),
@@ -66,8 +68,10 @@ const mockPrisma = {
   order: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     count: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
   $transaction: jest.fn((cb: (tx: typeof mockTx) => Promise<unknown>) => cb(mockTx)),
 };
@@ -274,13 +278,15 @@ describe('OrdersService', () => {
         buyer: { id: 'buyer-1', name: 'Maria' },
         seller: { id: 'seller-1', name: 'João' },
       };
-      mockPrisma.order.update.mockResolvedValue(shippedOrder);
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.order.findUniqueOrThrow.mockResolvedValue(shippedOrder);
 
       const result = await service.markShipped('order-1', 'seller-1', shipDto);
 
       expect(result).toEqual(shippedOrder);
-      expect(mockPrisma.order.update).toHaveBeenCalledWith(
+      expect(mockPrisma.order.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: expect.objectContaining({ id: 'order-1', status: 'PAID' }),
           data: expect.objectContaining({
             status: 'SHIPPED',
             trackingCode: 'BR123456789',
@@ -340,7 +346,8 @@ describe('OrdersService', () => {
         itemPriceBrl: new Decimal('100'),
         listing: { title: 'Vestido' },
       };
-      mockPrisma.order.update.mockResolvedValue(heldOrder);
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.order.findUniqueOrThrow.mockResolvedValue(heldOrder);
 
       const result = await service.confirmReceipt('order-1', 'buyer-1');
 
@@ -348,9 +355,9 @@ describe('OrdersService', () => {
       // Funds MUST NOT leave pendingBrl until the hold window elapses.
       expect(mockTx.wallet.update).not.toHaveBeenCalled();
       expect(mockTx.walletTransaction.create).not.toHaveBeenCalled();
-      expect(mockPrisma.order.update).toHaveBeenCalledWith(
+      expect(mockPrisma.order.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'order-1' },
+          where: expect.objectContaining({ id: 'order-1', status: 'DELIVERED' }),
           data: expect.objectContaining({
             status: 'HELD',
             escrowReleasesAt: expect.any(Date),

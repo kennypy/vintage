@@ -16,6 +16,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { ApproveReturnDto, InspectReturnDto, RejectReturnDto } from './dto/approve-return.dto';
 import { RETURN_WINDOW_DAYS } from '@vintage/shared';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 /**
  * Buyer-initiated return flow. Distinct from Dispute: returns are a
@@ -108,7 +109,7 @@ export class ReturnsService {
         { returnId: created.id, orderId: dto.orderId },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return created;
   }
@@ -202,7 +203,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id, trackingCode },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -278,7 +279,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -407,7 +408,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id, refundAmount },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return this.prisma.orderReturn.findUnique({ where: { id: returnId } });
   }
@@ -480,7 +481,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
 
     return updated;
   }
@@ -516,7 +517,7 @@ export class ReturnsService {
         { returnId, orderId: ret.order.id },
         'orders',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'return.notify'));
   }
 
   /**

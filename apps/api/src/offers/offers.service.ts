@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { warnAndSwallow } from '../common/utils/fire-and-forget';
 import { CreateOfferDto } from './dto/create-offer.dto';
 import { CounterOfferDto } from './dto/counter-offer.dto';
 import {
@@ -18,10 +20,43 @@ import {
 
 @Injectable()
 export class OffersService {
+  private readonly logger = new Logger(OffersService.name);
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
   ) {}
+
+  /**
+   * Find the latest PENDING offer between `userId` and the seller of
+   * `listingId` (or where `userId` IS the seller and has a buyer's
+   * pending offer). Used by both chat surfaces to decide whether to
+   * show the accept/reject/counter banner without forcing the client
+   * to list every offer it ever made. Returns null if no chain is
+   * active or the user isn't a party.
+   */
+  async findActiveForListing(userId: string, listingId: string) {
+    const listing = await this.prisma.listing.findUnique({
+      where: { id: listingId },
+      select: { id: true, sellerId: true },
+    });
+    if (!listing) return null;
+
+    // Seller sees PENDING offers from anyone on their listing;
+    // buyer only sees their own. The `counteredById !== userId`
+    // predicate (applied on the caller side) tells the UI whether
+    // the CURRENT viewer is the next expected actor — mirrors the
+    // `/offers/[id]` thread page.
+    const where =
+      listing.sellerId === userId
+        ? { listingId, status: 'PENDING' as const }
+        : { listingId, status: 'PENDING' as const, buyerId: userId };
+
+    return this.prisma.offer.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 
   async findUserOffers(
     userId: string,
@@ -146,9 +181,7 @@ export class OffersService {
         { offerId: offer.id, listingId: listing.id, buyerId },
         'offers',
       )
-      .catch(() => {
-        /* never let notification failure break an offer create */
-      });
+      .catch(warnAndSwallow(this.logger, 'offer.create.notify'));
 
     return offer;
   }
@@ -223,9 +256,7 @@ export class OffersService {
         { offerId, listingId: offer.listingId },
         'offers',
       )
-      .catch(() => {
-        /* never let notification failure break an offer accept */
-      });
+      .catch(warnAndSwallow(this.logger, 'offer.accept.notify'));
 
     return updated;
   }
@@ -328,7 +359,7 @@ export class OffersService {
         { offerId: newOffer.id, listingId: prev.listingId, parentOfferId: prev.id },
         'offers',
       )
-      .catch(() => {});
+      .catch(warnAndSwallow(this.logger, 'offer.counter.notify'));
 
     return newOffer;
   }
@@ -435,9 +466,7 @@ export class OffersService {
         { offerId, listingId: offer.listingId },
         'offers',
       )
-      .catch(() => {
-        /* never let notification failure break an offer reject */
-      });
+      .catch(warnAndSwallow(this.logger, 'offer.reject.notify'));
 
     return updated;
   }
