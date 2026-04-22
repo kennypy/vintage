@@ -57,7 +57,23 @@ export async function getCsrfToken(): Promise<string> {
   if (csrfTokenCache && Date.now() - csrfTokenFetchedAt < CSRF_CACHE_TTL_MS) {
     return csrfTokenCache;
   }
-  const res = await fetch(`${API_BASE_URL}/auth/csrf-token`);
+  // Same timeout posture as apiFetch — a hung server here used to
+  // freeze every mutating call in the app indefinitely because the
+  // CSRF fetch is awaited from inside apiFetch with no upper bound.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/auth/csrf-token`, { signal: controller.signal });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Falha ao obter token CSRF: timeout');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) throw new Error('Falha ao obter token CSRF');
   const data = (await res.json()) as { csrfToken: string };
   csrfTokenCache = data.csrfToken;

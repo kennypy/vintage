@@ -107,13 +107,12 @@ simultâneas).
    escopo apenas nesses buckets.
 3. Habilite *Public Access* apenas via domínio custom (ex.
    `cdn.vintage.br`) — NUNCA exponha o bucket público direto.
-4. Variáveis de ambiente:
+4. Variáveis de ambiente (nomes devem bater com `apps/api/.env.example`):
    - `S3_ENDPOINT` — `https://<account>.r2.cloudflarestorage.com`
    - `S3_REGION` — `auto`
    - `S3_BUCKET` — `vintage-listings`
-   - `S3_ACCESS_KEY_ID`
-   - `S3_SECRET_ACCESS_KEY`
-   - `S3_PUBLIC_URL` — `https://cdn.vintage.br`
+   - `S3_ACCESS_KEY` — token R2 Access Key ID
+   - `S3_SECRET_KEY` — token R2 Secret Access Key
    - `PRESIGNED_URL_EXPIRY` — `900` (15 min)
 5. Configure CORS no bucket para aceitar apenas `https://vintage.br`,
    `https://www.vintage.br` e os schemes do app (`vintagebr://`).

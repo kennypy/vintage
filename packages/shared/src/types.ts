@@ -3,113 +3,133 @@
 // ============================================================
 
 // --- Enums ---
+//
+// Values MUST match the Prisma enum spellings in
+// `apps/api/prisma/schema.prisma` (all UPPERCASE). The API returns
+// these as UPPERCASE strings in JSON responses; any consumer who
+// compares against the enum values below (e.g. `order.status ===
+// OrderStatus.PAID`) would silently always be false if the cases
+// drifted. If you add a new enum member to the Prisma schema, add it
+// here in the same PR — mobile-web parity + shared-package parity
+// with the DB is the source-of-truth convention.
 
 export enum ItemCondition {
-  NEW_WITH_TAGS = 'new_with_tags',
-  NEW_WITHOUT_TAGS = 'new_without_tags',
-  VERY_GOOD = 'very_good',
-  GOOD = 'good',
-  SATISFACTORY = 'satisfactory',
+  NEW_WITH_TAGS = 'NEW_WITH_TAGS',
+  NEW_WITHOUT_TAGS = 'NEW_WITHOUT_TAGS',
+  VERY_GOOD = 'VERY_GOOD',
+  GOOD = 'GOOD',
+  SATISFACTORY = 'SATISFACTORY',
 }
 
 export enum ListingStatus {
-  ACTIVE = 'active',
-  PAUSED = 'paused',
-  SOLD = 'sold',
-  DELETED = 'deleted',
+  ACTIVE = 'ACTIVE',
+  PAUSED = 'PAUSED',
+  SOLD = 'SOLD',
+  DELETED = 'DELETED',
+  // Admin moderation: a listing taken down after a policy review.
+  // Mirrored from Prisma schema.prisma enum ListingStatus.
+  SUSPENDED = 'SUSPENDED',
 }
 
 export enum OrderStatus {
-  PENDING = 'pending',
-  PAID = 'paid',
-  SHIPPED = 'shipped',
-  DELIVERED = 'delivered',
-  HELD = 'held',
-  COMPLETED = 'completed',
-  DISPUTED = 'disputed',
-  REFUNDED = 'refunded',
-  CANCELLED = 'cancelled',
+  PENDING = 'PENDING',
+  PAID = 'PAID',
+  SHIPPED = 'SHIPPED',
+  DELIVERED = 'DELIVERED',
+  HELD = 'HELD',
+  COMPLETED = 'COMPLETED',
+  DISPUTED = 'DISPUTED',
+  REFUNDED = 'REFUNDED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum PaymentStatus {
-  PENDING = 'pending',
-  SUCCEEDED = 'succeeded',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled',
+  PENDING = 'PENDING',
+  SUCCEEDED = 'SUCCEEDED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum ReturnStatus {
-  REQUESTED = 'requested',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  SHIPPED = 'shipped',
-  RECEIVED = 'received',
-  REFUNDED = 'refunded',
-  DISPUTED = 'disputed',
+  REQUESTED = 'REQUESTED',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SHIPPED = 'SHIPPED',
+  RECEIVED = 'RECEIVED',
+  REFUNDED = 'REFUNDED',
+  DISPUTED = 'DISPUTED',
 }
 
 export enum PaymentMethod {
-  PIX = 'pix',
-  CREDIT_CARD = 'credit_card',
-  BOLETO = 'boleto',
-  FREE = 'free',
+  PIX = 'PIX',
+  CREDIT_CARD = 'CREDIT_CARD',
+  BOLETO = 'BOLETO',
+  FREE = 'FREE',
 }
 
 export enum OfferStatus {
-  PENDING = 'pending',
-  ACCEPTED = 'accepted',
-  REJECTED = 'rejected',
-  COUNTERED = 'countered',
-  EXPIRED = 'expired',
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  COUNTERED = 'COUNTERED',
+  EXPIRED = 'EXPIRED',
 }
 
 export enum DisputeStatus {
-  OPEN = 'open',
-  RESOLVED = 'resolved',
-  ESCALATED = 'escalated',
+  OPEN = 'OPEN',
+  RESOLVED = 'RESOLVED',
+  ESCALATED = 'ESCALATED',
 }
 
 export enum DisputeReason {
-  NOT_AS_DESCRIBED = 'not_as_described',
-  DAMAGED = 'damaged',
-  COUNTERFEIT = 'counterfeit',
-  NOT_RECEIVED = 'not_received',
-  WRONG_ITEM = 'wrong_item',
+  NOT_AS_DESCRIBED = 'NOT_AS_DESCRIBED',
+  DAMAGED = 'DAMAGED',
+  COUNTERFEIT = 'COUNTERFEIT',
+  NOT_RECEIVED = 'NOT_RECEIVED',
+  WRONG_ITEM = 'WRONG_ITEM',
 }
 
 export enum WalletTransactionType {
-  CREDIT = 'credit',
-  DEBIT = 'debit',
-  PAYOUT = 'payout',
-  REFUND = 'refund',
-  ESCROW_HOLD = 'escrow_hold',
-  ESCROW_RELEASE = 'escrow_release',
+  CREDIT = 'CREDIT',
+  DEBIT = 'DEBIT',
+  PAYOUT = 'PAYOUT',
+  REFUND = 'REFUND',
+  ESCROW_HOLD = 'ESCROW_HOLD',
+  ESCROW_RELEASE = 'ESCROW_RELEASE',
 }
 
 export enum PromotionType {
-  BUMP = 'bump',
-  SPOTLIGHT = 'spotlight',
-  MEGAFONE = 'megafone',
+  BUMP = 'BUMP',
+  SPOTLIGHT = 'SPOTLIGHT',
+  MEGAFONE = 'MEGAFONE',
 }
 
+// Notification kinds surfaced to the client. There is no DB-level
+// enum for this (Notification.type is a plain String column) so the
+// only constraint is that producers and consumers agree; keep
+// UPPERCASE to stay consistent with every other enum in this file.
 export enum NotificationType {
-  ORDER_UPDATE = 'order_update',
-  NEW_MESSAGE = 'new_message',
-  NEW_OFFER = 'new_offer',
-  OFFER_ACCEPTED = 'offer_accepted',
-  NEW_FOLLOWER = 'new_follower',
-  PRICE_DROP = 'price_drop',
-  SAVED_SEARCH_MATCH = 'saved_search_match',
-  REVIEW_RECEIVED = 'review_received',
-  PAYOUT_COMPLETED = 'payout_completed',
+  ORDER_UPDATE = 'ORDER_UPDATE',
+  NEW_MESSAGE = 'NEW_MESSAGE',
+  NEW_OFFER = 'NEW_OFFER',
+  OFFER_ACCEPTED = 'OFFER_ACCEPTED',
+  NEW_FOLLOWER = 'NEW_FOLLOWER',
+  PRICE_DROP = 'PRICE_DROP',
+  SAVED_SEARCH_MATCH = 'SAVED_SEARCH_MATCH',
+  REVIEW_RECEIVED = 'REVIEW_RECEIVED',
+  PAYOUT_COMPLETED = 'PAYOUT_COMPLETED',
 }
 
 export enum Carrier {
-  CORREIOS = 'correios',
-  SEDEX = 'sedex',
-  PAC = 'pac',
-  JADLOG = 'jadlog',
-  KANGU = 'kangu',
+  CORREIOS = 'CORREIOS',
+  SEDEX = 'SEDEX',
+  PAC = 'PAC',
+  JADLOG = 'JADLOG',
+  KANGU = 'KANGU',
+  // PegakiClient is wired in ShippingService (see
+  // apps/api/src/shipping/shipping.service.ts) and real orders can
+  // be labelled with this carrier.
+  PEGAKI = 'PEGAKI',
 }
 
 // --- Brazilian Sizes ---
@@ -125,10 +145,10 @@ export enum ClothingSize {
 }
 
 export enum NFeStatus {
-  PENDING = 'pending',
-  AUTHORIZED = 'authorized',
-  REJECTED = 'rejected',
-  CANCELLED = 'cancelled',
+  PENDING = 'PENDING',
+  AUTHORIZED = 'AUTHORIZED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED',
 }
 
 // --- API Types ---

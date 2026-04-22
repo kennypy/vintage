@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,38 +7,20 @@ import * as crypto from 'crypto';
 import { AdCampaignStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AudienceService } from '../audience/audience.service';
+import { assertSafeUrl } from '../common/services/url-validator';
 import { CreatePartnerDto } from './dto/create-partner.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { CreateCreativeDto } from './dto/create-creative.dto';
 import { AudienceQueryDto } from './dto/audience-query.dto';
 
-// Allowed URL schemes — prevent SSRF via javascript:, file:, etc.
-const ALLOWED_URL_SCHEMES = ['http:', 'https:'];
-// Private/loopback CIDR ranges — checked after DNS resolution in production
-// (here we guard at URL-level; full SSRF prevention requires DNS resolution in a real deploy)
-const BLOCKED_HOSTNAMES = [
-  'localhost',
-  '127.0.0.1',
-  '0.0.0.0',
-  '::1',
-  'metadata.google.internal',
-  '169.254.169.254',
-];
-
-function validateUrl(raw: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new BadRequestException('URL de destino inválida.');
-  }
-  if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol)) {
-    throw new BadRequestException('Protocolo de URL não permitido.');
-  }
-  if (BLOCKED_HOSTNAMES.includes(parsed.hostname.toLowerCase())) {
-    throw new BadRequestException('URL de destino não permitida (SSRF).');
-  }
-}
+// Partner-supplied URLs (webhook endpoints, creative destinations,
+// creative images) are validated with the shared `assertSafeUrl`
+// helper so the SSRF rules stay centralised: scheme allowlist,
+// literal private-IP block, AND DNS resolution of the hostname with
+// a full private/loopback/link-local/CGNAT check on every resolved
+// address. The previous local validator only scanned a five-entry
+// hostname blocklist — a partner could point a webhook at "10.0.0.5"
+// or a hostname that resolved to 127.0.0.1 and bypass the guard.
 
 @Injectable()
 export class AdPartnersService {
@@ -58,7 +39,7 @@ export class AdPartnersService {
     const apiKeyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     const apiKeyPrefix = rawKey.slice(0, 8);
 
-    if (dto.webhookUrl) validateUrl(dto.webhookUrl);
+    if (dto.webhookUrl) await assertSafeUrl(dto.webhookUrl, { resolve: true });
 
     // Generate a fresh HMAC webhook secret for this partner
     const webhookSecret = crypto.randomBytes(32).toString('hex');
@@ -173,8 +154,8 @@ export class AdPartnersService {
     if (!campaign) throw new NotFoundException('Campanha não encontrada.');
     if (campaign.partnerId !== partnerId) throw new ForbiddenException();
 
-    validateUrl(dto.destinationUrl);
-    if (dto.imageUrl) validateUrl(dto.imageUrl);
+    await assertSafeUrl(dto.destinationUrl, { resolve: true });
+    if (dto.imageUrl) await assertSafeUrl(dto.imageUrl, { resolve: true });
 
     return this.prisma.adCreative.create({
       data: {
