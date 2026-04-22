@@ -31,6 +31,31 @@ export default function SegurancaPage() {
 
   // TOTP state
   const [totpSetup, setTotpSetup] = useState<TwoFaSetup | null>(null);
+  // Blob URL for the QR code. The API returns it as a data: URL, but the
+  // CSP blocks data: in img-src (see apps/web/next.config.mjs), so we
+  // convert to a same-origin blob: URL which the CSP does allow.
+  const [qrBlobUrl, setQrBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!totpSetup?.qrCodeDataUrl) {
+      setQrBlobUrl(null);
+      return;
+    }
+    let revoked = false;
+    let url: string | null = null;
+    fetch(totpSetup.qrCodeDataUrl)
+      .then((r) => r.blob())
+      .then((blob) => {
+        if (revoked) return;
+        url = URL.createObjectURL(blob);
+        setQrBlobUrl(url);
+      })
+      .catch(() => setQrBlobUrl(null));
+    return () => {
+      revoked = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [totpSetup?.qrCodeDataUrl]);
 
   // SMS state
   const [phoneInput, setPhoneInput] = useState('+55');
@@ -280,7 +305,13 @@ export default function SegurancaPage() {
                 1. Abra seu app autenticador (Google Authenticator, Authy…) e escaneie:
               </p>
               <div className="flex items-center justify-center bg-gray-50 p-4 rounded-lg">
-                <img src={totpSetup.qrCodeDataUrl} alt="QR code 2FA" width={180} height={180} />
+                {qrBlobUrl ? (
+                  <img src={qrBlobUrl} alt="QR code 2FA" width={180} height={180} />
+                ) : (
+                  <div className="w-[180px] h-[180px] flex items-center justify-center text-xs text-gray-400">
+                    Gerando QR…
+                  </div>
+                )}
               </div>
               <div className="text-sm text-gray-600">
                 Ou informe manualmente:
