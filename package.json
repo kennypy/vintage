@@ -6,6 +6,7 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "node scripts/dev-setup.mjs",
     "dev": "turbo dev",
     "dev:backend": "turbo dev --filter=@vintage/api --filter=@vintage/web --filter=@vintage/shared",
     "dev:mobile": "npm -w @vintage/mobile run dev",
