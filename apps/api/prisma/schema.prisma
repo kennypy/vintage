@@ -693,12 +693,21 @@ model SupportTicket {
 }
 
 model SupportTicketMessage {
-  id         String   @id @default(cuid())
-  ticketId   String
-  senderId   String
-  senderRole String   @db.VarChar(16) // 'user' | 'agent'
-  body       String   @db.Text
-  createdAt  DateTime @default(now())
+  id                 String   @id @default(cuid())
+  ticketId           String
+  senderId           String
+  senderRole         String   @db.VarChar(16) // 'user' | 'agent'
+  // Human-readable attribution for agent replies. When a CRM agent
+  // posts through /partner/support/*, all replies are stored under a
+  // single shared system user (support@vintage.br); this column carries
+  // the actual agent's display name ("Ana do Suporte") for the user.
+  // Null for user-authored messages.
+  senderDisplayName  String?  @db.VarChar(80)
+  body               String   @db.Text
+  // Attachment URLs. Agent attachments are hosted on the CRM side; we
+  // just store the URLs string-wise. User attachments use our S3.
+  attachmentUrls     String[] @default([])
+  createdAt          DateTime @default(now())
 
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 

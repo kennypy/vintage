@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Image,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { colors } from '../../src/theme/colors';
@@ -101,20 +103,47 @@ export default function SupportTicketScreen() {
           <Text style={styles.bubbleBody}>{ticket.body}</Text>
         </View>
 
-        {ticket.messages.map((m) => (
-          <View
-            key={m.id}
-            style={[styles.bubble, m.senderRole === 'agent' ? styles.bubbleAgent : styles.bubbleUser]}
-          >
-            <Text style={styles.bubbleRole}>
-              {m.senderRole === 'agent' ? 'Suporte Vintage' : 'Você'}
-            </Text>
-            <Text style={styles.bubbleBody}>{m.body}</Text>
-            <Text style={styles.bubbleTime}>
-              {new Date(m.createdAt).toLocaleString('pt-BR')}
-            </Text>
-          </View>
-        ))}
+        {ticket.messages.map((m) => {
+          const agentLabel =
+            m.senderRole === 'agent'
+              ? m.senderDisplayName
+                ? `${m.senderDisplayName} · Suporte Vintage`
+                : 'Suporte Vintage'
+              : 'Você';
+          const attachments = m.attachmentUrls ?? [];
+          return (
+            <View
+              key={m.id}
+              style={[styles.bubble, m.senderRole === 'agent' ? styles.bubbleAgent : styles.bubbleUser]}
+            >
+              <Text style={styles.bubbleRole}>{agentLabel}</Text>
+              <Text style={styles.bubbleBody}>{m.body}</Text>
+              {attachments.length > 0 && (
+                <View style={styles.attachmentsRow}>
+                  {attachments.map((url) => {
+                    const isImage = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url);
+                    return (
+                      <TouchableOpacity key={url} onPress={() => Linking.openURL(url)}>
+                        {isImage ? (
+                          <Image source={{ uri: url }} style={styles.attachmentImg} />
+                        ) : (
+                          <View style={styles.attachmentFile}>
+                            <Text style={styles.attachmentFileText} numberOfLines={1}>
+                              📎 Anexo
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              <Text style={styles.bubbleTime}>
+                {new Date(m.createdAt).toLocaleString('pt-BR')}
+              </Text>
+            </View>
+          );
+        })}
 
         {closed && (
           <Text style={styles.resolved}>
@@ -175,6 +204,22 @@ const styles = StyleSheet.create({
   bubbleRole: { fontSize: 11, fontWeight: '700', color: colors.neutral[500], marginBottom: 4 },
   bubbleBody: { fontSize: 14, color: colors.neutral[900], lineHeight: 20 },
   bubbleTime: { fontSize: 10, color: colors.neutral[400], marginTop: 6 },
+  attachmentsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  attachmentImg: {
+    width: 72,
+    height: 72,
+    borderRadius: 6,
+    backgroundColor: colors.neutral[200],
+  },
+  attachmentFile: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: colors.neutral[100],
+    borderWidth: 1,
+    borderColor: colors.neutral[200],
+  },
+  attachmentFileText: { fontSize: 12, color: colors.neutral[700], maxWidth: 120 },
   resolved: {
     marginTop: 16,
     padding: 12,

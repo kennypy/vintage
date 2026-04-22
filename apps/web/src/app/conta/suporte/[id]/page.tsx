@@ -1,6 +1,7 @@
 'use client';
 
 import { use, useCallback, useEffect, useState } from 'react';
+import Image from 'next/image';
 import { apiGet, apiPost } from '@/lib/api';
 
 interface TicketMessage {
@@ -8,7 +9,9 @@ interface TicketMessage {
   ticketId: string;
   senderId: string;
   senderRole: 'user' | 'agent';
+  senderDisplayName?: string | null;
   body: string;
+  attachmentUrls?: string[];
   createdAt: string;
 }
 
@@ -103,7 +106,14 @@ export default function SupportTicketPage({ params }: { params: Promise<{ id: st
       <div className="mt-6 space-y-3">
         <Bubble role="user" body={ticket.body} at={ticket.createdAt} />
         {ticket.messages.map((m) => (
-          <Bubble key={m.id} role={m.senderRole} body={m.body} at={m.createdAt} />
+          <Bubble
+            key={m.id}
+            role={m.senderRole}
+            displayName={m.senderDisplayName ?? null}
+            body={m.body}
+            attachmentUrls={m.attachmentUrls ?? []}
+            at={m.createdAt}
+          />
         ))}
       </div>
 
@@ -137,8 +147,25 @@ export default function SupportTicketPage({ params }: { params: Promise<{ id: st
   );
 }
 
-function Bubble({ role, body, at }: { role: 'user' | 'agent'; body: string; at: string }) {
+function Bubble({
+  role,
+  displayName,
+  body,
+  attachmentUrls = [],
+  at,
+}: {
+  role: 'user' | 'agent';
+  displayName?: string | null;
+  body: string;
+  attachmentUrls?: string[];
+  at: string;
+}) {
   const isAgent = role === 'agent';
+  const label = isAgent
+    ? displayName
+      ? `${displayName} · Suporte Vintage`
+      : 'Suporte Vintage'
+    : 'Você';
   return (
     <div className={`flex ${isAgent ? 'justify-start' : 'justify-end'}`}>
       <div
@@ -146,10 +173,43 @@ function Bubble({ role, body, at }: { role: 'user' | 'agent'; body: string; at: 
           isAgent ? 'rounded-tl-none bg-brand-50' : 'rounded-tr-none bg-white shadow-sm'
         }`}
       >
-        <p className="mb-1 text-xs font-semibold text-gray-500">
-          {isAgent ? 'Suporte Vintage' : 'Você'}
-        </p>
+        <p className="mb-1 text-xs font-semibold text-gray-500">{label}</p>
         <p className="whitespace-pre-wrap text-sm text-gray-900">{body}</p>
+        {attachmentUrls.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {attachmentUrls.map((url) => {
+              const isImage = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(url);
+              return isImage ? (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative h-20 w-20 overflow-hidden rounded-lg bg-gray-100"
+                >
+                  <Image
+                    src={url}
+                    alt=""
+                    fill
+                    sizes="80px"
+                    className="object-cover"
+                    unoptimized
+                  />
+                </a>
+              ) : (
+                <a
+                  key={url}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 hover:bg-gray-100"
+                >
+                  📎 Anexo
+                </a>
+              );
+            })}
+          </div>
+        )}
         <p className="mt-2 text-[11px] text-gray-400">
           {new Date(at).toLocaleString('pt-BR')}
         </p>

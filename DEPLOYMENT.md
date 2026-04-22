@@ -283,6 +283,25 @@ simultâneas).
      TRACKING_POLL_BATCH_SIZE="200"
    ```
 
+   **CRM integration (kennypy/CRM — agent workspace)**
+   ```bash
+   # Outbound webhook (Vintage → CRM): ticket.opened, ticket.user_replied,
+   # ticket.user_reopened. HMAC-signed with SUPPORT_CRM_WEBHOOK_SECRET in
+   # X-Vintage-Signature. Failures land in AuditLog as CRM_WEBHOOK_FAILED;
+   # support-cron replays stuck opens hourly for up to 7 days.
+   #
+   # Inbound partner API (CRM → Vintage): /partner/support/tickets/:id/reply
+   # and /resolve, auth'd by CRM_PARTNER_KEY (X-Partner-Key header).
+   # Key must be ≥32 chars — the guard refuses shorter values at boot.
+   #
+   # Leaving the webhook pair empty keeps tickets in-house; leaving
+   # CRM_PARTNER_KEY empty disables the partner endpoints entirely.
+   fly secrets set \
+     SUPPORT_CRM_WEBHOOK_URL="https://crm.vintage.br/webhooks/vintage" \
+     SUPPORT_CRM_WEBHOOK_SECRET=$(openssl rand -hex 32) \
+     CRM_PARTNER_KEY=$(openssl rand -hex 32)
+   ```
+
    For the **web host** (Vercel): see §7 below — the web consumes
    `APPLE_TEAM_ID`, `IOS_BUNDLE_ID`, `ANDROID_PACKAGE`,
    `ANDROID_CERT_SHA256` at `/.well-known/*` request time, plus the
