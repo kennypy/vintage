@@ -67,7 +67,14 @@ export async function startConversation(
   return conv;
 }
 
-export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'countered';
+// Re-exported from ./offers so the mobile codebase has a single source
+// of truth for offer status casing. Prisma emits UPPERCASE strings
+// (see apps/api/prisma/schema.prisma → enum OfferStatus), and the
+// shared package mirrors that. The `Message` type keeps optional
+// offer fields so a future gateway change can surface offer state
+// inline in chat without another type churn.
+export type { OfferStatus } from './offers';
+import type { OfferStatus } from './offers';
 
 export interface Message {
   id: string;

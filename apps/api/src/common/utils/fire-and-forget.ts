@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { incrementSwallowCounter } from '../../metrics/metrics.service';
 
 /**
  * Reusable rejection handler for fire-and-forget side effects
@@ -15,10 +16,15 @@ import { Logger } from '@nestjs/common';
  *
  * The tag is a short, free-form string appearing in the log line so
  * a grep like `journalctl | grep swallowed=offer.notify` finds every
- * dropped offer notification without joining on the service name.
+ * dropped offer notification without joining on the service name. It
+ * ALSO labels the `vintage_fire_and_forget_swallowed_total` Prom
+ * counter — alerts on sudden rate spikes of a specific tag catch the
+ * "notifications silently failed for 2 hours" class of incident that
+ * plain logs only surface during manual review.
  */
 export function warnAndSwallow(logger: Logger, tag: string) {
   return (err: unknown): void => {
     logger.warn(`swallowed=${tag} ${String(err).slice(0, 200)}`);
+    incrementSwallowCounter(tag);
   };
 }
