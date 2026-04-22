@@ -56,8 +56,8 @@ export default function ConversationScreen() {
   const [pendingOfferAmount, setPendingOfferAmount] = useState<number | null>(
     isOffer === '1' && offerAmount ? parseFloat(offerAmount) : null,
   );
-  const [offerStatus, setOfferStatus] = useState<'pending' | 'accepted' | 'rejected' | 'countered' | null>(
-    isOffer === '1' ? 'pending' : null,
+  const [offerStatus, setOfferStatus] = useState<'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COUNTERED' | null>(
+    isOffer === '1' ? 'PENDING' : null,
   );
   const [counterModalVisible, setCounterModalVisible] = useState(false);
   const [counterInput, setCounterInput] = useState('');
@@ -112,14 +112,29 @@ export default function ConversationScreen() {
       // retrying so we don't spam the gateway; the user will get a
       // stale UI but the REST poll-fallback still delivers messages,
       // and re-entering the screen re-reads the token.
+      //
+      // The gateway rejects with `client.emit('error') + client.disconnect(true)`
+      // inside handleConnection, which surfaces on the client as a
+      // `disconnect` event with reason `'io server disconnect'`.
+      // That reason is the canonical Socket.IO signal for a server-
+      // initiated kick and is stable across versions — matching on it
+      // is robust, whereas matching the human-readable error message
+      // breaks the moment anyone translates or rewords it. We also
+      // handle `connect_error` as a defensive net for any future
+      // middleware-level rejection that may carry a structured
+      // `err.data.code` — no string substring match.
+      socket.on('disconnect', (reason) => {
+        if (reason === 'io server disconnect') {
+          // Socket.IO won't auto-reconnect for this reason, but make
+          // it explicit so a future config change to `reconnection`
+          // doesn't silently flip behaviour.
+          socket?.disconnect();
+        }
+      });
+
       socket.on('connect_error', (err) => {
-        const msg = String((err as Error)?.message ?? err);
-        if (
-          msg.includes('Token') ||
-          msg.includes('Autenticação') ||
-          msg.includes('Sessão') ||
-          msg.includes('Conta')
-        ) {
+        const code = (err as { data?: { code?: string } } | undefined)?.data?.code;
+        if (code === 'AUTH_REJECTED' || code === 'TOKEN_INVALID' || code === 'ACCOUNT_UNAVAILABLE') {
           socket?.disconnect();
         }
       });
@@ -319,7 +334,7 @@ export default function ConversationScreen() {
         {
           text: 'Aceitar',
           onPress: () => {
-            setOfferStatus('accepted');
+            setOfferStatus('ACCEPTED');
             const confirmMsg: Message = {
               id: `offer-accepted-${Date.now()}`,
               conversationId: id ?? '',
@@ -343,7 +358,7 @@ export default function ConversationScreen() {
         text: 'Rejeitar',
         style: 'destructive',
         onPress: () => {
-          setOfferStatus('rejected');
+          setOfferStatus('REJECTED');
           const rejectMsg: Message = {
             id: `offer-rejected-${Date.now()}`,
             conversationId: id ?? '',
@@ -365,7 +380,7 @@ export default function ConversationScreen() {
       Alert.alert('Valor inválido', 'Informe um valor válido para a contraproposta.');
       return;
     }
-    setOfferStatus('countered');
+    setOfferStatus('COUNTERED');
     setPendingOfferAmount(counter);
     setCounterModalVisible(false);
     setCounterInput('');
@@ -516,16 +531,16 @@ export default function ConversationScreen() {
       />
       {/* Offer banner — visible when there's a pending/active offer */}
       {pendingOfferAmount != null && (
-        <View style={[styles.offerBanner, { backgroundColor: offerStatus === 'accepted' ? colors.success[50] : offerStatus === 'rejected' ? colors.error[50] : theme.cardSecondary, borderBottomColor: theme.border }]}>
+        <View style={[styles.offerBanner, { backgroundColor: offerStatus === 'ACCEPTED' ? colors.success[50] : offerStatus === 'REJECTED' ? colors.error[50] : theme.cardSecondary, borderBottomColor: theme.border }]}>
           <View style={styles.offerBannerLeft}>
             <Ionicons
-              name={offerStatus === 'accepted' ? 'checkmark-circle' : offerStatus === 'rejected' ? 'close-circle' : 'pricetag'}
+              name={offerStatus === 'ACCEPTED' ? 'checkmark-circle' : offerStatus === 'REJECTED' ? 'close-circle' : 'pricetag'}
               size={20}
-              color={offerStatus === 'accepted' ? colors.success[600] : offerStatus === 'rejected' ? colors.error[500] : colors.primary[600]}
+              color={offerStatus === 'ACCEPTED' ? colors.success[600] : offerStatus === 'REJECTED' ? colors.error[500] : colors.primary[600]}
             />
             <View>
               <Text style={[styles.offerBannerLabel, { color: theme.textSecondary }]}>
-                {offerStatus === 'accepted' ? 'Oferta aceita' : offerStatus === 'rejected' ? 'Oferta rejeitada' : offerStatus === 'countered' ? 'Contraproposta' : 'Oferta pendente'}
+                {offerStatus === 'ACCEPTED' ? 'Oferta aceita' : offerStatus === 'REJECTED' ? 'Oferta rejeitada' : offerStatus === 'COUNTERED' ? 'Contraproposta' : 'Oferta pendente'}
               </Text>
               <Text style={[styles.offerBannerAmount, { color: theme.text }]}>
                 R$ {formatBrl(pendingOfferAmount)}
@@ -534,7 +549,7 @@ export default function ConversationScreen() {
           </View>
 
           {/* Show actions only for pending/countered offers */}
-          {(offerStatus === 'pending' || offerStatus === 'countered') && (
+          {(offerStatus === 'PENDING' || offerStatus === 'COUNTERED') && (
             <View style={styles.offerActions}>
               <TouchableOpacity style={[styles.offerActionBtn, styles.offerRejectBtn]} onPress={handleRejectOffer}>
                 <Text style={styles.offerRejectText}>Rejeitar</Text>
@@ -549,7 +564,7 @@ export default function ConversationScreen() {
           )}
 
           {/* Buy Now button shown to buyer after seller accepts */}
-          {offerStatus === 'accepted' && (
+          {offerStatus === 'ACCEPTED' && (
             <TouchableOpacity
               style={styles.buyNowBtn}
               onPress={() => {

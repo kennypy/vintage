@@ -78,6 +78,19 @@ export class MetricsService implements OnModuleInit {
     registers: [this.registry],
   });
 
+  // Fire-and-forget side effects
+  // Incremented by common/utils/fire-and-forget.ts#warnAndSwallow.
+  // A spike under a particular `tag` (e.g. `offer.notify`, `search.sync`)
+  // points at a dropped side effect whose primary write succeeded —
+  // a silent user-facing gap we otherwise only catch via customer
+  // complaints. Alert on rate-of-change, not on absolute value.
+  readonly fireAndForgetSwallowed = new Counter({
+    name: 'vintage_fire_and_forget_swallowed_total',
+    help: 'Fire-and-forget side effects that threw and were logged + swallowed, labelled by the short tag supplied at the call site.',
+    labelNames: ['tag'] as const,
+    registers: [this.registry],
+  });
+
   // Durable-operation latency
   readonly orderCreate = new Histogram({
     name: 'vintage_order_create_duration_seconds',
@@ -95,6 +108,11 @@ export class MetricsService implements OnModuleInit {
       register: this.registry,
       prefix: 'vintage_',
     });
+    // Bridge the free-function warnAndSwallow util into the Prom
+    // counter. The util is called from dozens of service methods
+    // without DI, so we register the counter once at boot and the
+    // util reads it via a module-level ref.
+    registerSwallowCounter(this.fireAndForgetSwallowed);
     this.logger.log('Metrics registry initialised');
   }
 
@@ -102,4 +120,17 @@ export class MetricsService implements OnModuleInit {
   async snapshot(): Promise<string> {
     return this.registry.metrics();
   }
+}
+
+// Kept at module scope (outside the class) so common/utils/fire-and-forget.ts
+// can wire into it without creating a circular import on MetricsModule.
+// The counter is nullable until MetricsService.onModuleInit runs; in
+// unit tests that don't boot the metrics module the util simply logs
+// without incrementing.
+let swallowCounterRef: Counter<'tag'> | null = null;
+export function registerSwallowCounter(counter: Counter<'tag'>): void {
+  swallowCounterRef = counter;
+}
+export function incrementSwallowCounter(tag: string): void {
+  swallowCounterRef?.inc({ tag });
 }
