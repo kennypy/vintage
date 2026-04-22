@@ -33,10 +33,16 @@ export class ReviewsController {
   @Throttle({ default: { limit: 10, ttl: 60 * 60 * 1000 } })
   @ApiOperation({ summary: 'Avaliar pedido (1 ou 5 estrelas)' })
   create(
-    @Body() body: { orderId: string; rating: number; comment?: string },
+    @Body() body: { orderId: string; rating: number; comment?: string; imageUrls?: string[] },
     @CurrentUser() user: AuthUser,
   ) {
-    return this.reviewsService.create(user.id, body.orderId, body.rating, body.comment);
+    return this.reviewsService.create(
+      user.id,
+      body.orderId,
+      body.rating,
+      body.comment,
+      body.imageUrls,
+    );
   }
 
   @Get('users/:id/reviews')

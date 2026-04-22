@@ -127,8 +127,8 @@ describe('ReviewsService', () => {
   describe('getUserReviews', () => {
     it('should return paginated reviews', async () => {
       const reviews = [
-        { id: 'review-1', rating: 5, reviewer: { id: 'u-1', name: 'Ana', avatarUrl: null } },
-        { id: 'review-2', rating: 1, reviewer: { id: 'u-2', name: 'João', avatarUrl: null } },
+        { id: 'review-1', rating: 5, reviewer: { id: 'u-1', name: 'Ana', avatarUrl: null }, images: [] },
+        { id: 'review-2', rating: 1, reviewer: { id: 'u-2', name: 'João', avatarUrl: null }, images: [] },
       ];
       mockPrisma.review.findMany.mockResolvedValue(reviews);
       mockPrisma.review.count.mockResolvedValue(2);
@@ -144,13 +144,39 @@ describe('ReviewsService', () => {
     });
 
     it('should calculate totalPages correctly', async () => {
-      const reviews = Array.from({ length: 10 }, (_, i) => ({ id: `review-${i}`, reviewer: { id: `u-${i}`, name: 'X', avatarUrl: null } }));
+      const reviews = Array.from({ length: 10 }, (_, i) => ({
+        id: `review-${i}`,
+        reviewer: { id: `u-${i}`, name: 'X', avatarUrl: null },
+        images: [],
+      }));
       mockPrisma.review.findMany.mockResolvedValue(reviews);
       mockPrisma.review.count.mockResolvedValue(25);
 
       const result = await service.getUserReviews('user-1', 1, 10);
 
       expect(result.totalPages).toBe(3);
+    });
+
+    it('should include imageUrls from related images', async () => {
+      mockPrisma.review.findMany.mockResolvedValue([
+        {
+          id: 'review-1',
+          rating: 5,
+          reviewer: { id: 'u-1', name: 'Ana', avatarUrl: null },
+          images: [
+            { url: 'https://cdn.example/r/a.jpg', position: 0 },
+            { url: 'https://cdn.example/r/b.jpg', position: 1 },
+          ],
+        },
+      ]);
+      mockPrisma.review.count.mockResolvedValue(1);
+
+      const result = await service.getUserReviews('user-1', 1, 20);
+
+      expect(result.items[0].imageUrls).toEqual([
+        'https://cdn.example/r/a.jpg',
+        'https://cdn.example/r/b.jpg',
+      ]);
     });
   });
 });

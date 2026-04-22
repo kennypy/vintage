@@ -251,6 +251,24 @@ export class UsersController {
     return this.usersService.unfollowUser(user.id, id);
   }
 
+  @Get('users/:id/followers')
+  @ApiOperation({ summary: 'Lista de seguidores de um usuário' })
+  listFollowers(
+    @Param('id') id: string,
+    @Query('page') page?: number,
+  ) {
+    return this.usersService.listFollowers(id, Number(page) || 1);
+  }
+
+  @Get('users/:id/following')
+  @ApiOperation({ summary: 'Lista de quem o usuário segue' })
+  listFollowing(
+    @Param('id') id: string,
+    @Query('page') page?: number,
+  ) {
+    return this.usersService.listFollowing(id, Number(page) || 1);
+  }
+
   // --- Vacation Mode ---
 
   @Patch('users/me/vacation')

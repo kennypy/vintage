@@ -387,6 +387,92 @@ export class UsersService {
     return { following: false };
   }
 
+  async listFollowers(userId: string, page = 1, pageSize = 30) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 30));
+    const skip = (page - 1) * pageSize;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.follow.findMany({
+        where: { followingId: userId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        include: {
+          follower: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+              ratingAvg: true,
+              ratingCount: true,
+              followerCount: true,
+            },
+          },
+        },
+      }),
+      this.prisma.follow.count({ where: { followingId: userId } }),
+    ]);
+
+    return {
+      items: rows.map((r) => ({
+        id: r.follower.id,
+        name: r.follower.name,
+        avatarUrl: r.follower.avatarUrl,
+        ratingAvg: r.follower.ratingAvg,
+        ratingCount: r.follower.ratingCount,
+        followerCount: r.follower.followerCount,
+        followedAt: r.createdAt,
+      })),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
+  async listFollowing(userId: string, page = 1, pageSize = 30) {
+    page = Math.max(1, Number(page) || 1);
+    pageSize = Math.min(100, Math.max(1, Number(pageSize) || 30));
+    const skip = (page - 1) * pageSize;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.follow.findMany({
+        where: { followerId: userId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+        include: {
+          following: {
+            select: {
+              id: true,
+              name: true,
+              avatarUrl: true,
+              ratingAvg: true,
+              ratingCount: true,
+              followerCount: true,
+            },
+          },
+        },
+      }),
+      this.prisma.follow.count({ where: { followerId: userId } }),
+    ]);
+
+    return {
+      items: rows.map((r) => ({
+        id: r.following.id,
+        name: r.following.name,
+        avatarUrl: r.following.avatarUrl,
+        ratingAvg: r.following.ratingAvg,
+        ratingCount: r.following.ratingCount,
+        followerCount: r.following.followerCount,
+        followedAt: r.createdAt,
+      })),
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
   // --- Storefront ---
 
   async getStorefront(username: string, page: number = 1, pageSize: number = 20) {

@@ -141,7 +141,7 @@ export default function ConfiguracoesScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
-          onPress={() => Linking.openURL('https://vintage.br/termos')}
+          onPress={() => router.push('/legal/termos')}
         >
           <Ionicons name="document-text-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Termos de uso</Text>
@@ -149,10 +149,34 @@ export default function ConfiguracoesScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.row, { borderBottomColor: theme.divider }]}
-          onPress={() => Linking.openURL('https://vintage.br/privacidade')}
+          onPress={() => router.push('/legal/privacidade')}
         >
           <Ionicons name="shield-outline" size={22} color={theme.textSecondary} />
           <Text style={[styles.rowLabel, { color: theme.text }]}>Política de privacidade</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/legal/diretrizes-comunidade')}
+        >
+          <Ionicons name="people-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Diretrizes da comunidade</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/legal/sobre')}
+        >
+          <Ionicons name="information-circle-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Sobre a Vintage.br</Text>
+          <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.row, { borderBottomColor: theme.divider }]}
+          onPress={() => router.push('/legal/press')}
+        >
+          <Ionicons name="newspaper-outline" size={22} color={theme.textSecondary} />
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Imprensa</Text>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
       </View>

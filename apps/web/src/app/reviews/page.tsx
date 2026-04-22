@@ -15,6 +15,7 @@ interface Review {
   comment?: string;
   sellerReply?: string;
   sellerReplyAt?: string;
+  imageUrls?: string[];
   createdAt: string;
 }
 
@@ -126,6 +127,21 @@ function ReviewsPage() {
                   <StarRating rating={review.rating} />
                   {review.comment && (
                     <p className="text-sm text-gray-600 mt-2">{review.comment}</p>
+                  )}
+                  {review.imageUrls && review.imageUrls.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {review.imageUrls.map((url) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="relative w-20 h-20 rounded-lg overflow-hidden bg-gray-100"
+                        >
+                          <Image src={url} alt="" fill sizes="80px" className="object-cover" unoptimized />
+                        </a>
+                      ))}
+                    </div>
                   )}
                   {review.sellerReply && (
                     <div className="mt-3 pl-3 border-l-2 border-gray-200">

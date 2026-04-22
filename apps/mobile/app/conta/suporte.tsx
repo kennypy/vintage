@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { colors } from '../../src/theme/colors';
 import { apiFetch } from '../../src/services/api';
 
@@ -39,6 +40,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function SupportScreen() {
+  const router = useRouter();
   const [items, setItems] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [subject, setSubject] = useState('');
@@ -136,7 +138,11 @@ export default function SupportScreen() {
         <Text style={styles.empty}>Nenhum ticket aberto.</Text>
       ) : (
         items.map((t) => (
-          <View key={t.id} style={styles.ticketCard}>
+          <TouchableOpacity
+            key={t.id}
+            style={styles.ticketCard}
+            onPress={() => router.push(`/support/${t.id}`)}
+          >
             <View style={styles.ticketHeader}>
               <Text style={styles.ticketSubject}>{t.subject}</Text>
               <Text style={styles.ticketStatus}>{STATUS_LABELS[t.status] ?? t.status}</Text>
@@ -145,7 +151,7 @@ export default function SupportScreen() {
               {CATEGORIES.find((c) => c.value === t.category)?.label ?? t.category} ·{' '}
               {new Date(t.createdAt).toLocaleDateString('pt-BR')}
             </Text>
-          </View>
+          </TouchableOpacity>
         ))
       )}
     </ScrollView>

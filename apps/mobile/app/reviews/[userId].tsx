@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  Image,
   RefreshControl,
   ActivityIndicator,
   StyleSheet,
@@ -90,6 +91,13 @@ export default function ReviewsScreen() {
       <StarRating rating={item.rating} size={16} />
       {item.comment && (
         <Text style={styles.reviewComment}>{item.comment}</Text>
+      )}
+      {item.imageUrls && item.imageUrls.length > 0 && (
+        <View style={styles.imagesRow}>
+          {item.imageUrls.map((url) => (
+            <Image key={url} source={{ uri: url }} style={styles.reviewImage} />
+          ))}
+        </View>
       )}
       {item.sellerReply && (
         <View style={styles.replyBox}>
@@ -223,6 +231,18 @@ const styles = StyleSheet.create({
     color: colors.neutral[700],
     marginTop: 8,
     lineHeight: 20,
+  },
+  imagesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  reviewImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+    backgroundColor: colors.neutral[200],
   },
   replyBox: {
     marginTop: 10,
