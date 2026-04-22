@@ -41,18 +41,37 @@ export default function SegurancaPage() {
       setQrBlobUrl(null);
       return;
     }
-    let revoked = false;
+    // Decode the data URL manually. fetch(dataUrl) would be blocked by
+    // the CSP's connect-src (which also excludes data:), so we parse
+    // the base64 payload directly — pure client-side math, no network.
+    const dataUrl = totpSetup.qrCodeDataUrl;
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx < 0) {
+      setQrBlobUrl(null);
+      return;
+    }
+    const header = dataUrl.slice(0, commaIdx);
+    const payload = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/^data:([^;,]+)/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const isBase64 = header.includes(';base64');
     let url: string | null = null;
-    fetch(totpSetup.qrCodeDataUrl)
-      .then((r) => r.blob())
-      .then((blob) => {
-        if (revoked) return;
-        url = URL.createObjectURL(blob);
-        setQrBlobUrl(url);
-      })
-      .catch(() => setQrBlobUrl(null));
+    try {
+      let blob: Blob;
+      if (isBase64) {
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        blob = new Blob([bytes], { type: mime });
+      } else {
+        blob = new Blob([decodeURIComponent(payload)], { type: mime });
+      }
+      url = URL.createObjectURL(blob);
+      setQrBlobUrl(url);
+    } catch {
+      setQrBlobUrl(null);
+    }
     return () => {
-      revoked = true;
       if (url) URL.revokeObjectURL(url);
     };
   }, [totpSetup?.qrCodeDataUrl]);
