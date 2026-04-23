@@ -32,7 +32,7 @@ export class FcmService {
     }
   }
 
-  async sendOrderNotification(userId: string, orderId: string, status: string): Promise<void> {
+  async sendOrderNotification(_userId: string, _orderId: string, _status: string): Promise<void> {
     try {
       const titles: Record<string, string> = {
         pending: 'Pedido criado',
@@ -42,25 +42,25 @@ export class FcmService {
       };
 
       // TODO: Send via FCM
-      this.logger.log(`Sent notification to user ${userId} for order ${orderId}`);
+      // this.logger.log(`Sent notification to user ${_userId} for order ${_orderId}`);
     } catch (error) {
       this.logger.error(`Failed to send order notification: ${String(error).slice(0, 200)}`);
     }
   }
 
-  async sendMessageNotification(userId: string, senderName: string): Promise<void> {
+  async sendMessageNotification(_userId: string, _senderName: string): Promise<void> {
     try {
       // TODO: Send via FCM
-      this.logger.log(`Sent message notification to user ${userId} from ${senderName}`);
+      // this.logger.log(`Sent message notification to user ${_userId} from ${_senderName}`);
     } catch (error) {
       this.logger.error(`Failed to send message notification: ${String(error).slice(0, 200)}`);
     }
   }
 
-  async sendReviewNotification(userId: string, reviewerName: string): Promise<void> {
+  async sendReviewNotification(_userId: string, _reviewerName: string): Promise<void> {
     try {
       // TODO: Send via FCM
-      this.logger.log(`Sent review notification to user ${userId} from ${reviewerName}`);
+      // this.logger.log(`Sent review notification to user ${_userId} from ${_reviewerName}`);
     } catch (error) {
       this.logger.error(`Failed to send review notification: ${String(error).slice(0, 200)}`);
     }
