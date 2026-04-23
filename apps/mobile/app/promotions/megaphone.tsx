@@ -26,10 +26,16 @@ export default function MegaphoneScreen() {
   const [activeListings, setActiveListings] = useState<ActiveListing[]>([]);
   const [loadingListings, setLoadingListings] = useState(false);
   const [boosting, setBoosting] = useState(false);
+  // Rendered inside the picker sheet on fetch failure. Keeps the error
+  // surface single (no paired Alert popup) and distinguishes "couldn't
+  // load" from "no active listings" — the previous silent demo fallback
+  // made a real API failure look like an empty account.
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   const fetchActiveListings = useCallback(async () => {
     if (!user?.id) return;
     setLoadingListings(true);
+    setPickerError(null);
     try {
       // Pull active promotions in parallel so we can mark each listing's
       // current state instead of pretending they're all re-activatable —
@@ -63,13 +69,21 @@ export default function MegaphoneScreen() {
       });
       setActiveListings(active);
     } catch {
+      // Dev convenience: if the in-memory demo store has items for this
+      // user, show them — otherwise surface the real error so a network /
+      // auth failure isn't indistinguishable from an empty account.
       const demoItems = getUserDemoListings(user.id).map((l) => ({
         id: l.id,
         title: l.title,
         priceBrl: l.priceBrl,
         imageUrl: l.images[0]?.url,
       }));
-      setActiveListings(demoItems);
+      if (demoItems.length > 0) {
+        setActiveListings(demoItems);
+      } else {
+        setActiveListings([]);
+        setPickerError('Não foi possível carregar seus anúncios.');
+      }
     } finally {
       setLoadingListings(false);
     }
@@ -187,6 +201,14 @@ export default function MegaphoneScreen() {
 
             {loadingListings ? (
               <ActivityIndicator size="large" color={colors.primary[500]} style={{ marginVertical: 32 }} />
+            ) : pickerError ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="cloud-offline-outline" size={48} color={colors.error[500]} />
+                <Text style={[styles.emptyText, { color: colors.error[500] }]}>{pickerError}</Text>
+                <TouchableOpacity onPress={fetchActiveListings} style={styles.retryBtn}>
+                  <Text style={[styles.retryBtnText, { color: colors.primary[600] }]}>Tentar novamente</Text>
+                </TouchableOpacity>
+              </View>
             ) : activeListings.length === 0 ? (
               <View style={styles.emptyState}>
                 <Ionicons name="pricetag-outline" size={48} color={theme.textTertiary} />
@@ -296,6 +318,8 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700' },
   emptyState: { alignItems: 'center', padding: 32, gap: 12 },
   emptyText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
+  retryBtnText: { fontSize: 14, fontWeight: '600' },
   listingList: { paddingHorizontal: 16 },
   listingRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8,
