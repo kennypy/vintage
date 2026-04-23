@@ -14,6 +14,14 @@ interface Listing {
   price?: number;
   status: string;
   images?: Array<{ url: string } | string>;
+  activeUntil?: string;
+}
+
+interface ActivePromotion {
+  id: string;
+  type: string;
+  endsAt: string;
+  listingId?: string | null;
 }
 
 const BENEFITS = [
@@ -48,13 +56,32 @@ export default function BoostPage() {
     setErrorMessage(null);
     try {
       const user = await apiGet<{ id: string }>('/users/me');
-      const res = await apiGet<Listing[] | { data?: Listing[]; items?: Listing[] }>(
-        `/users/${encodeURIComponent(user.id)}/listings`,
-      );
+      // Pull listings + active promotions together so already-impulsioned
+      // listings show up as such instead of letting the user retry into
+      // a server-side 400.
+      const [res, promotions] = await Promise.all([
+        apiGet<Listing[] | { data?: Listing[]; items?: Listing[] }>(
+          `/users/${encodeURIComponent(user.id)}/listings`,
+        ),
+        apiGet<ActivePromotion[]>('/promotions').catch(() => [] as ActivePromotion[]),
+      ]);
       const all = Array.isArray(res)
         ? res
         : ((res as { items?: Listing[] }).items ?? (res as { data?: Listing[] }).data ?? []);
-      setListings(all.filter((l) => l.status === 'ACTIVE'));
+      const bumpByListing = new Map<string, string>();
+      for (const promo of promotions) {
+        if (promo.type === 'BUMP' && promo.listingId) {
+          bumpByListing.set(promo.listingId, promo.endsAt);
+        }
+      }
+      const mapped = all
+        .filter((l) => l.status === 'ACTIVE')
+        .map((l) => ({ ...l, activeUntil: bumpByListing.get(l.id) }));
+      mapped.sort((a, b) => {
+        if (!!a.activeUntil === !!b.activeUntil) return 0;
+        return a.activeUntil ? -1 : 1;
+      });
+      setListings(mapped);
     } catch {
       setErrorMessage('Nao foi possivel carregar seus anuncios.');
     } finally {
@@ -62,12 +89,27 @@ export default function BoostPage() {
     }
   };
 
+  const formatUntil = (iso: string) =>
+    new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+
   const handleConfirm = async () => {
     if (!confirmListingId) return;
     setBoosting(true);
     setErrorMessage(null);
     try {
-      await apiPost('/promotions/bump', { listingId: confirmListingId });
+      const promo = await apiPost<{ endsAt: string }>('/promotions/bump', {
+        listingId: confirmListingId,
+      });
+      const activatedId = confirmListingId;
+      const endsAt = promo?.endsAt ?? new Date(Date.now() + BUMP_DURATION_DAYS * 864e5).toISOString();
+      setListings((prev) => {
+        const next = prev.map((l) => (l.id === activatedId ? { ...l, activeUntil: endsAt } : l));
+        next.sort((a, b) => {
+          if (!!a.activeUntil === !!b.activeUntil) return 0;
+          return a.activeUntil ? -1 : 1;
+        });
+        return next;
+      });
       setConfirmListingId(null);
       setShowPicker(false);
       setSuccessMessage(
@@ -191,24 +233,44 @@ export default function BoostPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {listings.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setConfirmListingId(item.id)}
-                      disabled={boosting}
-                      className={`w-full text-left p-3 rounded-xl border transition ${
-                        confirmListingId === item.id
-                          ? 'border-brand-500 bg-brand-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                      <p className="text-sm text-brand-600 font-semibold mt-0.5">
-                        {formatBRL(item.priceBrl ?? item.price ?? 0)}
-                      </p>
-                    </button>
-                  ))}
+                  {listings.map((item) => {
+                    const isActive = !!item.activeUntil;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => !isActive && setConfirmListingId(item.id)}
+                        disabled={boosting || isActive}
+                        className={`w-full text-left p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
+                          isActive
+                            ? 'border-green-200 bg-green-50 cursor-not-allowed'
+                            : confirmListingId === item.id
+                              ? 'border-brand-500 bg-brand-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
+                          <p className="text-sm text-brand-600 font-semibold mt-0.5">
+                            {formatBRL(item.priceBrl ?? item.price ?? 0)}
+                          </p>
+                          {isActive && item.activeUntil && (
+                            <p className="text-xs font-semibold text-green-700 mt-1 flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                              </svg>
+                              Impulsionado até {formatUntil(item.activeUntil)}
+                            </p>
+                          )}
+                        </div>
+                        {isActive && (
+                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full shrink-0">
+                            Ativado
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

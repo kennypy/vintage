@@ -1,12 +1,13 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, ActivityIndicator, Modal } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
-import { createBump } from '../../src/services/promotions';
+import { createBump, getActivePromotions } from '../../src/services/promotions';
 import { getUserListings } from '../../src/services/users';
 import { useAuth } from '../../src/contexts/AuthContext';
+import { showThemedAlert } from '../../src/components/ThemedAlert';
 import { BUMP_PRICE_BRL, BUMP_DURATION_DAYS } from '@vintage/shared';
 
 const PLANS = [
@@ -20,6 +21,7 @@ interface ListingItem {
   title: string;
   priceBrl: number;
   images?: { url: string }[];
+  activeUntil?: string;
 }
 
 export default function BoostScreen() {
@@ -36,19 +38,38 @@ export default function BoostScreen() {
     setLoadingListings(true);
     try {
       if (!user?.id) return;
-      const data = await getUserListings(user.id);
-      const active = (data.data ?? data).filter((l: ListingItem & { status?: string }) => l.status === 'ACTIVE');
+      // Fetch listings and active promotions in parallel so we can flag
+      // already-boosted listings; tapping one after the first bump was
+      // just producing a server-side error popup.
+      const [data, promotions] = await Promise.all([
+        getUserListings(user.id),
+        getActivePromotions().catch(() => [] as { listingId?: string; type: string; endsAt: string }[]),
+      ]);
+      const bumpByListing = new Map<string, string>();
+      for (const promo of promotions) {
+        if (promo.type === 'BUMP' && promo.listingId) {
+          bumpByListing.set(promo.listingId, promo.endsAt);
+        }
+      }
+      const active = ((data.data ?? data) as (ListingItem & { status?: string })[])
+        .filter((l) => l.status === 'ACTIVE')
+        .map((l) => ({ ...l, activeUntil: bumpByListing.get(l.id) }));
+      active.sort((a, b) => {
+        if (!!a.activeUntil === !!b.activeUntil) return 0;
+        return a.activeUntil ? -1 : 1;
+      });
       setListings(active);
     } catch {
-      Alert.alert('Erro', 'Não foi possível carregar seus anúncios.');
+      showThemedAlert('Erro', 'Não foi possível carregar seus anúncios.');
     } finally {
       setLoadingListings(false);
     }
   };
 
-  const handleBoost = (listingId: string) => {
+  const handleBoost = (listing: ListingItem) => {
+    if (listing.activeUntil) return; // already boosted
     const priceFormatted = BUMP_PRICE_BRL.toFixed(2).replace('.', ',');
-    Alert.alert(
+    showThemedAlert(
       'Confirmar pagamento',
       `Confirmar pagamento de R$ ${priceFormatted}?\n\nSeu anúncio será impulsionado por ${BUMP_DURATION_DAYS} dias.`,
       [
@@ -58,16 +79,25 @@ export default function BoostScreen() {
           onPress: async () => {
             setBoosting(true);
             try {
-              await createBump(listingId);
-              setShowPicker(false);
-              Alert.alert(
+              const promo = await createBump(listing.id);
+              setListings((prev) => {
+                const updated = prev.map((item) =>
+                  item.id === listing.id ? { ...item, activeUntil: promo.endsAt } : item,
+                );
+                updated.sort((a, b) => {
+                  if (!!a.activeUntil === !!b.activeUntil) return 0;
+                  return a.activeUntil ? -1 : 1;
+                });
+                return updated;
+              });
+              showThemedAlert(
                 'Impulsionado!',
                 `Seu anúncio aparece no topo das buscas por ${BUMP_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
-                [{ text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') }],
+                [{ text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') }, { text: 'OK', style: 'cancel' }],
               );
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : 'Não foi possível impulsionar o anúncio. Tente novamente.';
-              Alert.alert('Erro', message);
+              showThemedAlert('Erro', message);
             } finally {
               setBoosting(false);
             }
@@ -75,6 +105,11 @@ export default function BoostScreen() {
         },
       ],
     );
+  };
+
+  const formatUntil = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
   };
 
   return (
@@ -157,23 +192,43 @@ export default function BoostScreen() {
               <FlatList
                 data={listings}
                 keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.listingItem, { borderColor: theme.border }]}
-                    onPress={() => handleBoost(item.id)}
-                    disabled={boosting}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={[styles.listingPrice, { color: colors.primary[600] }]}>
-                        R$ {Number(item.priceBrl).toFixed(2).replace('.', ',')}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
-                  </TouchableOpacity>
-                )}
+                renderItem={({ item }) => {
+                  const isActive = !!item.activeUntil;
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.listingItem,
+                        { borderColor: theme.border },
+                        isActive && { backgroundColor: theme.cardSecondary },
+                      ]}
+                      onPress={() => handleBoost(item)}
+                      disabled={boosting || isActive}
+                      activeOpacity={isActive ? 1 : 0.6}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={[styles.listingPrice, { color: colors.primary[600] }]}>
+                          R$ {Number(item.priceBrl).toFixed(2).replace('.', ',')}
+                        </Text>
+                        {isActive && item.activeUntil ? (
+                          <View style={styles.activeBadge}>
+                            <Ionicons name="rocket" size={12} color={colors.success[600]} />
+                            <Text style={[styles.activeBadgeText, { color: colors.success[600] }]}>
+                              Impulsionado até {formatUntil(item.activeUntil)}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      {isActive ? (
+                        <Ionicons name="checkmark-circle" size={20} color={colors.success[500]} />
+                      ) : (
+                        <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
                 removeClippedSubviews={true}
                 maxToRenderPerBatch={10}
                 windowSize={11}
@@ -234,8 +289,12 @@ const styles = StyleSheet.create({
   emptyText: { textAlign: 'center', marginTop: 40, fontSize: 14 },
   listingItem: {
     flexDirection: 'row', alignItems: 'center', padding: 14,
-    borderBottomWidth: 1, gap: 12,
+    borderBottomWidth: 1, gap: 12, borderRadius: 8,
   },
   listingTitle: { fontSize: 14, fontWeight: '500' },
   listingPrice: { fontSize: 13, fontWeight: '600', marginTop: 2 },
+  activeBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
+  },
+  activeBadgeText: { fontSize: 12, fontWeight: '600' },
 });

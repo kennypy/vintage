@@ -8,12 +8,14 @@ import {
   ThemeProvider as NavThemeProvider,
 } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import { FavoritesProvider } from '../src/contexts/FavoritesContext';
 import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { PostHogBootstrap } from '../src/components/PostHogBootstrap';
+import { ThemedAlertHost } from '../src/components/ThemedAlert';
 import { colors } from '../src/theme/colors';
 
 function AppShell() {
@@ -56,14 +58,21 @@ function AppShell() {
     }
   }, [isAuthenticated, isLoading, inAuthGroup, isGuestAllowed, isListingDetail, isSellerProfile, router]);
 
-  // Full-screen (hide Android navigation bar) when the user opts in.
-  // Expo SDK 54+ enables edge-to-edge by default, and setBehaviorAsync then
-  // warns + no-ops; only invoke these when the user actually toggled on,
-  // and swallow any runtime error.
+  // Expo SDK 54+ enables edge-to-edge on Android by default, so the system
+  // navigation bar is transparent and content can draw behind it. The
+  // SafeAreaProvider below feeds react-navigation's bottom tab bar the
+  // correct inset so it doesn't sit under the gesture/3-button area. Here
+  // we only toggle explicit visibility when the user opts into fullscreen,
+  // and restore it otherwise — without this, once a user turns fullscreen
+  // on the bar stays hidden across sessions.
   useEffect(() => {
-    if (Platform.OS !== 'android' || !fullScreen) return;
-    NavigationBar.setVisibilityAsync('hidden').catch(() => {});
-    NavigationBar.setBehaviorAsync('inset-swipe').catch(() => {});
+    if (Platform.OS !== 'android') return;
+    if (fullScreen) {
+      NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+      NavigationBar.setBehaviorAsync('inset-swipe').catch(() => {});
+    } else {
+      NavigationBar.setVisibilityAsync('visible').catch(() => {});
+    }
   }, [fullScreen]);
 
   // Show a spinner while auth state is determined.
@@ -95,6 +104,7 @@ function AppShell() {
   return (
     <NavThemeProvider value={navTheme}>
       <PostHogBootstrap />
+      <ThemedAlertHost />
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -181,15 +191,22 @@ function AppShell() {
 export default function RootLayout() {
   return (
     <ErrorBoundary>
-      <ThemeProvider>
-        <AuthProvider>
-          <FeatureFlagsProvider>
-            <FavoritesProvider>
-              <AppShell />
-            </FavoritesProvider>
-          </FeatureFlagsProvider>
-        </AuthProvider>
-      </ThemeProvider>
+      {/* SafeAreaProvider must be above AppShell so every descendant — the
+          Stack header, the (tabs) bottom bar, modals — can read real insets.
+          Expo SDK 54 draws under the status/nav bars by default; without a
+          provider react-native-safe-area-context defaults to zero insets
+          and the system chrome overlaps app content. */}
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <FeatureFlagsProvider>
+              <FavoritesProvider>
+                <AppShell />
+              </FavoritesProvider>
+            </FeatureFlagsProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
