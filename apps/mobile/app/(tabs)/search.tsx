@@ -7,7 +7,7 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { ListingCard } from '../../src/components/ListingCard';
 import { getListings } from '../../src/services/listings';
-import { searchDemoListings } from '../../src/services/demoStore';
+import { searchDemoListings, isDemoModeSync } from '../../src/services/demoStore';
 import type { Listing } from '../../src/services/listings';
 
 const CATEGORIES = [
@@ -54,6 +54,11 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Distinguishes "search returned nothing" from "search call failed".
+  // Previously a failure silently fell back to searchDemoListings —
+  // real users saw seeded demo results and assumed their query returned
+  // irrelevant matches instead of realising the API was down.
+  const [searchError, setSearchError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const performSearch = useCallback(async (
@@ -70,6 +75,7 @@ export default function SearchScreen() {
 
     setLoading(true);
     setHasSearched(true);
+    setSearchError(null);
     try {
       const params: Record<string, string | undefined> = {
         search: searchQuery || undefined,
@@ -79,14 +85,23 @@ export default function SearchScreen() {
       };
       const response = await getListings(params);
       setResults(response.items.map(mapListingToCard));
-    } catch (_error) {
-      const demoResults = searchDemoListings({
-        search: searchQuery || undefined,
-        category: category || undefined,
-        condition: condition || undefined,
-        size: size || undefined,
-      });
-      setResults(demoResults.map(mapListingToCard));
+    } catch (error) {
+      if (isDemoModeSync()) {
+        const demoResults = searchDemoListings({
+          search: searchQuery || undefined,
+          category: category || undefined,
+          condition: condition || undefined,
+          size: size || undefined,
+        });
+        setResults(demoResults.map(mapListingToCard));
+      } else {
+        setResults([]);
+        setSearchError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Não foi possível buscar agora. Tente novamente.',
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -271,10 +286,23 @@ export default function SearchScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum resultado encontrado</Text>
-            </View>
+            searchError ? (
+              <View style={styles.empty}>
+                <Ionicons name="cloud-offline-outline" size={48} color={colors.error[500]} />
+                <Text style={[styles.emptyText, { color: colors.error[500] }]}>{searchError}</Text>
+                <TouchableOpacity
+                  onPress={() => performSearch(query, selectedCategory, selectedCondition, selectedSize)}
+                  style={{ paddingVertical: 8, paddingHorizontal: 16, marginTop: 4 }}
+                >
+                  <Text style={{ color: colors.primary[600], fontSize: 14, fontWeight: '600' }}>Tentar novamente</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Ionicons name="search-outline" size={48} color={theme.textTertiary} />
+                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Nenhum resultado encontrado</Text>
+              </View>
+            )
           }
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}

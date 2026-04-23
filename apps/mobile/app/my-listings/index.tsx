@@ -57,13 +57,24 @@ export default function MyListingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<StatusFilter>('all');
+  // Rendered inline when the fetch fails so a real API error can't hide
+  // behind a silent fallback to the in-memory demo store. That fallback
+  // was directly responsible for "created a listing and nothing showed" —
+  // the create POST failed, the user saw a fake success, and my-listings
+  // then quietly served stale demo items instead of flagging the load
+  // failure so they could retry.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchListings = useCallback(async () => {
     if (!user?.id) return;
+    setFetchError(null);
     try {
       const data = await getUserListings(user.id);
       setListings(data.items as unknown as MyListing[]);
-    } catch (_error) {
+    } catch (error) {
+      // Keep the in-memory demo store usable for local dev (we add to it
+      // explicitly from e.g. seed scripts) but only surface those items
+      // when they actually exist; otherwise flag the failure.
       const demoItems = getUserDemoListings(user.id).map((l) => ({
         id: l.id,
         title: l.title,
@@ -76,7 +87,16 @@ export default function MyListingsScreen() {
         favoriteCount: 0,
         viewCount: l.viewCount,
       }));
-      setListings(demoItems);
+      if (demoItems.length > 0) {
+        setListings(demoItems);
+      } else {
+        setListings([]);
+        setFetchError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Não foi possível carregar seus anúncios.',
+        );
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -211,7 +231,15 @@ export default function MyListingsScreen() {
         ))}
       </View>
 
-      {filteredListings.length === 0 ? (
+      {fetchError ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Erro ao carregar anúncios"
+          subtitle={fetchError}
+          actionLabel="Tentar novamente"
+          onAction={fetchListings}
+        />
+      ) : filteredListings.length === 0 ? (
         <EmptyState
           icon="pricetag-outline"
           title="Nenhum anúncio encontrado"

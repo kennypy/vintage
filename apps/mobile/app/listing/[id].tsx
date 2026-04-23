@@ -12,7 +12,7 @@ import { useFavorites } from '../../src/contexts/FavoritesContext';
 import { getListing } from '../../src/services/listings';
 import { startConversation } from '../../src/services/messages';
 import type { Listing } from '../../src/services/listings';
-import { getDemoListing, DEMO_PHOTOS, startDemoConversation } from '../../src/services/demoStore';
+import { getDemoListing, isDemoModeSync, startDemoConversation } from '../../src/services/demoStore';
 import { BUYER_PROTECTION_FIXED_BRL, BUYER_PROTECTION_RATE } from '@vintage/shared';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -37,6 +37,11 @@ export default function ListingDetailScreen() {
   const { isFavorited, toggleFavorite } = useFavorites();
   const [loading, setLoading] = useState(true);
   const [listing, setListing] = useState<Listing | null>(null);
+  // Separates "listing not found / load failed" from "still loading".
+  // Previously we silently fell back to a hardcoded "Vestido Zara"
+  // stub — so a 404 or 500 rendered a completely unrelated fake
+  // listing and the user had no idea the real one was gone.
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [offerAmount, setOfferAmount] = useState('');
   const [offerLoading, setOfferLoading] = useState(false);
@@ -46,34 +51,24 @@ export default function ListingDetailScreen() {
 
   useEffect(() => {
     async function fetchListing() {
+      setFetchError(null);
       try {
         const data = await getListing(id ?? '');
         setListing(data);
-      } catch {
-        const demoListing = getDemoListing(id ?? '');
+      } catch (error) {
+        // Demo mode still surfaces demo listings from the in-memory
+        // store — that's an intentional product path for seeded demo
+        // accounts. Real accounts see an honest error.
+        const demoListing = isDemoModeSync() ? getDemoListing(id ?? '') : null;
         if (demoListing) {
           setListing(demoListing);
         } else {
-          setListing({
-            id: id ?? '1',
-            title: 'Vestido Zara tamanho M',
-            description: 'Vestido preto fluido, usado 2 vezes, sem defeitos. Tecido leve, ideal para o verão. Excelente estado de conservação.',
-            priceBrl: 89.9,
-            condition: 'VERY_GOOD',
-            size: 'M',
-            color: 'Preto',
-            images: [
-              { id: 'img1', url: DEMO_PHOTOS[0], order: 0 },
-              { id: 'img2', url: DEMO_PHOTOS[1], order: 1 },
-              { id: 'img3', url: DEMO_PHOTOS[2], order: 2 },
-            ],
-            seller: { id: 'seller1', name: 'Maria Silva', rating: 4.8 },
-            category: 'Moda Feminina',
-            brand: 'Zara',
-            viewCount: 42,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
+          setListing(null);
+          setFetchError(
+            error instanceof Error && error.message
+              ? error.message
+              : 'Não foi possível carregar este anúncio.',
+          );
         }
       } finally {
         setLoading(false);
@@ -181,10 +176,27 @@ export default function ListingDetailScreen() {
     }
   };
 
-  if (loading || !listing) {
+  if (loading) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
+      </View>
+    );
+  }
+
+  if (!listing) {
+    return (
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background, padding: 24 }]}>
+        <Ionicons name="cloud-offline-outline" size={48} color={colors.error[500]} />
+        <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600', marginTop: 12, textAlign: 'center' }}>
+          Anúncio indisponível
+        </Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 14, marginTop: 6, textAlign: 'center', lineHeight: 20 }}>
+          {fetchError ?? 'Este anúncio não foi encontrado.'}
+        </Text>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20, paddingVertical: 10, paddingHorizontal: 20 }}>
+          <Text style={{ color: colors.primary[600], fontSize: 14, fontWeight: '600' }}>Voltar</Text>
+        </TouchableOpacity>
       </View>
     );
   }
