@@ -28,6 +28,9 @@ export default function BoostScreen() {
   const [listings, setListings] = useState<ListingItem[]>([]);
   const [loadingListings, setLoadingListings] = useState(false);
   const [boosting, setBoosting] = useState(false);
+  // Surfaced inline inside the picker sheet — the user said one error
+  // message is enough, so we dropped the paired showThemedAlert popup.
+  const [pickerError, setPickerError] = useState<string | null>(null);
   // Default to the "popular" tier (3 days) so the user can proceed without
   // tapping anything if that's what they want. The previous hard-coded
   // display made the other cards look tappable when they weren't.
@@ -37,6 +40,7 @@ export default function BoostScreen() {
   const openPicker = async () => {
     setShowPicker(true);
     setLoadingListings(true);
+    setPickerError(null);
     try {
       if (!user?.id) return;
       // Fetch listings and active promotions in parallel so we can flag
@@ -61,7 +65,8 @@ export default function BoostScreen() {
       });
       setListings(active);
     } catch {
-      showThemedAlert('Erro', 'Não foi possível carregar seus anúncios.');
+      setPickerError('Não foi possível carregar seus anúncios.');
+      setListings([]);
     } finally {
       setLoadingListings(false);
     }
@@ -204,6 +209,15 @@ export default function BoostScreen() {
             </View>
             {loadingListings ? (
               <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary[500]} />
+            ) : pickerError ? (
+              <View style={styles.sheetErrorBlock}>
+                <Text style={[styles.emptyText, { color: colors.error[500], marginTop: 0 }]}>
+                  {pickerError}
+                </Text>
+                <TouchableOpacity onPress={openPicker} style={styles.retryBtn}>
+                  <Text style={[styles.retryBtnText, { color: colors.primary[600] }]}>Tentar novamente</Text>
+                </TouchableOpacity>
+              </View>
             ) : listings.length === 0 ? (
               <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
                 Você não tem anúncios ativos para impulsionar.
@@ -314,6 +328,9 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: '700' },
   emptyText: { textAlign: 'center', marginTop: 40, fontSize: 14 },
+  sheetErrorBlock: { alignItems: 'center', marginTop: 40, gap: 12 },
+  retryBtn: { paddingVertical: 8, paddingHorizontal: 16 },
+  retryBtnText: { fontSize: 14, fontWeight: '600' },
   listingItem: {
     flexDirection: 'row', alignItems: 'center', padding: 14,
     borderBottomWidth: 1, gap: 12, borderRadius: 8,

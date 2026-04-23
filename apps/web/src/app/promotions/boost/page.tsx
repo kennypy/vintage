@@ -40,6 +40,9 @@ export default function BoostPage() {
   const [confirmListingId, setConfirmListingId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Load-time failures surface only inside the picker sheet so the user
+  // doesn't also see a duplicate banner at the top of the page.
+  const [pickerError, setPickerError] = useState<string | null>(null);
   // Default to the "popular" tier so the CTA works without further input.
   const defaultTier =
     BUMP_TIERS.find((t) => t.popular) ??
@@ -61,6 +64,7 @@ export default function BoostPage() {
     setShowPicker(true);
     setLoadingListings(true);
     setErrorMessage(null);
+    setPickerError(null);
     try {
       const user = await apiGet<{ id: string }>('/users/me');
       // Pull listings + active promotions together so already-impulsioned
@@ -90,7 +94,8 @@ export default function BoostPage() {
       });
       setListings(mapped);
     } catch {
-      setErrorMessage('Nao foi possivel carregar seus anuncios.');
+      setPickerError('Não foi possível carregar seus anúncios.');
+      setListings([]);
     } finally {
       setLoadingListings(false);
     }
@@ -259,9 +264,20 @@ export default function BoostPage() {
                   <div className="animate-spin inline-block w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full" />
                   <p className="text-sm text-gray-500 mt-2">Carregando...</p>
                 </div>
+              ) : pickerError ? (
+                <div className="text-center py-8 space-y-3">
+                  <p className="text-sm text-red-600">{pickerError}</p>
+                  <button
+                    type="button"
+                    onClick={openPicker}
+                    className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
               ) : listings.length === 0 ? (
                 <p className="text-center text-gray-500 py-8 text-sm">
-                  Voce nao tem anuncios ativos para impulsionar.
+                  Você não tem anúncios ativos para impulsionar.
                 </p>
               ) : (
                 <div className="space-y-2">
