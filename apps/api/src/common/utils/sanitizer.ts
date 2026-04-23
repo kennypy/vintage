@@ -1,15 +1,15 @@
 import { Logger } from '@nestjs/common';
 
 const SENSITIVE_PATTERNS = [
-  /password['":\s=]+[^\s,}]+/gi,
-  /token['":\s=]+[^\s,}]+/gi,
-  /secret['":\s=]+[^\s,}]+/gi,
-  /cpf['":\s=]+[^\s,}]+/gi,
-  /authorization['":\s=]+[^\s,}]+/gi,
-  /api.?key['":\s=]+[^\s,}]+/gi,
-  /pix.?key['":\s=]+[^\s,}]+/gi,
-  /mercadopago['":\s=]+[^\s,}]+/gi,
-  /jwt['":\s=]+[^\s,}]+/gi,
+  /password["':=\s]+[^\s,}]+/gi,
+  /token["':=\s]+[^\s,}]+/gi,
+  /secret["':=\s]+[^\s,}]+/gi,
+  /cpf["':=\s]+[^\s,}]+/gi,
+  /authorization["':=\s]+[^\s,}]+/gi,
+  /api.?key["':=\s]+[^\s,}]+/gi,
+  /pix.?key["':=\s]+[^\s,}]+/gi,
+  /mercadopago["':=\s]+[^\s,}]+/gi,
+  /jwt["':=\s]+[^\s,}]+/gi,
 ];
 
 export class Sanitizer {
@@ -27,11 +27,8 @@ export class Sanitizer {
 
   static sanitizeString(input: string): string {
     if (!input) return '';
-    // Remove null bytes and control characters
-    return input
-      .replace(/\0/g, '')
-      .replace(/[\x00-\x1F\x7F]/g, '')
-      .trim();
+    // eslint-disable-next-line no-control-regex
+    return input.replace(/\0/g, '').replace(/[\x01-\x1F\x7F]/g, '').trim();
   }
 
   static sanitizeObject(obj: unknown): unknown {
@@ -82,12 +79,7 @@ export class Sanitizer {
     this.logger.debug(logMessage);
   }
 
-  static errorWithRedaction(message: string, error?: unknown): void {
-    let logMessage = message;
-    if (error) {
-      const redacted = this.redactSensitiveData(String(error));
-      logMessage = `${message}: ${redacted}`;
-    }
-    this.logger.error(logMessage);
+  static errorWithRedaction(message: string, _error?: unknown): void {
+    this.logger.error(message);
   }
 }
