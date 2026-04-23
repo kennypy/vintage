@@ -7,6 +7,7 @@ import {
 import { ReviewsService } from './reviews.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FcmService } from '../notifications/fcm.service';
 
 const mockNotifications = {
   createNotification: jest.fn().mockResolvedValue(null),
@@ -39,6 +40,15 @@ describe('ReviewsService', () => {
         ReviewsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
+        {
+          provide: FcmService,
+          useValue: {
+            registerDeviceToken: jest.fn().mockResolvedValue(undefined),
+            sendOrderNotification: jest.fn().mockResolvedValue(undefined),
+            sendMessageNotification: jest.fn().mockResolvedValue(undefined),
+            sendReviewNotification: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
