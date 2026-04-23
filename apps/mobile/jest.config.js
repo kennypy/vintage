@@ -1,6 +1,18 @@
 const path = require('path');
 const fs = require('fs');
-const preset = require('jest-expo/jest-preset');
+
+// jest-expo is optional - if not installed, use a basic preset
+let preset = {};
+try {
+  preset = require('jest-expo/jest-preset');
+} catch (e) {
+  // jest-expo not available, use basic react-native preset
+  preset = {
+    testEnvironment: 'node',
+    moduleNameMapper: {},
+    setupFiles: [],
+  };
+}
 
 // jest-expo's withTypescriptMapping reads tsconfig paths and converts them to
 // moduleNameMapper. Our tsconfig maps "react" to local @types/react for type
