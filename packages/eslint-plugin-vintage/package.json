@@ -1,0 +1,8 @@
+{
+  "name": "@vintage/eslint-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./index.js",
+  "type": "commonjs",
+  "description": "Internal ESLint rules for the Vintage.br monorepo"
+}
