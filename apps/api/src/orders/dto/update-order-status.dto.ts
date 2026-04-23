@@ -11,5 +11,5 @@ export enum OrderStatus {
 
 export class UpdateOrderStatusDto {
   @IsEnum(OrderStatus)
-  status: OrderStatus;
+  status!: OrderStatus;
 }

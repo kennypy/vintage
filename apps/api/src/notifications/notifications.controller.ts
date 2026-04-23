@@ -1,15 +1,19 @@
-import { Controller, Get, Patch, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Post, Query, UseGuards, Body } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { NotificationsService } from './notifications.service';
+import { FcmService } from './fcm.service';
 
 @ApiTags('notifications')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly fcmService: FcmService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Listar notificações' })
@@ -27,5 +31,14 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Marcar todas como lidas' })
   markAllAsRead(@CurrentUser() user: AuthUser) {
     return this.notificationsService.markAllAsRead(user.id);
+  }
+
+  @Post('device-token/register')
+  @ApiOperation({ summary: 'Registrar token de dispositivo para push notifications' })
+  registerDeviceToken(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { token: string },
+  ) {
+    return this.fcmService.registerDeviceToken(user.id, body.token);
   }
 }
