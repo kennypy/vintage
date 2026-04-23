@@ -22,11 +22,11 @@ export class FcmService {
     }
   }
 
-  async registerDeviceToken(userId: string, token: string): Promise<void> {
+  async registerDeviceToken(_userId: string, _token: string): Promise<void> {
     try {
       // TODO: Store token in database
       // await this.db.userDeviceToken.create({ userId, token });
-      this.logger.log(`Registered FCM token for user ${userId}`);
+      // this.logger.log(`Registered FCM token for user ${_userId}`);
     } catch (error) {
       this.logger.error(`Failed to register FCM token: ${String(error).slice(0, 200)}`);
     }
@@ -34,15 +34,13 @@ export class FcmService {
 
   async sendOrderNotification(_userId: string, _orderId: string, _status: string): Promise<void> {
     try {
-      const titles: Record<string, string> = {
-        pending: 'Pedido criado',
-        paid: 'Pagamento confirmado',
-        shipped: 'Seu pedido foi enviado',
-        delivered: 'Pedido entregue',
-      };
-
-      // TODO: Send via FCM
-      // this.logger.log(`Sent notification to user ${_userId} for order ${_orderId}`);
+      // TODO: Send via FCM - titles map will be used when firebase is configured
+      // const titles: Record<string, string> = {
+      //   pending: 'Pedido criado',
+      //   paid: 'Pagamento confirmado',
+      //   shipped: 'Seu pedido foi enviado',
+      //   delivered: 'Pedido entregue',
+      // };
     } catch (error) {
       this.logger.error(`Failed to send order notification: ${String(error).slice(0, 200)}`);
     }
