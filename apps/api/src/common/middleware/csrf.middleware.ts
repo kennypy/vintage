@@ -32,7 +32,7 @@ export class CsrfMiddleware implements NestMiddleware {
     next();
   }
 
-  private generateToken(): string {
+  generateToken(): string {
     return crypto.randomBytes(32).toString('hex');
   }
 }

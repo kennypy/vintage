@@ -18,6 +18,7 @@ import * as path from 'path';
 import { AppModule } from './app.module';
 import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { CacheInterceptor } from './common/interceptors/cache.interceptor';
 
 const logger = new Logger('Bootstrap');
 
@@ -258,6 +259,9 @@ async function bootstrap() {
     new GlobalExceptionFilter(),
     new JsonSyntaxExceptionFilter(),
   );
+
+  // Global interceptor for response caching (GET endpoints only)
+  app.useGlobalInterceptors(new CacheInterceptor());
 
   // Global validation pipe
   app.useGlobalPipes(

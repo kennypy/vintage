@@ -1,4 +1,4 @@
-import { Injectable, CanActivate, ExecutionContext, TooManyRequestsException } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
 import { Request } from 'express';
 
 interface RateLimitBucket {
@@ -44,8 +44,9 @@ export class RateLimitGuard implements CanActivate {
     };
 
     if (bucket.count > limit) {
-      throw new TooManyRequestsException(
-        `Rate limit exceeded. Try again in ${Math.ceil((bucket.resetAt - now) / 1000)}s`
+      throw new HttpException(
+        `Rate limit exceeded. Try again in ${Math.ceil((bucket.resetAt - now) / 1000)}s`,
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
