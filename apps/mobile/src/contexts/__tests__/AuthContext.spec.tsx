@@ -35,7 +35,7 @@ jest.mock('../../services/permissions', () => ({
 }));
 
 const mockGetToken = getToken as jest.MockedFunction<typeof getToken>;
-const mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
+const _mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
 const mockLogin = loginService as jest.MockedFunction<typeof loginService>;
 const mockLogout = logoutService as jest.MockedFunction<typeof logoutService>;
 const mockRegister = registerService as jest.MockedFunction<typeof registerService>;

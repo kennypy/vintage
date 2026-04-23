@@ -1,7 +1,5 @@
-module.exports = {
-  brand: 'TestBrand',
-  deviceName: 'test-device',
-  isDevice: false,
-  modelName: 'TestModel',
-  manufacturer: 'TestManufacturer',
-};
+export const brand = 'TestBrand';
+export const deviceName = 'test-device';
+export const isDevice = false;
+export const modelName = 'TestModel';
+export const manufacturer = 'TestManufacturer';
