@@ -1,0 +1,18 @@
+appId: br.vintage.app
+name: "Smoke — login form fields render"
+tags:
+  - smoke
+---
+# Cold-launch to an unauthenticated state and verify the login screen
+# renders its input fields + primary CTA. Catches "mount crash on
+# /(auth)/login" regressions that the typecheck/lint pipeline misses.
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: ".*(Entrar|Cadastrar).*"
+    timeout: 20000
+- assertVisible:
+    text: ".*(E-?mail|email).*"
+- assertVisible:
+    text: ".*(Senha|senha).*"

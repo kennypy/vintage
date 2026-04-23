@@ -1,0 +1,60 @@
+appId: br.vintage.app
+name: "Flow — Impulsionar anúncio tier picker"
+tags:
+  - auth-required
+env:
+  VINTAGE_TEST_EMAIL: ""
+  VINTAGE_TEST_PASSWORD: ""
+---
+# Regression test for the decorative-plan-cards bug:
+#   1. sign in with a test account
+#   2. open Profile → Impulsionar anúncio
+#   3. tap each tier (1 dia, 7 dias) and assert the selection actually
+#      changes — if the cards stay visual-only the test fails.
+#
+# Requires VINTAGE_TEST_EMAIL + VINTAGE_TEST_PASSWORD to point at a
+# staging account. Run with:
+#   maestro test .maestro/flow_promotion_boost.yaml \
+#     -e VINTAGE_TEST_EMAIL=foo@example.com \
+#     -e VINTAGE_TEST_PASSWORD=secret
+- launchApp:
+    clearState: true
+- runFlow:
+    when:
+      visible:
+        text: "Entrar"
+    commands:
+      - tapOn:
+          id: "email-input"
+          optional: true
+      - tapOn:
+          text: "E-mail"
+      - inputText: ${VINTAGE_TEST_EMAIL}
+      - tapOn:
+          text: "Senha"
+      - inputText: ${VINTAGE_TEST_PASSWORD}
+      - tapOn:
+          text: "Entrar"
+      - extendedWaitUntil:
+          visible: "Início"
+          timeout: 15000
+- tapOn: "Perfil"
+- extendedWaitUntil:
+    visible: "Impulsionar anúncio"
+    timeout: 10000
+- tapOn: "Impulsionar anúncio"
+- extendedWaitUntil:
+    visible: "Escolha o plano"
+    timeout: 10000
+
+# The three tiers are surfaced from shared BUMP_TIERS — tapping them
+# must toggle selection. The CTA label reflects the selected tier, so
+# we assert the CTA text shifts from "3 dias" → "1 dia" → "7 dias".
+- assertVisible:
+    text: ".*3 dias.*R\\$ 4,90.*"
+- tapOn: "1 dia"
+- assertVisible:
+    text: ".*1 dia.*R\\$ 2,90.*"
+- tapOn: "7 dias"
+- assertVisible:
+    text: ".*7 dias.*R\\$ 9,90.*"
