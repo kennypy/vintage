@@ -1,4 +1,4 @@
-module.exports = {
+export default {
   sessionId: 'test-session-id-12345678',
   appOwnership: 'expo',
   isDevice: false,
