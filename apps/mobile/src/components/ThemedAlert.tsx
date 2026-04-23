@@ -6,15 +6,21 @@ import { colors } from '../theme/colors';
 export type ThemedAlertButtonStyle = 'default' | 'cancel' | 'destructive';
 
 export interface ThemedAlertButton {
-  text: string;
+  text?: string;
   style?: ThemedAlertButtonStyle;
   onPress?: () => void | Promise<void>;
+}
+
+export interface ThemedAlertOptions {
+  cancelable?: boolean;
+  onDismiss?: () => void;
 }
 
 interface AlertState {
   title: string;
   message?: string;
   buttons: ThemedAlertButton[];
+  options?: ThemedAlertOptions;
 }
 
 // Single mounted host + imperative show() so callers can keep the familiar
@@ -27,11 +33,12 @@ export function showThemedAlert(
   title: string,
   message?: string,
   buttons?: ThemedAlertButton[],
+  options?: ThemedAlertOptions,
 ) {
   const resolved: ThemedAlertButton[] =
     buttons && buttons.length > 0 ? buttons : [{ text: 'OK' }];
   if (showInternal) {
-    showInternal({ title, message, buttons: resolved });
+    showInternal({ title, message, buttons: resolved, options });
   }
 }
 
@@ -69,28 +76,38 @@ export function ThemedAlertHost() {
     [close],
   );
 
+  const handleDismiss = useCallback(() => {
+    const onDismiss = state?.options?.onDismiss;
+    close();
+    if (onDismiss) {
+      setTimeout(() => {
+        try { onDismiss(); } catch { /* mirror Alert.alert contract */ }
+      }, 0);
+    }
+  }, [close, state]);
+
   if (!state) return null;
 
-  const isSingleButton = state.buttons.length === 1;
+  // `cancelable` defaults to true on Android for native Alert.alert. We treat
+  // backdrop taps + hardware back as dismiss, unless the caller opted out.
+  const cancelable = state.options?.cancelable !== false;
+
+  const onOutside = () => {
+    if (!cancelable) return;
+    const cancelBtn = state.buttons.find((b) => b.style === 'cancel');
+    if (cancelBtn) handlePress(cancelBtn);
+    else handleDismiss();
+  };
 
   return (
     <Modal
       visible
       transparent
       animationType="fade"
-      onRequestClose={() => {
-        const cancelBtn = state.buttons.find((b) => b.style === 'cancel');
-        if (cancelBtn) handlePress(cancelBtn);
-        else close();
-      }}
+      statusBarTranslucent
+      onRequestClose={onOutside}
     >
-      <Pressable
-        style={styles.backdrop}
-        onPress={() => {
-          const cancelBtn = state.buttons.find((b) => b.style === 'cancel');
-          if (cancelBtn) handlePress(cancelBtn);
-        }}
-      >
+      <Pressable style={styles.backdrop} onPress={onOutside}>
         <Pressable
           style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
           onPress={(e) => e.stopPropagation()}
@@ -99,7 +116,7 @@ export function ThemedAlertHost() {
           {state.message ? (
             <Text style={[styles.message, { color: theme.textSecondary }]}>{state.message}</Text>
           ) : null}
-          <View style={[styles.buttonRow, isSingleButton && styles.buttonRowSingle]}>
+          <View style={styles.buttonRow}>
             {state.buttons.map((btn, idx) => {
               const destructive = btn.style === 'destructive';
               const cancel = btn.style === 'cancel';
@@ -110,11 +127,14 @@ export function ThemedAlertHost() {
                   : colors.primary[600];
               return (
                 <TouchableOpacity
-                  key={`${btn.text}-${idx}`}
+                  key={`${btn.text ?? 'OK'}-${idx}`}
                   style={[
                     styles.button,
                     { borderTopColor: theme.border },
-                    idx > 0 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.border },
+                    idx > 0 && {
+                      borderLeftWidth: StyleSheet.hairlineWidth,
+                      borderLeftColor: theme.border,
+                    },
                   ]}
                   onPress={() => handlePress(btn)}
                 >
@@ -125,7 +145,7 @@ export function ThemedAlertHost() {
                       cancel && { fontWeight: '500' },
                     ]}
                   >
-                    {btn.text}
+                    {btn.text ?? 'OK'}
                   </Text>
                 </TouchableOpacity>
               );
@@ -171,7 +191,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  buttonRowSingle: { flexDirection: 'row' },
   button: {
     flex: 1,
     paddingVertical: 14,
@@ -183,3 +202,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+/**
+ * Globally replace React Native's native Alert.alert with our themed
+ * implementation. Called once at app startup from the root layout so every
+ * existing `Alert.alert(...)` callsite (~45 files) inherits dark-mode
+ * support without per-file edits. Alert.prompt (iOS-only) is left alone —
+ * it requires a text input our modal doesn't render.
+ */
+export function installThemedAlertOverride() {
+  // Require lazily so this module doesn't pin react-native's import order.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const RN = require('react-native');
+  if (!RN?.Alert || (RN.Alert as { __themed?: boolean }).__themed) return;
+  const themed = (
+    title: string,
+    message?: string,
+    buttons?: ThemedAlertButton[],
+    options?: ThemedAlertOptions,
+  ) => showThemedAlert(title, message, buttons, options);
+  (themed as unknown as { __themed: boolean }).__themed = true;
+  RN.Alert.alert = themed;
+}
