@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "jest --passWithNoTests"
+    "test": "jest --passWithNoTests",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@vintage/shared": "*",
@@ -18,6 +20,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",
+    "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",

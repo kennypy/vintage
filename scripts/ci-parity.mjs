@@ -224,6 +224,16 @@ async function main() {
   // ── security-audit job ───────────────────────────────────────────────
   await runStep('Security audit (high gate, CI launch gate)', 'npm audit --audit-level=high');
 
+  // ── optional: Web E2E smoke tests (Playwright) ───────────────────────
+  // Skipped by default because it needs the Chromium binary
+  // (`npx playwright install chromium`) which is too heavy for every
+  // contributor's first checkout. Opt in with E2E=1.
+  if (process.env.E2E === '1') {
+    await runStep('Web E2E smoke tests (Playwright)', 'npm -w @vintage/web run test:e2e');
+  } else {
+    process.stdout.write('[skip] Web E2E smoke tests — set E2E=1 after `npx playwright install chromium` to run.\n');
+  }
+
   // ── Summary ──────────────────────────────────────────────────────────
   const total = Math.round((Date.now() - totalStart) / 1000);
   process.stdout.write('\n');

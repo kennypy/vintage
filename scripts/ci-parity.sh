@@ -188,6 +188,18 @@ run_step "Build Web" \
 run_step "Security audit (high gate, CI launch gate)" \
   "npm audit --audit-level=high"
 
+# ── optional: Web E2E smoke tests (Playwright) ─────────────────────────
+# Skipped by default because it needs the Chromium binary
+# (`npx playwright install chromium`) which is too heavy for every
+# contributor's first checkout. Opt in with E2E=1 (CI sets this after
+# installing the browser).
+if [[ "${E2E:-0}" == "1" ]]; then
+  run_step "Web E2E smoke tests (Playwright)" \
+    "npm -w @vintage/web run test:e2e"
+else
+  echo "[skip] Web E2E smoke tests — set E2E=1 after \`npx playwright install chromium\` to run."
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────
 TOTAL_END=$(date +%s)
 TOTAL=$((TOTAL_END - TOTAL_START))
