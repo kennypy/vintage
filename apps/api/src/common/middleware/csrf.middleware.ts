@@ -1,4 +1,4 @@
-import { Injectable, NestMiddleware, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
@@ -14,19 +14,19 @@ export class CsrfMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     // Generate CSRF token if not present
     if (!req.cookies['x-csrf-token']) {
-      const token = this.generateToken();
-      res.cookie('x-csrf-token', token, {
+      const newToken = this.generateToken();
+      res.cookie('x-csrf-token', newToken, {
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         maxAge: 86400000,
       });
-      res.setHeader('X-CSRF-Token', token);
+      res.setHeader('X-CSRF-Token', newToken);
     }
 
-    const token = req.cookies['x-csrf-token'];
-    if (token) {
-      res.setHeader('X-CSRF-Token', token);
+    const existingToken = req.cookies['x-csrf-token'];
+    if (existingToken) {
+      res.setHeader('X-CSRF-Token', existingToken);
     }
 
     next();
