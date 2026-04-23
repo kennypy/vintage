@@ -1,4 +1,6 @@
 import { apiFetch } from './api';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 
 export interface AppNotification {
   id: string;
@@ -38,4 +40,28 @@ export async function markAllRead(): Promise<void> {
   await apiFetch<void>('/notifications/read-all', {
     method: 'POST',
   });
+}
+
+/**
+ * Register FCM device token for push notifications.
+ * Called on app startup and token refresh.
+ */
+export async function registerDeviceToken(token: string): Promise<void> {
+  const deviceId = `${Device.brand}-${Device.deviceName ?? 'unknown'}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
+  try {
+    await apiFetch<void>('/notifications/device-token/register', {
+      method: 'POST',
+      body: JSON.stringify({ token, deviceId }),
+    });
+  } catch (error) {
+    // Non-critical — log but don't crash if token registration fails
+    console.warn('Failed to register FCM device token:', error);
+  }
+}
+
+/**
+ * Get device ID for this phone. Used for identifying and managing device tokens.
+ */
+export function getDeviceId(): string {
+  return `${Device.brand}-${Device.deviceName ?? 'unknown'}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
 }

@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { apiFetch } from './api';
+import { registerDeviceToken as registerFcmToken } from './notifications';
 import { ensureNotificationPermission } from './permissions';
 
 /**
@@ -38,6 +39,12 @@ export async function registerForPushNotifications(): Promise<string | null> {
     body: JSON.stringify({ token, platform }),
     headers: { 'Content-Type': 'application/json' },
     authenticated: true,
+  });
+
+  // Also register the device token with the FCM service for push notifications
+  // (fire-and-forget — failures are logged but don't break the auth flow)
+  registerFcmToken(token).catch(() => {
+    if (__DEV__) console.warn('FCM device token registration failed');
   });
 
   return token;
