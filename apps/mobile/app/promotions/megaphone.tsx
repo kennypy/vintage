@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Modal, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Modal, FlatList } from 'react-native';
 import { Image } from 'expo-image';
 import { useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,7 +7,8 @@ import { useTheme } from '../../src/contexts/ThemeContext';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { getUserListings } from '../../src/services/users';
 import { getUserDemoListings } from '../../src/services/demoStore';
-import { createMegafone } from '../../src/services/promotions';
+import { createMegafone, getActivePromotions } from '../../src/services/promotions';
+import { showThemedAlert } from '../../src/components/ThemedAlert';
 import { MEGAFONE_FREE_DAYS } from '@vintage/shared';
 
 interface ActiveListing {
@@ -15,6 +16,7 @@ interface ActiveListing {
   title: string;
   priceBrl: number;
   imageUrl?: string;
+  activeUntil?: string; // set when this listing already has an active megafone
 }
 
 export default function MegaphoneScreen() {
@@ -23,22 +25,42 @@ export default function MegaphoneScreen() {
   const [showListings, setShowListings] = useState(false);
   const [activeListings, setActiveListings] = useState<ActiveListing[]>([]);
   const [loadingListings, setLoadingListings] = useState(false);
-  const [boostedId, setBoostedId] = useState<string | null>(null);
   const [boosting, setBoosting] = useState(false);
 
   const fetchActiveListings = useCallback(async () => {
     if (!user?.id) return;
     setLoadingListings(true);
     try {
-      const data = await getUserListings(user.id);
-      const active = (data.items as any[])
+      // Pull active promotions in parallel so we can mark each listing's
+      // current state instead of pretending they're all re-activatable —
+      // the API rejects a second megafone with a 400, so tapping again
+      // was just producing an error popup.
+      const [listingsRes, promotions] = await Promise.all([
+        getUserListings(user.id),
+        getActivePromotions().catch(() => [] as { listingId?: string; type: string; endsAt: string }[]),
+      ]);
+      const megafoneByListing = new Map<string, string>();
+      for (const promo of promotions) {
+        if (promo.type === 'MEGAFONE' && promo.listingId) {
+          megafoneByListing.set(promo.listingId, promo.endsAt);
+        }
+      }
+      const active = (listingsRes.items as any[])
         .filter((l: any) => l.status === 'ACTIVE')
         .map((l: any) => ({
           id: l.id,
           title: l.title,
           priceBrl: l.priceBrl,
           imageUrl: l.images?.sort((a: any, b: any) => a.position - b.position)[0]?.url,
+          activeUntil: megafoneByListing.get(l.id),
         }));
+      // Boosted listings float to the top so users see their active
+      // megafones first — "it should show as activated with the listing
+      // underneath" per product feedback.
+      active.sort((a: ActiveListing, b: ActiveListing) => {
+        if (!!a.activeUntil === !!b.activeUntil) return 0;
+        return a.activeUntil ? -1 : 1;
+      });
       setActiveListings(active);
     } catch {
       const demoItems = getUserDemoListings(user.id).map((l) => ({
@@ -59,7 +81,8 @@ export default function MegaphoneScreen() {
   };
 
   const handleBoost = (listing: ActiveListing) => {
-    Alert.alert(
+    if (listing.activeUntil) return; // already boosted — UI row is disabled
+    showThemedAlert(
       'Confirmar Megafone',
       `Ativar megafone gratuito para "${listing.title}"?\n\nSeu anúncio será destacado por ${MEGAFONE_FREE_DAYS} dias.`,
       [
@@ -69,16 +92,24 @@ export default function MegaphoneScreen() {
           onPress: async () => {
             setBoosting(true);
             try {
-              await createMegafone(listing.id);
-              setBoostedId(listing.id);
-              setShowListings(false);
-              Alert.alert(
+              const promo = await createMegafone(listing.id);
+              setActiveListings((prev) => {
+                const updated = prev.map((item) =>
+                  item.id === listing.id ? { ...item, activeUntil: promo.endsAt } : item,
+                );
+                updated.sort((a, b) => {
+                  if (!!a.activeUntil === !!b.activeUntil) return 0;
+                  return a.activeUntil ? -1 : 1;
+                });
+                return updated;
+              });
+              showThemedAlert(
                 'Megafone ativado!',
                 `"${listing.title}" será destacado para mais compradores por ${MEGAFONE_FREE_DAYS} dias.`,
               );
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : 'Não foi possível ativar o megafone. Tente novamente.';
-              Alert.alert('Erro', message);
+              showThemedAlert('Erro', message);
             } finally {
               setBoosting(false);
             }
@@ -89,6 +120,10 @@ export default function MegaphoneScreen() {
   };
 
   const formatBrl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const formatUntil = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} showsVerticalScrollIndicator={false}>
@@ -143,7 +178,7 @@ export default function MegaphoneScreen() {
       <Modal visible={showListings} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
-            <View style={styles.modalHeader}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
               <Text style={[styles.modalTitle, { color: theme.text }]}>Escolha um anúncio</Text>
               <TouchableOpacity onPress={() => setShowListings(false)}>
                 <Ionicons name="close" size={24} color={theme.textSecondary} />
@@ -163,30 +198,46 @@ export default function MegaphoneScreen() {
               <FlatList
                 data={activeListings}
                 keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={[styles.listingRow, { borderBottomColor: theme.border }, boostedId === item.id && styles.listingRowBoosted]}
-                    onPress={() => handleBoost(item)}
-                    disabled={boosting}
-                  >
-                    {item.imageUrl ? (
-                      <Image source={{ uri: item.imageUrl }} style={styles.listingThumb} transition={200} cachePolicy="memory-disk" />
-                    ) : (
-                      <View style={[styles.listingThumb, styles.listingThumbPlaceholder, { backgroundColor: theme.inputBg }]}>
-                        <Ionicons name="image-outline" size={20} color={theme.textTertiary} />
+                renderItem={({ item }) => {
+                  const isActive = !!item.activeUntil;
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.listingRow,
+                        { borderBottomColor: theme.border },
+                        isActive && { backgroundColor: theme.cardSecondary },
+                      ]}
+                      onPress={() => handleBoost(item)}
+                      disabled={boosting || isActive}
+                      activeOpacity={isActive ? 1 : 0.6}
+                    >
+                      {item.imageUrl ? (
+                        <Image source={{ uri: item.imageUrl }} style={styles.listingThumb} transition={200} cachePolicy="memory-disk" />
+                      ) : (
+                        <View style={[styles.listingThumb, styles.listingThumbPlaceholder, { backgroundColor: theme.inputBg }]}>
+                          <Ionicons name="image-outline" size={20} color={theme.textTertiary} />
+                        </View>
+                      )}
+                      <View style={styles.listingInfo}>
+                        <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={2}>{item.title}</Text>
+                        <Text style={[styles.listingPrice, { color: theme.textSecondary }]}>R$ {formatBrl(item.priceBrl)}</Text>
+                        {isActive && item.activeUntil ? (
+                          <View style={styles.activeBadge}>
+                            <Ionicons name="megaphone" size={12} color={colors.success[600]} />
+                            <Text style={[styles.activeBadgeText, { color: colors.success[600] }]}>
+                              Ativado até {formatUntil(item.activeUntil)}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
-                    )}
-                    <View style={styles.listingInfo}>
-                      <Text style={[styles.listingTitle, { color: theme.text }]} numberOfLines={2}>{item.title}</Text>
-                      <Text style={[styles.listingPrice, { color: theme.textSecondary }]}>R$ {formatBrl(item.priceBrl)}</Text>
-                    </View>
-                    {boostedId === item.id ? (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.success[500]} />
-                    ) : (
-                      <Ionicons name="megaphone-outline" size={22} color={colors.primary[500]} />
-                    )}
-                  </TouchableOpacity>
-                )}
+                      {isActive ? (
+                        <Ionicons name="checkmark-circle" size={22} color={colors.success[500]} />
+                      ) : (
+                        <Ionicons name="megaphone-outline" size={22} color={colors.primary[500]} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
                 style={styles.listingList}
                 removeClippedSubviews={true}
                 maxToRenderPerBatch={10}
@@ -240,20 +291,23 @@ const styles = StyleSheet.create({
   modalHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingVertical: 16,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.08)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   modalTitle: { fontSize: 18, fontWeight: '700' },
   emptyState: { alignItems: 'center', padding: 32, gap: 12 },
   emptyText: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
   listingList: { paddingHorizontal: 16 },
   listingRow: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth, gap: 12,
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth, gap: 12, borderRadius: 8,
   },
-  listingRowBoosted: { opacity: 0.7 },
   listingThumb: { width: 56, height: 56, borderRadius: 8 },
   listingThumbPlaceholder: { justifyContent: 'center', alignItems: 'center' },
   listingInfo: { flex: 1 },
   listingTitle: { fontSize: 14, fontWeight: '500' },
   listingPrice: { fontSize: 13, marginTop: 2 },
+  activeBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
+  },
+  activeBadgeText: { fontSize: 12, fontWeight: '600' },
 });

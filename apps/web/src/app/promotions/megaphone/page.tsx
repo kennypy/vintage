@@ -13,6 +13,14 @@ interface Listing {
   price?: number;
   status: string;
   images?: Array<{ url: string } | string>;
+  activeUntil?: string;
+}
+
+interface ActivePromotion {
+  id: string;
+  type: string;
+  endsAt: string;
+  listingId?: string | null;
 }
 
 const BENEFITS = [
@@ -51,13 +59,32 @@ export default function MegaphonePage() {
     setErrorMessage(null);
     try {
       const user = await apiGet<{ id: string }>('/users/me');
-      const res = await apiGet<Listing[] | { data?: Listing[]; items?: Listing[] }>(
-        `/users/${encodeURIComponent(user.id)}/listings`,
-      );
+      // Fetch listings and active promotions in parallel so the modal can
+      // flag listings that already have a megafone rather than letting
+      // the user re-tap and hit an API 400.
+      const [res, promotions] = await Promise.all([
+        apiGet<Listing[] | { data?: Listing[]; items?: Listing[] }>(
+          `/users/${encodeURIComponent(user.id)}/listings`,
+        ),
+        apiGet<ActivePromotion[]>('/promotions').catch(() => [] as ActivePromotion[]),
+      ]);
       const all = Array.isArray(res)
         ? res
         : ((res as { items?: Listing[] }).items ?? (res as { data?: Listing[] }).data ?? []);
-      setListings(all.filter((l) => l.status === 'ACTIVE'));
+      const megafoneByListing = new Map<string, string>();
+      for (const promo of promotions) {
+        if (promo.type === 'MEGAFONE' && promo.listingId) {
+          megafoneByListing.set(promo.listingId, promo.endsAt);
+        }
+      }
+      const mapped = all
+        .filter((l) => l.status === 'ACTIVE')
+        .map((l) => ({ ...l, activeUntil: megafoneByListing.get(l.id) }));
+      mapped.sort((a, b) => {
+        if (!!a.activeUntil === !!b.activeUntil) return 0;
+        return a.activeUntil ? -1 : 1;
+      });
+      setListings(mapped);
     } catch {
       setErrorMessage('Nao foi possivel carregar seus anuncios.');
     } finally {
@@ -65,16 +92,32 @@ export default function MegaphonePage() {
     }
   };
 
+  const formatUntil = (iso: string) =>
+    new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+
   const handleConfirm = async () => {
     if (!confirmListing) return;
     setBoosting(true);
     setErrorMessage(null);
     try {
-      await apiPost('/promotions/megafone', { listingId: confirmListing.id });
+      const promo = await apiPost<{ endsAt: string }>('/promotions/megafone', {
+        listingId: confirmListing.id,
+      });
+      const activatedId = confirmListing.id;
+      const activatedTitle = confirmListing.title;
+      const endsAt = promo?.endsAt ?? new Date(Date.now() + MEGAFONE_FREE_DAYS * 864e5).toISOString();
+      setListings((prev) => {
+        const next = prev.map((l) => (l.id === activatedId ? { ...l, activeUntil: endsAt } : l));
+        next.sort((a, b) => {
+          if (!!a.activeUntil === !!b.activeUntil) return 0;
+          return a.activeUntil ? -1 : 1;
+        });
+        return next;
+      });
       setConfirmListing(null);
       setShowPicker(false);
       setSuccessMessage(
-        `"${confirmListing.title}" sera destacado para mais compradores por ${MEGAFONE_FREE_DAYS} dias.`,
+        `"${activatedTitle}" sera destacado para mais compradores por ${MEGAFONE_FREE_DAYS} dias.`,
       );
     } catch (err: unknown) {
       const message =
@@ -190,24 +233,44 @@ export default function MegaphonePage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {listings.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setConfirmListing(item)}
-                      disabled={boosting}
-                      className={`w-full text-left p-3 rounded-xl border transition ${
-                        confirmListing?.id === item.id
-                          ? 'border-brand-500 bg-brand-50'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
-                      <p className="text-sm text-brand-600 font-semibold mt-0.5">
-                        {formatBRL(item.priceBrl ?? item.price ?? 0)}
-                      </p>
-                    </button>
-                  ))}
+                  {listings.map((item) => {
+                    const isActive = !!item.activeUntil;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => !isActive && setConfirmListing(item)}
+                        disabled={boosting || isActive}
+                        className={`w-full text-left p-3 rounded-xl border transition flex items-start justify-between gap-3 ${
+                          isActive
+                            ? 'border-green-200 bg-green-50 cursor-not-allowed'
+                            : confirmListing?.id === item.id
+                              ? 'border-brand-500 bg-brand-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 truncate">{item.title}</p>
+                          <p className="text-sm text-brand-600 font-semibold mt-0.5">
+                            {formatBRL(item.priceBrl ?? item.price ?? 0)}
+                          </p>
+                          {isActive && item.activeUntil && (
+                            <p className="text-xs font-semibold text-green-700 mt-1 flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                              </svg>
+                              Megafone ativo até {formatUntil(item.activeUntil)}
+                            </p>
+                          )}
+                        </div>
+                        {isActive && (
+                          <span className="text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full shrink-0">
+                            Ativado
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

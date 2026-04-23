@@ -2,8 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiPost } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
 import { SPOTLIGHT_PRICE_BRL, SPOTLIGHT_DURATION_DAYS } from '@vintage/shared';
+
+interface ActivePromotion {
+  id: string;
+  type: string;
+  endsAt: string;
+  listingId?: string | null;
+}
 
 const BENEFITS = [
   'Selo de loja em destaque no perfil',
@@ -19,6 +26,7 @@ export default function HighlightPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeUntil, setActiveUntil] = useState<string | null>(null);
 
   const priceFormatted = SPOTLIGHT_PRICE_BRL.toFixed(2).replace('.', ',');
 
@@ -26,14 +34,33 @@ export default function HighlightPage() {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
     if (!token) {
       router.push('/auth/login');
+      return;
     }
+    // Spotlight is per-user (not per-listing), so gate the CTA on the
+    // single active SPOTLIGHT promotion rather than letting a second
+    // activation bounce off the API with a 400.
+    apiGet<ActivePromotion[]>('/promotions')
+      .then((promos) => {
+        const spotlight = promos.find((p) => p.type === 'SPOTLIGHT');
+        if (spotlight) setActiveUntil(spotlight.endsAt);
+      })
+      .catch(() => {});
   }, [router]);
+
+  const formatUntil = (iso: string) =>
+    new Date(iso).toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
 
   const handleConfirm = async () => {
     setActivating(true);
     setErrorMessage(null);
     try {
-      await apiPost('/promotions/spotlight');
+      const promo = await apiPost<{ endsAt: string }>('/promotions/spotlight');
+      const endsAt = promo?.endsAt ?? new Date(Date.now() + SPOTLIGHT_DURATION_DAYS * 864e5).toISOString();
+      setActiveUntil(endsAt);
       setShowConfirm(false);
       setSuccessMessage(
         `Seu perfil agora tem o selo de loja em destaque por ${SPOTLIGHT_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
@@ -78,6 +105,19 @@ export default function HighlightPage() {
         </div>
       )}
 
+      {/* Active spotlight banner (persists across reloads via GET /promotions) */}
+      {activeUntil && !successMessage && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
+          <svg className="w-6 h-6 text-green-600 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          </svg>
+          <div>
+            <p className="text-green-800 font-medium text-sm">Destaque ativo</p>
+            <p className="text-green-700 text-xs mt-0.5">Seu perfil fica destacado até {formatUntil(activeUntil)}.</p>
+          </div>
+        </div>
+      )}
+
       {/* Error message */}
       {errorMessage && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
@@ -115,10 +155,10 @@ export default function HighlightPage() {
           <button
             type="button"
             onClick={() => { setShowConfirm(true); setErrorMessage(null); }}
-            disabled={activating || !!successMessage}
-            className="px-6 py-3 bg-yellow-500 text-white rounded-xl font-medium hover:bg-yellow-600 transition disabled:opacity-50"
+            disabled={activating || !!successMessage || !!activeUntil}
+            className="px-6 py-3 bg-yellow-500 text-white rounded-xl font-medium hover:bg-yellow-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Ativar destaque
+            {activeUntil ? 'Destaque ativo' : 'Ativar destaque'}
           </button>
         </div>
         <p className="text-xs text-gray-400 mt-3 text-center">Cancele a qualquer momento</p>
