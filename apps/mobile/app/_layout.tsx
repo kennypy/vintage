@@ -15,8 +15,14 @@ import { FeatureFlagsProvider } from '../src/contexts/FeatureFlagsContext';
 import { ThemeProvider, useTheme } from '../src/contexts/ThemeContext';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { PostHogBootstrap } from '../src/components/PostHogBootstrap';
-import { ThemedAlertHost } from '../src/components/ThemedAlert';
+import { ThemedAlertHost, installThemedAlertOverride } from '../src/components/ThemedAlert';
 import { colors } from '../src/theme/colors';
+
+// Replace RN's native Alert.alert at module load so every existing
+// Alert.alert(...) callsite (45+ files across the app) renders through the
+// themed modal host. Dark mode otherwise showed as a stark-white popup
+// because the native dialog ignores our JS ThemeContext.
+installThemedAlertOverride();
 
 function AppShell() {
   const { theme, fullScreen } = useTheme();
