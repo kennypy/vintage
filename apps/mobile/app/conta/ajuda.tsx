@@ -1,5 +1,6 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
 import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
@@ -186,8 +187,14 @@ const FAQ_SECTIONS: FaqSection[] = [
 
 export default function AjudaScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const [expandedSection, setExpandedSection] = useState<number | null>(null);
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+
+  const openSupport = () => router.push('/conta/suporte');
+  const openEmail = () => {
+    Linking.openURL('mailto:suporte@vintage.br').catch(() => { /* mail client unavailable */ });
+  };
 
   const toggleSection = (index: number) => {
     setExpandedSection(expandedSection === index ? null : index);
@@ -209,15 +216,21 @@ export default function AjudaScreen() {
       </View>
 
       <View style={styles.contactSection}>
-        <TouchableOpacity style={[styles.contactCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <TouchableOpacity
+          onPress={openSupport}
+          style={[styles.contactCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
           <Ionicons name="chatbubble-outline" size={24} color={colors.primary[600]} />
           <View style={styles.contactInfo}>
-            <Text style={[styles.contactTitle, { color: theme.text }]}>Chat ao vivo</Text>
-            <Text style={[styles.contactSub, { color: theme.textTertiary }]}>Respondemos em minutos</Text>
+            <Text style={[styles.contactTitle, { color: theme.text }]}>Abrir um ticket</Text>
+            <Text style={[styles.contactSub, { color: theme.textTertiary }]}>Respondemos em até 24h</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.contactCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <TouchableOpacity
+          onPress={openEmail}
+          style={[styles.contactCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
           <Ionicons name="mail-outline" size={24} color={colors.primary[600]} />
           <View style={styles.contactInfo}>
             <Text style={[styles.contactTitle, { color: theme.text }]}>E-mail</Text>

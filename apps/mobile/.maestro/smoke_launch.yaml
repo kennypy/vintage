@@ -1,0 +1,15 @@
+appId: br.vintage.app
+name: "Smoke — app launches"
+tags:
+  - smoke
+---
+# Cold-launch the app and confirm SOMETHING renders without a crash.
+# Accepts either signed-in state (Início tab) or signed-out state
+# (Entrar/Cadastrar on the login screen) — the goal is just to prove
+# the bundle boots and the root layout mounts.
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: ".*(Início|Entrar|Cadastrar).*"
+    timeout: 20000

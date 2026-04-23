@@ -45,6 +45,9 @@ export default function MegaphonePage() {
   const [confirmListing, setConfirmListing] = useState<Listing | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Load-time failures stay inside the picker sheet so the user doesn't
+  // also see a duplicate banner at the top of the page.
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -57,6 +60,7 @@ export default function MegaphonePage() {
     setShowPicker(true);
     setLoadingListings(true);
     setErrorMessage(null);
+    setPickerError(null);
     try {
       const user = await apiGet<{ id: string }>('/users/me');
       // Fetch listings and active promotions in parallel so the modal can
@@ -86,7 +90,8 @@ export default function MegaphonePage() {
       });
       setListings(mapped);
     } catch {
-      setErrorMessage('Nao foi possivel carregar seus anuncios.');
+      setPickerError('Não foi possível carregar seus anúncios.');
+      setListings([]);
     } finally {
       setLoadingListings(false);
     }
@@ -227,9 +232,20 @@ export default function MegaphonePage() {
                   <div className="animate-spin inline-block w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full" />
                   <p className="text-sm text-gray-500 mt-2">Carregando...</p>
                 </div>
+              ) : pickerError ? (
+                <div className="text-center py-8 space-y-3">
+                  <p className="text-sm text-red-600">{pickerError}</p>
+                  <button
+                    type="button"
+                    onClick={openPicker}
+                    className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
               ) : listings.length === 0 ? (
                 <p className="text-center text-gray-500 py-8 text-sm">
-                  Voce nao tem anuncios ativos. Publique um anuncio primeiro.
+                  Você não tem anúncios ativos. Publique um anúncio primeiro.
                 </p>
               ) : (
                 <div className="space-y-2">

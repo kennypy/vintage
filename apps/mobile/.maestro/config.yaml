@@ -1,0 +1,5 @@
+appId: br.vintage.app
+---
+# Maestro workspace config. See https://maestro.mobile.dev/
+# Flows in this folder run against the Vintage.br mobile app
+# (same bundle ID on iOS + Android).

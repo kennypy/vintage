@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tsPlugin from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import vintage from '@vintage/eslint-plugin';
 
 export default [
   js.configs.recommended,
@@ -37,11 +38,15 @@ export default [
     },
     plugins: {
       '@typescript-eslint': tsPlugin,
+      vintage,
     },
     rules: {
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-console': 'warn',
+      // Guard against shipping decorative pressables (the "Impulsionar"
+      // plan-card bug that the user caught in QA).
+      'vintage/no-nonfunctional-touchable': 'error',
     },
   },
   {
