@@ -9,7 +9,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { createListing, uploadListingImage, uploadListingVideo, setListingVideo, ListingSuggestions } from '../../src/services/listings';
-import { addDemoListing, DEMO_PHOTOS } from '../../src/services/demoStore';
 import {
   ensureCameraPermission,
   ensureMediaLibraryPermission,
@@ -369,52 +368,34 @@ function SellScreenContent() {
 
       const weightParsed = weight ? parseInt(weight, 10) : 300;
 
-      let listingId: string;
+      // Previously: on API failure we silently saved a demo listing to
+      // an in-memory Map and showed "Anúncio criado!" — the user thought
+      // the listing was live when nothing had reached the server. When
+      // they later checked /my-listings or searched, nothing appeared
+      // and the "listing" vanished on app restart. Now we let the real
+      // error bubble to the outer catch so the user sees an honest
+      // "Não foi possível criar o anúncio" with the server's message.
+      const listing = await createListing({
+        title,
+        description,
+        priceBrl: priceParsed,
+        condition,
+        size: size || undefined,
+        color: color || undefined,
+        categoryId: selectedCategory || 'outros',
+        shippingWeightG: isNaN(weightParsed) ? 300 : weightParsed,
+        imageUrls: uploadedUrls,
+      });
+      const listingId = listing.id;
 
-      try {
-        const listing = await createListing({
-          title,
-          description,
-          priceBrl: priceParsed,
-          condition,
-          size: size || undefined,
-          color: color || undefined,
-          categoryId: selectedCategory || 'outros',
-          shippingWeightG: isNaN(weightParsed) ? 300 : weightParsed,
-          imageUrls: uploadedUrls,
-        });
-        listingId = listing.id;
-
-        // Attach video if uploaded
-        if (videoUrl) {
-          try {
-            await setListingVideo(listingId, videoUrl);
-          } catch (_videoErr) {
-            // Non-fatal: listing created, video attach failed silently
-            if (__DEV__) console.warn('[setListingVideo] failed:', String(_videoErr));
-          }
+      // Attach video if uploaded. Non-fatal on its own: the listing
+      // exists, just without the video — user can retry from edit.
+      if (videoUrl) {
+        try {
+          await setListingVideo(listingId, videoUrl);
+        } catch (_videoErr) {
+          if (__DEV__) console.warn('[setListingVideo] failed:', String(_videoErr));
         }
-      } catch (_apiError) {
-        const demoId = `demo-user-listing-${Date.now()}`;
-        const photoUrls = uploadedUrls.length > 0 ? uploadedUrls : DEMO_PHOTOS.slice(0, 3);
-        addDemoListing({
-          id: demoId,
-          title,
-          description,
-          priceBrl: priceParsed,
-          condition,
-          size,
-          brand: brand || undefined,
-          category: selectedSubCategory || selectedCategory || 'Outros',
-          color: color || undefined,
-          images: photoUrls.map((url, i) => ({ id: `img-${i}`, url, order: i })),
-          seller: { id: user?.id ?? 'demo-user', name: user?.name ?? 'Você (Demo)' },
-          isFavorited: false,
-          viewCount: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        listingId = demoId;
       }
 
       setPhotos([]);
@@ -440,8 +421,14 @@ function SellScreenContent() {
         },
         { text: 'OK' },
       ]);
-    } catch (_error) {
-      Alert.alert('Erro', 'Não foi possível criar o anúncio. Tente novamente.');
+    } catch (error) {
+      // Surface the server's message when we have one — "campo X inválido"
+      // is dramatically more useful than a generic "tente novamente".
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Não foi possível criar o anúncio. Tente novamente.';
+      Alert.alert('Erro ao criar anúncio', message);
     } finally {
       setPublishing(false);
     }
