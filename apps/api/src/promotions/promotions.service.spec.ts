@@ -8,13 +8,23 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { PromotionsService } from './promotions.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-jest.mock('@vintage/shared', () => ({
-  MEGAFONE_FREE_DAYS: 7,
-  BUMP_PRICE_BRL: 5.0,
-  BUMP_DURATION_DAYS: 3,
-  SPOTLIGHT_PRICE_BRL: 15.0,
-  SPOTLIGHT_DURATION_DAYS: 7,
-}));
+jest.mock('@vintage/shared', () => {
+  const tiers = [
+    { days: 1, priceBrl: 2.0 },
+    { days: 3, priceBrl: 5.0, popular: true },
+    { days: 7, priceBrl: 9.0 },
+  ];
+  return {
+    MEGAFONE_FREE_DAYS: 7,
+    BUMP_PRICE_BRL: 5.0,
+    BUMP_DURATION_DAYS: 3,
+    BUMP_TIERS: tiers,
+    BUMP_TIER_DAYS: tiers.map((t) => t.days),
+    getBumpTier: (days: number) => tiers.find((t) => t.days === days),
+    SPOTLIGHT_PRICE_BRL: 15.0,
+    SPOTLIGHT_DURATION_DAYS: 7,
+  };
+});
 
 const mockPrisma = {
   listing: {
@@ -194,6 +204,57 @@ describe('PromotionsService', () => {
           data: { balanceBrl: { decrement: 5.0 } },
         }),
       );
+    });
+
+    it('should charge the 7-day tier price when days=7 is passed', async () => {
+      mockPrisma.listing.findUnique.mockResolvedValue(activeListing);
+      mockPrisma.promotion.findFirst.mockResolvedValue(null);
+      mockPrisma.wallet.findUnique.mockResolvedValue({
+        id: 'wallet-1',
+        userId: 'user-1',
+        balanceBrl: new Decimal('50.00'),
+      });
+
+      const createdPromo = { id: 'promo-7', type: 'BUMP', pricePaidBrl: new Decimal('9.00') };
+      const mockTx = {
+        wallet: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+        promotion: { create: jest.fn().mockResolvedValue(createdPromo) },
+        listing: { update: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await service.createBump('listing-1', 'user-1', 7);
+
+      // Debit must reflect the tier price, not the default 3-day price.
+      expect(mockTx.wallet.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'wallet-1',
+            balanceBrl: { gte: 9.0 },
+          }),
+          data: { balanceBrl: { decrement: 9.0 } },
+        }),
+      );
+      expect(mockTx.promotion.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'BUMP',
+            pricePaidBrl: new Decimal('9.00'),
+          }),
+        }),
+      );
+    });
+
+    it('should throw BadRequestException for an unsupported days value', async () => {
+      await expect(service.createBump('listing-1', 'user-1', 5)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.createBump('listing-1', 'user-1', 5)).rejects.toThrow(
+        /Duração inválida/,
+      );
+      // Should short-circuit before touching the DB.
+      expect(mockPrisma.listing.findUnique).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestException if balance is depleted mid-transaction (race)', async () => {

@@ -8,8 +8,9 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   MEGAFONE_FREE_DAYS,
-  BUMP_PRICE_BRL,
   BUMP_DURATION_DAYS,
+  BUMP_TIER_DAYS,
+  getBumpTier,
   SPOTLIGHT_PRICE_BRL,
   SPOTLIGHT_DURATION_DAYS,
 } from '@vintage/shared';
@@ -100,7 +101,20 @@ export class PromotionsService {
     return promotion;
   }
 
-  async createBump(listingId: string, userId: string) {
+  async createBump(listingId: string, userId: string, days?: number) {
+    // Resolve the requested duration to a configured tier. When the
+    // client omits `days` we fall back to the default 3-day tier so
+    // older mobile/web builds stay compatible.
+    const requestedDays = days ?? BUMP_DURATION_DAYS;
+    const tier = getBumpTier(requestedDays);
+    if (!tier) {
+      throw new BadRequestException(
+        `Duração inválida. Opções: ${BUMP_TIER_DAYS.join(', ')} dias`,
+      );
+    }
+    const tierPriceBrl = tier.priceBrl;
+    const tierDurationDays = tier.days;
+
     const listing = await this.prisma.listing.findUnique({
       where: { id: listingId },
     });
@@ -141,15 +155,15 @@ export class PromotionsService {
     // updateMany gate in walletsService, but this pre-check should not
     // drift from it because of float representation.
     const balanceCentavos = Math.round(Number(wallet.balanceBrl) * 100);
-    const priceCentavos = Math.round(BUMP_PRICE_BRL * 100);
+    const priceCentavos = Math.round(tierPriceBrl * 100);
     if (balanceCentavos < priceCentavos) {
       throw new BadRequestException(
-        `Saldo insuficiente. Necessário R$${BUMP_PRICE_BRL.toFixed(2)}`,
+        `Saldo insuficiente. Necessário R$${tierPriceBrl.toFixed(2)}`,
       );
     }
 
     const endsAt = new Date();
-    endsAt.setDate(endsAt.getDate() + BUMP_DURATION_DAYS);
+    endsAt.setDate(endsAt.getDate() + tierDurationDays);
 
     const promotion = await this.prisma.$transaction(async (tx) => {
       // Authoritative debit with a conditional claim on balance.
@@ -157,12 +171,12 @@ export class PromotionsService {
       // concurrent createBump calls for the same user both pass the
       // outer read-check and both decrement — balance can go negative.
       const debit = await tx.wallet.updateMany({
-        where: { id: wallet.id, balanceBrl: { gte: BUMP_PRICE_BRL } },
-        data: { balanceBrl: { decrement: BUMP_PRICE_BRL } },
+        where: { id: wallet.id, balanceBrl: { gte: tierPriceBrl } },
+        data: { balanceBrl: { decrement: tierPriceBrl } },
       });
       if (debit.count === 0) {
         throw new BadRequestException(
-          `Saldo insuficiente. Necessário R$${BUMP_PRICE_BRL.toFixed(2)}`,
+          `Saldo insuficiente. Necessário R$${tierPriceBrl.toFixed(2)}`,
         );
       }
 
@@ -170,8 +184,8 @@ export class PromotionsService {
         data: {
           walletId: wallet.id,
           type: 'DEBIT',
-          amountBrl: new Decimal((-BUMP_PRICE_BRL).toFixed(2)),
-          description: `Bump do anúncio: ${listing.title}`,
+          amountBrl: new Decimal((-tierPriceBrl).toFixed(2)),
+          description: `Bump do anúncio (${tierDurationDays}d): ${listing.title}`,
         },
       });
 
@@ -181,7 +195,7 @@ export class PromotionsService {
           userId,
           type: 'BUMP',
           endsAt,
-          pricePaidBrl: new Decimal(BUMP_PRICE_BRL.toFixed(2)),
+          pricePaidBrl: new Decimal(tierPriceBrl.toFixed(2)),
         },
       });
 

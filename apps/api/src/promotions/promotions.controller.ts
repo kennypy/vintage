@@ -23,12 +23,15 @@ export class PromotionsController {
   }
 
   @Post('bump')
-  @ApiOperation({ summary: 'Criar bump — impulso pago de R$4,90 por 3 dias' })
+  @ApiOperation({
+    summary:
+      'Criar bump — impulso pago por tier (1, 3 ou 7 dias). Omitir `days` usa o tier padrão de 3 dias.',
+  })
   createBump(
-    @Body() body: { listingId: string },
+    @Body() body: { listingId: string; days?: number },
     @CurrentUser() user: AuthUser,
   ) {
-    return this.promotionsService.createBump(body.listingId, user.id);
+    return this.promotionsService.createBump(body.listingId, user.id, body.days);
   }
 
   @Post('spotlight')

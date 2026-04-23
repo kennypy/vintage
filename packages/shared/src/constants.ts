@@ -58,8 +58,31 @@ export const RETURN_INSPECTION_DAYS = 3;
 export const MIN_PAYOUT_BRL = 10.0;
 
 // Promotions (BRL)
+// Default bump pricing — used when callers don't specify a tier.
 export const BUMP_PRICE_BRL = 4.9;
 export const BUMP_DURATION_DAYS = 3;
+
+// Tiered bump pricing. The picker on mobile + web exposes all three;
+// the API resolves the requested `days` value to the matching tier and
+// charges `priceBrl`. Keep the list sorted by `days` so iteration order
+// in the UI stays stable. Adding a tier here lights it up everywhere
+// (no per-app hard-coding).
+export interface BumpTier {
+  days: number;
+  priceBrl: number;
+  popular?: boolean;
+}
+export const BUMP_TIERS: readonly BumpTier[] = [
+  { days: 1, priceBrl: 2.9 },
+  { days: BUMP_DURATION_DAYS, priceBrl: BUMP_PRICE_BRL, popular: true },
+  { days: 7, priceBrl: 9.9 },
+] as const;
+export const BUMP_TIER_DAYS: readonly number[] = BUMP_TIERS.map((t) => t.days);
+
+export function getBumpTier(days: number): BumpTier | undefined {
+  return BUMP_TIERS.find((t) => t.days === days);
+}
+
 export const SPOTLIGHT_PRICE_BRL = 29.9;
 export const SPOTLIGHT_DURATION_DAYS = 7;
 export const MEGAFONE_FREE_DAYS = 7; // Free boost for new listings
