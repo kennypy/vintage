@@ -6,7 +6,7 @@ import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { getConversations } from '../../src/services/messages';
 import type { Conversation } from '../../src/services/messages';
-import { getAllDemoConversations } from '../../src/services/demoStore';
+import { getAllDemoConversations, isDemoModeSync } from '../../src/services/demoStore';
 import { useAuth } from '../../src/contexts/AuthContext';
 
 function formatTimeAgo(dateString: string): string {
@@ -57,15 +57,31 @@ function InboxScreenContent() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Inline error state — previously a failed GET /conversations
+  // silently served demo conversations, so a logged-in user with no
+  // real messages couldn't tell "I have no messages" from "API is
+  // down".
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchConversations = useCallback(async () => {
+    setFetchError(null);
     try {
       const response = await getConversations();
       setConversations(response.items);
-    } catch (_error) {
-      setConversations(getAllDemoConversations());
+    } catch (error) {
+      if (isDemoModeSync()) {
+        setConversations(getAllDemoConversations());
+      } else {
+        setConversations([]);
+        setFetchError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Não foi possível carregar suas mensagens.',
+        );
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -142,13 +158,27 @@ function InboxScreenContent() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={64} color={theme.textTertiary} />
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma mensagem</Text>
-            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-              Suas conversas com compradores e vendedores aparecerão aqui.
-            </Text>
-          </View>
+          fetchError ? (
+            <View style={styles.empty}>
+              <Ionicons name="cloud-offline-outline" size={64} color={colors.error[500]} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Erro ao carregar mensagens</Text>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>{fetchError}</Text>
+              <TouchableOpacity
+                onPress={fetchConversations}
+                style={{ marginTop: 16, paddingVertical: 8, paddingHorizontal: 16 }}
+              >
+                <Text style={{ color: colors.primary[600], fontSize: 14, fontWeight: '600' }}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Ionicons name="chatbubbles-outline" size={64} color={theme.textTertiary} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhuma mensagem</Text>
+              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+                Suas conversas com compradores e vendedores aparecerão aqui.
+              </Text>
+            </View>
+          )
         }
         removeClippedSubviews={true}
         maxToRenderPerBatch={10}

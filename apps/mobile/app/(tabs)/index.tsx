@@ -1,7 +1,8 @@
-import { View, Text, StyleSheet, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, RefreshControl, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/colors';
 import { useTheme } from '../../src/contexts/ThemeContext';
 import { useFavorites } from '../../src/contexts/FavoritesContext';
@@ -9,18 +10,9 @@ import { ListingCard } from '../../src/components/ListingCard';
 import { VerifyIdentityBanner } from '../../src/components/VerifyIdentityBanner';
 import { getListings } from '../../src/services/listings';
 import type { Listing } from '../../src/services/listings';
-import { DEMO_PHOTOS, getDemoListings } from '../../src/services/demoStore';
+import { getDemoListings, isDemoModeSync } from '../../src/services/demoStore';
 
 const CARD_GAP = 12;
-
-const MOCK_LISTINGS = [
-  { id: 'demo-1', title: 'Vestido Zara tamanho M', priceBrl: 89.9, sellerName: 'Maria S.', sellerVerified: true, condition: 'VERY_GOOD', size: 'M', imageUrl: DEMO_PHOTOS[0] },
-  { id: 'demo-2', title: 'Tênis Nike Air Max 42', priceBrl: 199.9, sellerName: 'João P.', condition: 'GOOD', size: '42', imageUrl: DEMO_PHOTOS[3] },
-  { id: 'demo-3', title: 'Bolsa Arezzo couro marrom', priceBrl: 149.0, sellerName: 'Ana L.', sellerVerified: true, condition: 'NEW_WITHOUT_TAGS', imageUrl: DEMO_PHOTOS[5] },
-  { id: 'demo-4', title: 'Camisa Reserva slim fit', priceBrl: 59.9, sellerName: 'Pedro R.', condition: 'VERY_GOOD', size: 'G', imageUrl: DEMO_PHOTOS[1] },
-  { id: 'demo-5', title: 'Óculos Ray-Ban Aviador', priceBrl: 320.0, sellerName: 'Carla M.', sellerVerified: true, condition: 'NEW_WITH_TAGS', imageUrl: DEMO_PHOTOS[6] },
-  { id: 'demo-6', title: 'Jaqueta Farm estampada', priceBrl: 129.9, sellerName: 'Bia F.', condition: 'GOOD', size: 'P', imageUrl: DEMO_PHOTOS[4] },
-];
 
 function mapListingToCard(listing: Listing) {
   return {
@@ -44,23 +36,42 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [listings, setListings] = useState<any[]>([]);
+  // Separates "feed load failed" from "feed is empty" so a network/auth
+  // error can't hide behind fake "Maria S." mock listings. The previous
+  // catch silently swapped real data for demo items — the user had no
+  // way to see the API was down.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchListings = useCallback(async () => {
+    setFetchError(null);
     try {
       const response = await getListings({ sortBy: 'newest', limit: 20 });
       setListings(response.items.map(mapListingToCard));
-    } catch {
-      const demoItems = getDemoListings().map((l) => ({
-        id: l.id,
-        title: l.title,
-        priceBrl: l.priceBrl,
-        imageUrl: l.images[0]?.url,
-        sellerName: l.seller.name,
-        sellerVerified: false,
-        condition: l.condition,
-        size: l.size,
-      }));
-      setListings(demoItems.length > 0 ? demoItems : MOCK_LISTINGS);
+    } catch (error) {
+      // Intentional demo mode (user opted into a demo account) still
+      // serves seeded items — that path is real product behaviour, not
+      // an error hide. Only real users on a real account hit the error
+      // branch below.
+      if (isDemoModeSync()) {
+        const demoItems = getDemoListings().map((l) => ({
+          id: l.id,
+          title: l.title,
+          priceBrl: l.priceBrl,
+          imageUrl: l.images[0]?.url,
+          sellerName: l.seller.name,
+          sellerVerified: false,
+          condition: l.condition,
+          size: l.size,
+        }));
+        setListings(demoItems);
+      } else {
+        setListings([]);
+        setFetchError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Não foi possível carregar os anúncios.',
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -100,22 +111,33 @@ export default function HomeScreen() {
         <Text style={[styles.logo, { color: colors.primary[600] }]}>Vintage.br</Text>
       </View>
       <VerifyIdentityBanner />
-      <FlatList
-        data={listings}
-        numColumns={2}
-        keyExtractor={(item) => item.id}
-        columnWrapperStyle={styles.row}
-        renderItem={renderItem}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={10}
-        windowSize={11}
-        initialNumToRender={8}
-      />
+      {fetchError ? (
+        <View style={[styles.errorBlock, { backgroundColor: theme.background }]}>
+          <Ionicons name="cloud-offline-outline" size={40} color={colors.error[500]} />
+          <Text style={[styles.errorTitle, { color: theme.text }]}>Não foi possível carregar o feed</Text>
+          <Text style={[styles.errorBody, { color: theme.textSecondary }]}>{fetchError}</Text>
+          <TouchableOpacity onPress={onRefresh} style={styles.errorRetry}>
+            <Text style={[styles.errorRetryText, { color: colors.primary[600] }]}>Tentar novamente</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={listings}
+          numColumns={2}
+          keyExtractor={(item) => item.id}
+          columnWrapperStyle={styles.row}
+          renderItem={renderItem}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={11}
+          initialNumToRender={8}
+        />
+      )}
     </View>
   );
 }
@@ -132,4 +154,9 @@ const styles = StyleSheet.create({
   logo: { fontSize: 24, fontWeight: '700' },
   list: { padding: CARD_GAP },
   row: { justifyContent: 'space-between' },
+  errorBlock: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
+  errorTitle: { fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  errorBody: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  errorRetry: { paddingVertical: 8, paddingHorizontal: 16 },
+  errorRetryText: { fontSize: 14, fontWeight: '600' },
 });

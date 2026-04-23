@@ -11,7 +11,7 @@ import { getListings } from '../../src/services/listings';
 import { ListingCard } from '../../src/components/ListingCard';
 import type { PublicProfile } from '../../src/services/users';
 import type { Listing } from '../../src/services/listings';
-import { getDemoListings } from '../../src/services/demoStore';
+import { getDemoListings, isDemoModeSync } from '../../src/services/demoStore';
 
 function mapListingToCard(listing: Listing) {
   return {
@@ -37,12 +37,17 @@ export default function SellerProfileScreen() {
   const [followLoading, setFollowLoading] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockActionLoading, setBlockActionLoading] = useState(false);
+  // Previously a profile load failure would silently fabricate a profile
+  // (hash-based follower/rating counts, "Vendedor" name) and pretend it
+  // was real. Now surfaces the error and lets the user retry or go back.
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Viewing one's own profile should hide block/follow actions — the backend
   // rejects self-block with 400 anyway, but we don't want to show the option.
   const isSelf = !!currentUser && !!id && currentUser.id === id;
 
   const fetchData = useCallback(async () => {
+    setFetchError(null);
     try {
       const [profileData, listingsData, blocksData] = await Promise.all([
         getPublicProfile(id ?? ''),
@@ -54,30 +59,43 @@ export default function SellerProfileScreen() {
       setProfile(profileData);
       setListings(listingsData.items.map(mapListingToCard));
       setIsBlocked(!!id && blocksData.blockedIds.includes(id));
-    } catch (_error) {
-      // API unavailable — build a demo profile from the seller in demo listings
-      const demoListings = getDemoListings();
-      const sellerListings = demoListings.filter((l) => l.seller.id === id);
-      const seller = sellerListings[0]?.seller ?? { id: id ?? 'demo', name: 'Vendedor', rating: 5.0 };
-
-      // Generate unique-ish counts per seller using id hash
-      const idHash = (id ?? 'demo').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const demoProfile: PublicProfile = {
-        id: seller.id,
-        name: seller.name,
-        verified: true,
-        ratingAvg: seller.rating ?? 4.8,
-        ratingCount: (idHash % 40) + 5,
-        followerCount: (idHash % 80) + 10,
-        followingCount: (idHash % 30) + 3,
-        listingCount: sellerListings.length,
-        isFollowing: false,
-        createdAt: new Date(Date.now() - 86400000 * (90 + (idHash % 300))).toISOString(),
-      };
-      setProfile(demoProfile);
-      setListings(sellerListings.map(mapListingToCard));
+    } catch (error) {
+      // Demo mode — serve a demo profile synthesised from the demo
+      // listings store. Real users get an honest error: fabricating a
+      // profile with a name of "Vendedor" and hash-based follower
+      // counts was indistinguishable from real data and misled the
+      // viewer about the seller's reputation.
+      if (isDemoModeSync()) {
+        const demoListings = getDemoListings();
+        const sellerListings = demoListings.filter((l) => l.seller.id === id);
+        const seller = sellerListings[0]?.seller ?? { id: id ?? 'demo', name: 'Vendedor', rating: 5.0 };
+        const idHash = (id ?? 'demo').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        const demoProfile: PublicProfile = {
+          id: seller.id,
+          name: seller.name,
+          verified: true,
+          ratingAvg: seller.rating ?? 4.8,
+          ratingCount: (idHash % 40) + 5,
+          followerCount: (idHash % 80) + 10,
+          followingCount: (idHash % 30) + 3,
+          listingCount: sellerListings.length,
+          isFollowing: false,
+          createdAt: new Date(Date.now() - 86400000 * (90 + (idHash % 300))).toISOString(),
+        };
+        setProfile(demoProfile);
+        setListings(sellerListings.map(mapListingToCard));
+      } else {
+        setProfile(null);
+        setListings([]);
+        setFetchError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Não foi possível carregar este perfil.',
+        );
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [id]);
 
@@ -171,10 +189,27 @@ export default function SellerProfileScreen() {
     ]);
   };
 
-  if (loading || !profile) {
+  if (loading) {
     return (
       <View style={[styles.container, styles.centered, { backgroundColor: theme.background }]}>
         <ActivityIndicator size="large" color={colors.primary[500]} />
+      </View>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <View style={[styles.container, styles.centered, { backgroundColor: theme.background, padding: 24 }]}>
+        <Ionicons name="cloud-offline-outline" size={48} color={colors.error[500]} />
+        <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600', marginTop: 12, textAlign: 'center' }}>
+          Perfil indisponível
+        </Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 14, marginTop: 6, textAlign: 'center', lineHeight: 20 }}>
+          {fetchError ?? 'Este vendedor não foi encontrado.'}
+        </Text>
+        <TouchableOpacity onPress={fetchData} style={{ marginTop: 20, paddingVertical: 10, paddingHorizontal: 20 }}>
+          <Text style={{ color: colors.primary[600], fontSize: 14, fontWeight: '600' }}>Tentar novamente</Text>
+        </TouchableOpacity>
       </View>
     );
   }
