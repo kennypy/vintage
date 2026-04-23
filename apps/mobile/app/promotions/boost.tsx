@@ -8,13 +8,9 @@ import { createBump, getActivePromotions } from '../../src/services/promotions';
 import { getUserListings } from '../../src/services/users';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { showThemedAlert } from '../../src/components/ThemedAlert';
-import { BUMP_PRICE_BRL, BUMP_DURATION_DAYS } from '@vintage/shared';
+import { BUMP_TIERS, BUMP_DURATION_DAYS, type BumpTier } from '@vintage/shared';
 
-const PLANS = [
-  { name: '1 dia', price: 'R$ 4,90', highlight: false },
-  { name: '3 dias', price: 'R$ 9,90', highlight: true, tag: 'Mais popular' },
-  { name: '7 dias', price: 'R$ 19,90', highlight: false },
-];
+const formatBrl = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`;
 
 interface ListingItem {
   id: string;
@@ -32,6 +28,11 @@ export default function BoostScreen() {
   const [listings, setListings] = useState<ListingItem[]>([]);
   const [loadingListings, setLoadingListings] = useState(false);
   const [boosting, setBoosting] = useState(false);
+  // Default to the "popular" tier (3 days) so the user can proceed without
+  // tapping anything if that's what they want. The previous hard-coded
+  // display made the other cards look tappable when they weren't.
+  const defaultTier = BUMP_TIERS.find((t) => t.popular) ?? BUMP_TIERS.find((t) => t.days === BUMP_DURATION_DAYS) ?? BUMP_TIERS[0];
+  const [selectedTier, setSelectedTier] = useState<BumpTier>(defaultTier);
 
   const openPicker = async () => {
     setShowPicker(true);
@@ -68,10 +69,11 @@ export default function BoostScreen() {
 
   const handleBoost = (listing: ListingItem) => {
     if (listing.activeUntil) return; // already boosted
-    const priceFormatted = BUMP_PRICE_BRL.toFixed(2).replace('.', ',');
+    const tier = selectedTier;
+    const priceFormatted = tier.priceBrl.toFixed(2).replace('.', ',');
     showThemedAlert(
       'Confirmar pagamento',
-      `Confirmar pagamento de R$ ${priceFormatted}?\n\nSeu anúncio será impulsionado por ${BUMP_DURATION_DAYS} dias.`,
+      `Confirmar pagamento de R$ ${priceFormatted}?\n\nSeu anúncio será impulsionado por ${tier.days} ${tier.days === 1 ? 'dia' : 'dias'}.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -79,7 +81,7 @@ export default function BoostScreen() {
           onPress: async () => {
             setBoosting(true);
             try {
-              const promo = await createBump(listing.id);
+              const promo = await createBump(listing.id, tier.days);
               setListings((prev) => {
                 const updated = prev.map((item) =>
                   item.id === listing.id ? { ...item, activeUntil: promo.endsAt } : item,
@@ -92,7 +94,7 @@ export default function BoostScreen() {
               });
               showThemedAlert(
                 'Impulsionado!',
-                `Seu anúncio aparece no topo das buscas por ${BUMP_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
+                `Seu anúncio aparece no topo das buscas por ${tier.days} ${tier.days === 1 ? 'dia' : 'dias'}. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
                 [{ text: 'Ver meus anúncios', onPress: () => router.push('/my-listings') }, { text: 'OK', style: 'cancel' }],
               );
             } catch (err: unknown) {
@@ -126,30 +128,46 @@ export default function BoostScreen() {
 
       <View style={[styles.section, { backgroundColor: theme.card }]}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Escolha o plano</Text>
-        {PLANS.map((plan) => (
-          <TouchableOpacity
-            key={plan.name}
-            style={[
-              styles.planCard,
-              { borderColor: theme.border, backgroundColor: theme.card },
-              plan.highlight && styles.planCardHighlight,
-            ]}
-          >
-            <View style={styles.planLeft}>
-              <Text style={[styles.planName, { color: theme.text }, plan.highlight && styles.planNameHighlight]}>
-                {plan.name}
-              </Text>
-              {plan.tag && (
-                <View style={styles.planTag}>
-                  <Text style={styles.planTagText}>{plan.tag}</Text>
+        {BUMP_TIERS.map((tier) => {
+          const isSelected = selectedTier.days === tier.days;
+          const label = `${tier.days} ${tier.days === 1 ? 'dia' : 'dias'}`;
+          return (
+            <TouchableOpacity
+              key={tier.days}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: isSelected }}
+              accessibilityLabel={`${label}, ${formatBrl(tier.priceBrl)}`}
+              onPress={() => setSelectedTier(tier)}
+              style={[
+                styles.planCard,
+                { borderColor: theme.border, backgroundColor: theme.card },
+                isSelected && styles.planCardHighlight,
+              ]}
+            >
+              <View style={styles.planLeft}>
+                <View
+                  style={[
+                    styles.radioOuter,
+                    { borderColor: isSelected ? colors.primary[500] : theme.border },
+                  ]}
+                >
+                  {isSelected && <View style={styles.radioInner} />}
                 </View>
-              )}
-            </View>
-            <Text style={[styles.planPrice, { color: theme.text }, plan.highlight && styles.planPriceHighlight]}>
-              {plan.price}
-            </Text>
-          </TouchableOpacity>
-        ))}
+                <Text style={[styles.planName, { color: theme.text }, isSelected && styles.planNameHighlight]}>
+                  {label}
+                </Text>
+                {tier.popular && (
+                  <View style={styles.planTag}>
+                    <Text style={styles.planTagText}>Mais popular</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.planPrice, { color: theme.text }, isSelected && styles.planPriceHighlight]}>
+                {formatBrl(tier.priceBrl)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <View style={[styles.section, { backgroundColor: theme.card }]}>
@@ -168,7 +186,9 @@ export default function BoostScreen() {
       </View>
 
       <TouchableOpacity style={styles.ctaButton} onPress={openPicker}>
-        <Text style={styles.ctaText}>Escolher anúncio para impulsionar</Text>
+        <Text style={styles.ctaText}>
+          Escolher anúncio — {formatBrl(selectedTier.priceBrl)} / {selectedTier.days} {selectedTier.days === 1 ? 'dia' : 'dias'}
+        </Text>
       </TouchableOpacity>
       <View style={{ height: 40 }} />
 
@@ -260,7 +280,14 @@ const styles = StyleSheet.create({
     padding: 16, marginBottom: 10,
   },
   planCardHighlight: { borderColor: colors.primary[500], backgroundColor: colors.primary[50] },
-  planLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  planLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  radioOuter: {
+    width: 20, height: 20, borderRadius: 10, borderWidth: 2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  radioInner: {
+    width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary[500],
+  },
   planName: { fontSize: 16, fontWeight: '600' },
   planNameHighlight: { color: colors.primary[700] },
   planTag: {

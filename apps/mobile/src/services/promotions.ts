@@ -9,10 +9,12 @@ interface Promotion {
   listingId?: string;
 }
 
-export async function createBump(listingId: string): Promise<Promotion> {
+export async function createBump(listingId: string, days?: number): Promise<Promotion> {
+  const body: Record<string, unknown> = { listingId };
+  if (typeof days === 'number') body.days = days;
   return apiFetch<Promotion>('/promotions/bump', {
     method: 'POST',
-    body: JSON.stringify({ listingId }),
+    body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' },
     authenticated: true,
   });

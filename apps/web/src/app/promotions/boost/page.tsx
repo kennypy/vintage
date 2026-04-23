@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
-import { BUMP_PRICE_BRL, BUMP_DURATION_DAYS } from '@vintage/shared';
+import { BUMP_TIERS, BUMP_DURATION_DAYS, type BumpTier } from '@vintage/shared';
 import { formatBRL } from '@/lib/i18n';
 
 interface Listing {
@@ -40,8 +40,15 @@ export default function BoostPage() {
   const [confirmListingId, setConfirmListingId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Default to the "popular" tier so the CTA works without further input.
+  const defaultTier =
+    BUMP_TIERS.find((t) => t.popular) ??
+    BUMP_TIERS.find((t) => t.days === BUMP_DURATION_DAYS) ??
+    BUMP_TIERS[0];
+  const [selectedTier, setSelectedTier] = useState<BumpTier>(defaultTier);
 
-  const priceFormatted = BUMP_PRICE_BRL.toFixed(2).replace('.', ',');
+  const priceFormatted = selectedTier.priceBrl.toFixed(2).replace('.', ',');
+  const daysLabel = `${selectedTier.days} ${selectedTier.days === 1 ? 'dia' : 'dias'}`;
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
@@ -99,9 +106,10 @@ export default function BoostPage() {
     try {
       const promo = await apiPost<{ endsAt: string }>('/promotions/bump', {
         listingId: confirmListingId,
+        days: selectedTier.days,
       });
       const activatedId = confirmListingId;
-      const endsAt = promo?.endsAt ?? new Date(Date.now() + BUMP_DURATION_DAYS * 864e5).toISOString();
+      const endsAt = promo?.endsAt ?? new Date(Date.now() + selectedTier.days * 864e5).toISOString();
       setListings((prev) => {
         const next = prev.map((l) => (l.id === activatedId ? { ...l, activeUntil: endsAt } : l));
         next.sort((a, b) => {
@@ -113,7 +121,7 @@ export default function BoostPage() {
       setConfirmListingId(null);
       setShowPicker(false);
       setSuccessMessage(
-        `Seu anuncio foi impulsionado por ${BUMP_DURATION_DAYS} dias. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
+        `Seu anuncio foi impulsionado por ${daysLabel}. O valor de R$ ${priceFormatted} foi debitado da sua carteira.`,
       );
     } catch (err: unknown) {
       const message =
@@ -161,19 +169,43 @@ export default function BoostPage() {
         </div>
       )}
 
-      {/* Price */}
+      {/* Plan picker */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-500">Preco</p>
-            <p className="text-2xl font-bold text-gray-900">
-              R$ {priceFormatted}
-              <span className="text-sm font-normal text-gray-500"> / {BUMP_DURATION_DAYS} dias</span>
-            </p>
-          </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Escolha o plano</h2>
           <span className="text-xs font-medium px-3 py-1 bg-brand-50 text-brand-700 rounded-full">
             Pagamento via carteira
           </span>
+        </div>
+        <div role="radiogroup" aria-label="Duração do impulso" className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {BUMP_TIERS.map((tier) => {
+            const isSelected = selectedTier.days === tier.days;
+            const label = `${tier.days} ${tier.days === 1 ? 'dia' : 'dias'}`;
+            return (
+              <button
+                key={tier.days}
+                type="button"
+                role="radio"
+                aria-checked={isSelected}
+                onClick={() => setSelectedTier(tier)}
+                className={`relative text-left p-4 rounded-xl border-2 transition ${
+                  isSelected
+                    ? 'border-brand-500 bg-brand-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                {tier.popular && (
+                  <span className="absolute -top-2 left-3 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 bg-brand-500 text-white rounded-full">
+                    Mais popular
+                  </span>
+                )}
+                <p className={`text-sm font-semibold ${isSelected ? 'text-brand-700' : 'text-gray-900'}`}>{label}</p>
+                <p className={`text-xl font-bold mt-1 ${isSelected ? 'text-brand-600' : 'text-gray-900'}`}>
+                  {formatBRL(tier.priceBrl)}
+                </p>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -279,7 +311,7 @@ export default function BoostPage() {
                 <p className="text-sm text-gray-700 mb-3">
                   Confirmar pagamento de <strong>R$ {priceFormatted}</strong>?
                   <br />
-                  Seu anuncio sera impulsionado por {BUMP_DURATION_DAYS} dias.
+                  Seu anuncio sera impulsionado por {daysLabel}.
                 </p>
                 <div className="flex gap-2">
                   <button
