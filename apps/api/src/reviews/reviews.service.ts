@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { FcmService } from '../notifications/fcm.service';
 import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 @Injectable()
@@ -11,7 +10,6 @@ export class ReviewsService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
-    private fcm: FcmService,
   ) {}
 
   async create(
@@ -95,11 +93,6 @@ export class ReviewsService {
         'reviews',
       )
       .catch(warnAndSwallow(this.logger, 'review.notify'));
-
-    // Send push notification to seller (fire-and-forget)
-    this.fcm
-      .sendReviewNotification(order.sellerId, titleCopy)
-      .catch(warnAndSwallow(this.logger, 'fcm.side-effect'));
 
     return review;
   }
