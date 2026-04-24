@@ -1,18 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-
-// jest-expo is optional - if not installed, use a basic preset
-let preset = {};
-try {
-  preset = require('jest-expo/jest-preset');
-} catch (e) {
-  // jest-expo not available, use basic react-native preset
-  preset = {
-    testEnvironment: 'node',
-    moduleNameMapper: {},
-    setupFiles: [],
-  };
-}
+const preset = require('jest-expo/jest-preset');
 
 // jest-expo's withTypescriptMapping reads tsconfig paths and converts them to
 // moduleNameMapper. Our tsconfig maps "react" to local @types/react for type
@@ -40,17 +28,6 @@ if (fs.existsSync(localRenderer)) {
   reactMapper['^react-test-renderer/(.*)$'] = localRenderer + '/$1';
 }
 
-// Mock expo modules for tests when unavailable
-const expoDeviceMock = path.resolve(__dirname, 'src/__mocks__/expo-device.js');
-const expoConstantsMock = path.resolve(__dirname, 'src/__mocks__/expo-constants.js');
-const expoMocks = {};
-if (fs.existsSync(expoDeviceMock)) {
-  expoMocks['^expo-device$'] = expoDeviceMock;
-}
-if (fs.existsSync(expoConstantsMock)) {
-  expoMocks['^expo-constants$'] = expoConstantsMock;
-}
-
 module.exports = {
   ...preset,
   setupFiles: [
@@ -60,7 +37,6 @@ module.exports = {
   moduleNameMapper: {
     ...cleanedMapper,
     ...reactMapper,
-    ...expoMocks,
   },
   // react-native is not hoisted to the monorepo root. When expo (hoisted to root
   // node_modules) imports react-native/* sub-paths, Jest needs to resolve them

@@ -25,17 +25,8 @@ jest.mock('../../services/users', () => ({
   getProfile: jest.fn(),
 }));
 
-jest.mock('../../services/pushNotifications', () => ({
-  registerForPushNotifications: jest.fn(),
-  configureForegroundNotifications: jest.fn(),
-}));
-
-jest.mock('../../services/permissions', () => ({
-  maybePrimeNotificationPermission: jest.fn(),
-}));
-
 const mockGetToken = getToken as jest.MockedFunction<typeof getToken>;
-const _mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
+const mockClearTokens = clearTokens as jest.MockedFunction<typeof clearTokens>;
 const mockLogin = loginService as jest.MockedFunction<typeof loginService>;
 const mockLogout = logoutService as jest.MockedFunction<typeof logoutService>;
 const mockRegister = registerService as jest.MockedFunction<typeof registerService>;

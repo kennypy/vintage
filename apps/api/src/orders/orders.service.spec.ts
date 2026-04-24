@@ -15,7 +15,6 @@ import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { ReferralsService } from '../referrals/referrals.service';
 import { SmsService } from '../sms/sms.service';
-import { FcmService } from '../notifications/fcm.service';
 
 jest.mock('@vintage/shared', () => ({
   BUYER_PROTECTION_FIXED_BRL: 3.5,
@@ -89,15 +88,6 @@ describe('OrdersService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CouponsService, useValue: mockCoupons },
         { provide: NotificationsService, useValue: mockNotifications },
-        {
-          provide: FcmService,
-          useValue: {
-            registerDeviceToken: jest.fn().mockResolvedValue(undefined),
-            sendOrderNotification: jest.fn().mockResolvedValue(undefined),
-            sendMessageNotification: jest.fn().mockResolvedValue(undefined),
-            sendReviewNotification: jest.fn().mockResolvedValue(undefined),
-          },
-        },
         {
           provide: ListingsService,
           useValue: { syncSearchIndex: jest.fn().mockResolvedValue(undefined) },

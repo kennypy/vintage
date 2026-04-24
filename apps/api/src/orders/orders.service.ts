@@ -12,7 +12,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { FcmService } from '../notifications/fcm.service';
 import { ListingsService } from '../listings/listings.service';
 import { FraudService } from '../fraud/fraud.service';
 import { AnalyticsService, AnalyticsEvents } from '../analytics/analytics.service';
@@ -36,7 +35,6 @@ export class OrdersService {
     private prisma: PrismaService,
     private coupons: CouponsService,
     private notifications: NotificationsService,
-    private fcm: FcmService,
     private listings: ListingsService,
     private fraud: FraudService,
     private analytics: AnalyticsService,
@@ -333,11 +331,6 @@ export class OrdersService {
       )
       .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
-    // Send push notification to seller (fire-and-forget)
-    this.fcm
-      .sendOrderNotification(order.sellerId, order.id, 'pending')
-      .catch(warnAndSwallow(this.logger, 'fcm.side-effect'));
-
     // Listing is now SOLD — remove it from search so other shoppers
     // don't see a purchased item in results.
     this.listings.syncSearchIndex(dto.listingId).catch(warnAndSwallow(this.logger, 'order.side-effect'));
@@ -565,11 +558,6 @@ export class OrdersService {
       )
       .catch(warnAndSwallow(this.logger, 'order.side-effect'));
 
-    // Send push notification to buyer (fire-and-forget)
-    this.fcm
-      .sendOrderNotification(updated.buyerId, updated.id, 'shipped')
-      .catch(warnAndSwallow(this.logger, 'fcm.side-effect'));
-
     // WhatsApp-first shipping alert. Fire-and-forget — the bell
     // notification above is the source of truth; WhatsApp is an
     // additional channel BR users expect for logistics updates.
@@ -765,11 +753,6 @@ export class OrdersService {
         'orders',
       )
       .catch(warnAndSwallow(this.logger, 'order.side-effect'));
-
-    // Send push notification to seller (fire-and-forget)
-    this.fcm
-      .sendOrderNotification(result.sellerId, result.id, 'delivered')
-      .catch(warnAndSwallow(this.logger, 'fcm.side-effect'));
 
     // Zero-day hold: finalize immediately. Keeps ops override simple
     // (ESCROW_HOLD_DAYS=0 is equivalent to "no hold").
