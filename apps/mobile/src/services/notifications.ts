@@ -1,6 +1,6 @@
 import { apiFetch } from './api';
 import Constants from 'expo-constants';
-import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
 export interface AppNotification {
   id: string;
@@ -47,7 +47,7 @@ export async function markAllRead(): Promise<void> {
  * Called on app startup and token refresh.
  */
 export async function registerDeviceToken(token: string): Promise<void> {
-  const deviceId = `${Device.brand}-${Device.deviceName ?? 'unknown'}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
+  const deviceId = `${Platform.OS}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
   try {
     await apiFetch<void>('/notifications/device-token/register', {
       method: 'POST',
@@ -63,5 +63,5 @@ export async function registerDeviceToken(token: string): Promise<void> {
  * Get device ID for this phone. Used for identifying and managing device tokens.
  */
 export function getDeviceId(): string {
-  return `${Device.brand}-${Device.deviceName ?? 'unknown'}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
+  return `${Platform.OS}-${Constants.sessionId?.slice(0, 8) ?? 'unknown'}`;
 }
