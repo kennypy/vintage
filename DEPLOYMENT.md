@@ -151,9 +151,20 @@ simultâneas).
    fly launch --name vintage-api --region gru --no-deploy
    ```
 3. **Segredos** — nunca coloque em `fly.toml`:
-   Below is the launch-day set. Source of truth is
-   `apps/api/.env.example` — any var you see there that's not below is
+   Below is the launch-day set. **Source of truth is
+   `apps/api/.env.example`** — any var you see there that's not below is
    optional (feature degrades gracefully).
+
+   **How to use this section:** the blocks below (Core, Search+Storage,
+   Payments+Shipping+NFe+Email, OAuth+Moderation+SMS, Captcha, Escrow,
+   Identity+Fraud, etc.) each correspond to a labelled section in
+   `apps/api/.env.example`. If a var is in `.env.example` but missing
+   here, it is intentionally optional. If a var is here but missing from
+   `.env.example`, that's a bug — open a PR to add it to `.env.example`
+   first (the lint test in `apps/api/test/env-example.spec.ts` catches
+   this on CI). Feature flags (`*_ENABLED`, `CAPTCHA_ENFORCE`,
+   `IDENTITY_*`) carry inline flip-checklist comments in `.env.example` —
+   read them before changing the value.
 
    **Core runtime + auth**
    ```bash

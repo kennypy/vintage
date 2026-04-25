@@ -18,6 +18,7 @@ import * as path from 'path';
 import { AppModule } from './app.module';
 import { JsonSyntaxExceptionFilter } from './common/filters/json-syntax.filter';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { assertSafeInternalEndpointAtStartup } from './common/services/url-validator';
 
 const logger = new Logger('Bootstrap');
 
@@ -97,6 +98,14 @@ async function bootstrap() {
     runMigrations();
   }
 
+  // SSRF: validate operator-controlled internal endpoints at startup so
+  // misconfigurations (e.g. MEILISEARCH_HOST pointed at a metadata IP) are
+  // caught at boot, not on the first health probe.
+  assertSafeInternalEndpointAtStartup(
+    config.get<string>('MEILISEARCH_HOST', ''),
+    'MEILISEARCH_HOST',
+  );
+
   // Security: fail if critical secrets use defaults in production
   if (nodeEnv === 'production') {
     const requiredSecrets = [
@@ -116,6 +125,14 @@ async function bootstrap() {
       { key: 'TWILIO_AUTH_TOKEN', label: 'Twilio Auth Token (SMS 2FA)' },
       { key: 'TWILIO_FROM_NUMBER', label: 'Twilio sender number (E.164, SMS 2FA)' },
     ];
+
+    // MEILISEARCH_API_KEY is conditionally required: only when MEILISEARCH_HOST
+    // is set (i.e. search is in use). An empty key against a configured host
+    // would surface as authentication errors at query time and leave the empty
+    // string visible to logs.
+    if (config.get<string>('MEILISEARCH_HOST', '')) {
+      requiredSecrets.push({ key: 'MEILISEARCH_API_KEY', label: 'Meilisearch API key (search auth)' });
+    }
 
     const missing: string[] = [];
     for (const { key, label } of requiredSecrets) {

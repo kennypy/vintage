@@ -1,4 +1,5 @@
 import { apiFetch, setTokens, clearTokens, revokeRefreshTokenOnServer } from './api';
+import { unregisterCurrentDevicePushToken } from './pushNotifications';
 
 export interface AuthTokens {
   accessToken: string;
@@ -177,6 +178,11 @@ export async function logout(): Promise<void> {
   // does a bare fetch that presents the REFRESH token (not the access
   // JWT apiFetch attaches — refresh tokens are the only thing the
   // server-side revoke can resolve against the RefreshToken table).
+  // Unregister the device push token while the access JWT is still valid,
+  // otherwise the next user on this device would inherit the previous
+  // user's push subscription (multi-user device, shared phone, hand-me-
+  // down). Best-effort: a flaky network must not block logout.
+  await unregisterCurrentDevicePushToken();
   await revokeRefreshTokenOnServer();
   await clearTokens();
 }

@@ -66,10 +66,38 @@ describe('SearchService', () => {
     it('should build filter string from filters', async () => {
       mockIndex.search.mockResolvedValue({ hits: [], estimatedTotalHits: 0 });
 
-      await service.search('', { categoryId: 'cat-1', minPrice: 50, maxPrice: 200 }, 'newest', 1, 20);
+      // M3: categoryId/brandId values must be valid CUIDs (Prisma default)
+      // or UUIDs to be spliced into the Meilisearch filter expression.
+      // Anything else is silently dropped — defense in depth on top of
+      // the controller's DTO validation.
+      const validCuid = 'clxh7y8z00000abcdefghijkl';
+      await service.search(
+        '',
+        { categoryId: validCuid, minPrice: 50, maxPrice: 200 },
+        'newest',
+        1,
+        20,
+      );
 
       expect(mockIndex.search).toHaveBeenCalledWith('', expect.objectContaining({
-        filter: 'categoryId = "cat-1" AND priceBrl >= 50 AND priceBrl <= 200',
+        filter: `categoryId = "${validCuid}" AND priceBrl >= 50 AND priceBrl <= 200`,
+      }));
+    });
+
+    it('drops malformed categoryId values silently (M3 defense-in-depth)', async () => {
+      mockIndex.search.mockResolvedValue({ hits: [], estimatedTotalHits: 0 });
+
+      await service.search(
+        '',
+        { categoryId: '"; DROP TABLE listings; --', minPrice: 50 },
+        'newest',
+        1,
+        20,
+      );
+
+      // Bad categoryId shouldn't reach the filter expression at all.
+      expect(mockIndex.search).toHaveBeenCalledWith('', expect.objectContaining({
+        filter: 'priceBrl >= 50',
       }));
     });
 
