@@ -11,21 +11,31 @@ import { test, expect } from '@playwright/test';
 const requireAuth = process.env.E2E_AUTH === '1';
 
 test.describe('login form — client-side validation', () => {
-  test('submitting empty fields surfaces inline errors, not a 4xx', async ({ page }) => {
+  // The form has `<input required>` + `<input type="email">`, so the browser's
+  // native HTML5 validation would normally short-circuit a click on submit
+  // before our validateLoginForm gets a chance to run. We disable HTML5
+  // validation per-test via `form.noValidate = true` so we can exercise the
+  // app-level path. In production the two layers run in series; either one
+  // alone would block a malformed submit.
+  test('submitting empty fields surfaces our inline errors (HTML5 bypassed)', async ({ page }) => {
     await page.goto('/auth/login');
-    // The button is the single primary CTA on the form.
+    await page.evaluate(() => {
+      const form = document.querySelector('form');
+      if (form) form.noValidate = true;
+    });
     await page.getByRole('button', { name: /entrar|login/i }).first().click();
-    // validateLoginForm() in @vintage/shared returns Portuguese messages.
     await expect(page.getByText(/informe seu e-mail/i)).toBeVisible();
     await expect(page.getByText(/informe sua senha/i)).toBeVisible();
   });
 
-  test('typing a malformed email surfaces "E-mail inválido"', async ({ page }) => {
+  test('a too-short password surfaces "A senha tem no mínimo 8 caracteres"', async ({ page }) => {
+    // Valid email + 5-char password → passes HTML5 (both required fields are
+    // non-empty, email type-checks), trips validateLoginForm's password rule.
     await page.goto('/auth/login');
-    await page.locator('input[type="email"], input[name="email"]').first().fill('not-an-email');
-    await page.locator('input[type="password"], input[name="password"]').first().fill('password123');
+    await page.locator('input[type="email"], input[name="email"]').first().fill('user@example.com');
+    await page.locator('input[type="password"], input[name="password"]').first().fill('short');
     await page.getByRole('button', { name: /entrar|login/i }).first().click();
-    await expect(page.getByText(/e-mail inválido/i)).toBeVisible();
+    await expect(page.getByText(/no mínimo 8 caracteres/i)).toBeVisible();
   });
 });
 
@@ -41,16 +51,16 @@ test.describe('protected route auth gate', () => {
   }
 });
 
-test.describe('public listing detail', () => {
-  test('listing detail page renders without auth', async ({ page, request }) => {
-    // Hit /listings to find any active listing, then visit its detail page.
-    // If the API isn't seeded, fall back to the route shell — the test
-    // still proves Next.js rendered something rather than 500ing.
-    const r = await request.get('/listings').catch(() => null);
-    await page.goto('/listings');
-    await expect(page.locator('h1, h2').first()).toBeVisible();
-    // Don't fail if listings are empty in test env — render is enough.
-    expect(r?.status() ?? 200).toBeLessThan(500);
+test.describe('public listing route', () => {
+  test('/listings responds without auth and does not 5xx', async ({ page }) => {
+    // The listings index is a public, server-rendered page. We can't assert
+    // a specific h1/h2 because in a clean test env (no seeded fixtures) the
+    // page may render an empty-state component instead of a heading. The
+    // contract under test is the same as in middleware.ts: this path is in
+    // the public allowlist and must NOT redirect to /auth/login.
+    const response = await page.goto('/listings');
+    expect(response?.status() ?? 0).toBeLessThan(500);
+    await expect(page).not.toHaveURL(/\/auth\/login/);
   });
 });
 
