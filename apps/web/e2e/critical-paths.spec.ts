@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // Critical-path E2E coverage: validates that the buy/sell flow's key
 // surfaces exist and behave on a cold session, complementing smoke.spec.ts
@@ -10,25 +10,44 @@ import { test, expect } from '@playwright/test';
 
 const requireAuth = process.env.E2E_AUTH === '1';
 
+// `/auth/login` is a `'use client'` page: Next.js renders SSR HTML first and
+// React hydrates asynchronously. waitForSelector / getByLabel only check
+// DOM presence — neither blocks until React has attached its onSubmit
+// handler. Submitting the form before hydration completes drops the event
+// into the void: noValidate=true skips HTML5, no React listener catches the
+// `submit` event, the form posts natively (GET to the same URL), the page
+// rerenders empty, and the assertion times out. Two prior fix attempts
+// kept the requestSubmit() shape and only retuned the waits, so CI kept
+// flaking. This helper waits for React's __reactFiber$ internal property
+// to appear on the form node — the canonical post-hydration signal in
+// React 18+ — before the test touches anything.
+async function waitForLoginFormHydration(page: Page): Promise<void> {
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => {
+    const form = document.querySelector('form');
+    if (!form) return false;
+    return Object.keys(form).some((k) => k.startsWith('__reactFiber'));
+  }, undefined, { timeout: 15_000 });
+}
+
 test.describe('login form — client-side validation', () => {
   // The form has `<input required>` + `<input type="email">`, so the browser's
   // native HTML5 validation would normally short-circuit a click on submit
   // before our validateLoginForm gets a chance to run. We disable HTML5
-  // validation per-test via `form.noValidate = true` and call
-  // `form.requestSubmit()` directly so the synthetic submit event reaches
-  // React's onSubmit handler regardless of the click cascade. In production
-  // both layers run in series; either alone blocks a malformed submit.
+  // validation per-test by setting `form.noValidate = true`, then click the
+  // submit button (a real DOM click, not requestSubmit) so React's onSubmit
+  // handler — which is now guaranteed bound by waitForLoginFormHydration —
+  // catches the submit event. In production both layers run in series;
+  // either alone blocks a malformed submit.
   test('submitting empty fields surfaces our inline errors (HTML5 bypassed)', async ({ page }) => {
     await page.goto('/auth/login');
-    // Wait until React has actually mounted the form before we touch it.
-    await page.waitForSelector('form');
-    await page.getByLabel(/e-mail/i).waitFor();
+    await waitForLoginFormHydration(page);
     await page.evaluate(() => {
       const form = document.querySelector('form') as HTMLFormElement | null;
       if (!form) throw new Error('login form not found');
       form.noValidate = true;
-      form.requestSubmit();
     });
+    await page.getByRole('button', { name: /^entrar$/i }).click();
     await expect(page.getByText(/informe seu e-mail/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(/informe sua senha/i)).toBeVisible();
   });
@@ -37,16 +56,10 @@ test.describe('login form — client-side validation', () => {
     // Valid email + 5-char password → passes HTML5 (both required fields are
     // non-empty, email type-checks), trips validateLoginForm's password rule.
     await page.goto('/auth/login');
-    await page.waitForSelector('form');
+    await waitForLoginFormHydration(page);
     await page.getByLabel('E-mail').fill('user@example.com');
     await page.getByLabel('Senha').fill('short');
-    // requestSubmit() instead of clicking the button — sidesteps any timing
-    // issue where the button's pointer events haven't bound yet on a slow
-    // dev-mode compile.
-    await page.evaluate(() => {
-      const form = document.querySelector('form') as HTMLFormElement | null;
-      form?.requestSubmit();
-    });
+    await page.getByRole('button', { name: /^entrar$/i }).click();
     await expect(page.getByText(/no mínimo 8 caracteres/i)).toBeVisible({ timeout: 10_000 });
   });
 });
