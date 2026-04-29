@@ -33,12 +33,19 @@ async function waitForLoginFormHydration(page: Page): Promise<void> {
 test.describe('login form — client-side validation', () => {
   // The form has `<input required>` + `<input type="email">`, so the browser's
   // native HTML5 validation would normally short-circuit a click on submit
-  // before our validateLoginForm gets a chance to run. We disable HTML5
-  // validation per-test by setting `form.noValidate = true`, then click the
-  // submit button (a real DOM click, not requestSubmit) so React's onSubmit
-  // handler — which is now guaranteed bound by waitForLoginFormHydration —
-  // catches the submit event. In production both layers run in series;
-  // either alone blocks a malformed submit.
+  // before our validateLoginForm gets a chance to run. The previous fix
+  // tried `form.noValidate = true` alone, but the empirical CI run shows
+  // that the submit event still doesn't reach React's onSubmit when the
+  // required inputs are empty — Chrome focuses the first invalid field
+  // and consumes the click before the form's submission algorithm runs.
+  // The bulletproof workaround is to strip the per-input constraints
+  // (`required`, `type="email"`) so each input is a plain text box that
+  // never enters the `:invalid` state, then click the submit button. The
+  // click cascade fires `submit` synchronously, React's onSubmit catches
+  // it, and validateLoginForm gets the empty values it needs to surface
+  // its Portuguese error messages. In production both the HTML5 layer
+  // and validateLoginForm run in series; either alone blocks a malformed
+  // submit.
   test('submitting empty fields surfaces our inline errors (HTML5 bypassed)', async ({ page }) => {
     await page.goto('/auth/login');
     await waitForLoginFormHydration(page);
@@ -46,6 +53,14 @@ test.describe('login form — client-side validation', () => {
       const form = document.querySelector('form') as HTMLFormElement | null;
       if (!form) throw new Error('login form not found');
       form.noValidate = true;
+      form.setAttribute('novalidate', '');
+      form.querySelectorAll<HTMLInputElement>('input[required]').forEach((i) => {
+        i.required = false;
+        i.removeAttribute('required');
+      });
+      form.querySelectorAll<HTMLInputElement>('input[type="email"]').forEach((i) => {
+        i.type = 'text';
+      });
     });
     await page.getByRole('button', { name: /^entrar$/i }).click();
     await expect(page.getByText(/informe seu e-mail/i)).toBeVisible({ timeout: 10_000 });
