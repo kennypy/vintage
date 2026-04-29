@@ -132,8 +132,13 @@ describe('LoginPage', () => {
     });
     render(<LoginPage />);
 
+    // Password is a realistic-shape value (>=8 chars) so the new client-side
+    // validateLoginForm gate doesn't short-circuit before the API call. The
+    // gate is intentional — `password='wrong'` (5 chars) used to round-trip
+    // to the API and show its 401 message; we now reject it locally with
+    // "A senha tem no mínimo 8 caracteres." for faster feedback.
     fireEvent.change(screen.getByLabelText('E-mail'), { target: { value: 'user@test.com' } });
-    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'wrong' } });
+    fireEvent.change(screen.getByLabelText('Senha'), { target: { value: 'wrong-pwd-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
 
     await waitFor(() => {

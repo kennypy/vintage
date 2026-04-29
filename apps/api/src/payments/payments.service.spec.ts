@@ -62,7 +62,16 @@ const mockPrisma: Record<string, any> = {
   },
   $transaction: jest.fn(),
 };
-mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+// Handle both Prisma transaction forms:
+//   - Callback form: $transaction(async (tx) => { ... }) — passes the
+//     mocked client through as `tx`.
+//   - Batch form: $transaction([promiseA, promiseB]) — finalizeAttempt uses
+//     this to atomically update Payment + Order; just resolve the array.
+mockPrisma.$transaction.mockImplementation((arg: any) => {
+  if (typeof arg === 'function') return arg(mockPrisma);
+  if (Array.isArray(arg)) return Promise.all(arg);
+  return arg;
+});
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -131,10 +140,13 @@ describe('PaymentsService', () => {
 
       expect(result).toEqual(pixResponse);
       expect(result.status).toBe('pending');
+      // The fourth argument is the deterministic attempt number used to
+      // derive the idempotency key (C2: app-side dedup against MP).
       expect(mockMercadoPago.createPixPayment).toHaveBeenCalledWith(
         'order-1',
         150,
         'Vintage.br - Pedido order-1',
+        1,
       );
     });
 
@@ -202,6 +214,7 @@ describe('PaymentsService', () => {
         150,
         1,
         'token-123',
+        1,
       );
     });
   });
@@ -227,6 +240,7 @@ describe('PaymentsService', () => {
         'order-1',
         150,
         'Vintage.br - Pedido order-1',
+        1,
       );
     });
   });
@@ -269,7 +283,7 @@ describe('PaymentsService', () => {
   });
 
   describe('getPaymentStatus', () => {
-    it('returns payment status ONLY when the caller owns the order', async () => {
+    it('returns payment status when the caller is the buyer OR seller on that order (H5)', async () => {
       mockPrisma.order.findFirst.mockResolvedValue({ id: 'order-1' });
       mockMercadoPago.getPaymentStatus.mockResolvedValue({
         id: 'pay-1',
@@ -279,8 +293,14 @@ describe('PaymentsService', () => {
 
       const result = await service.getPaymentStatus('pay-1', 'user-buyer');
 
+      // H5: sellers also need to see payment status to know whether the
+      // funds have arrived before shipping. The OR clause keeps the
+      // ownership oracle behaviour while widening access to both parties.
       expect(mockPrisma.order.findFirst).toHaveBeenCalledWith({
-        where: { paymentId: 'pay-1', buyerId: 'user-buyer' },
+        where: {
+          paymentId: 'pay-1',
+          OR: [{ buyerId: 'user-buyer' }, { sellerId: 'user-buyer' }],
+        },
         select: { id: true },
       });
       expect(result.id).toBe('pay-1');

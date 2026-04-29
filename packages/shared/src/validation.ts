@@ -284,3 +284,138 @@ export function maskPixKey(key: string, type: PixKeyType): string {
     }
   }
 }
+
+// ============================================================
+// Shared form validators (web + mobile)
+// ============================================================
+//
+// These return a `Record<field, errorMessage>` keyed by form field. An empty
+// object means the form is valid. Wired into web forms (Login, Register, Sell)
+// to give immediate feedback before the API roundtrip and into mobile forms
+// for the same UX. The API still validates on every request — these are
+// purely a UX layer.
+
+export interface FieldErrors {
+  [field: string]: string;
+}
+
+/** Returns errors map; empty when input is valid. */
+export function validateLoginForm(input: { email: string; password: string }): FieldErrors {
+  const errors: FieldErrors = {};
+  const email = input.email?.trim() ?? '';
+  if (!email) {
+    errors.email = 'Informe seu e-mail.';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = 'E-mail inválido.';
+  }
+  if (!input.password) {
+    errors.password = 'Informe sua senha.';
+  } else if (input.password.length < 8) {
+    errors.password = 'A senha tem no mínimo 8 caracteres.';
+  }
+  return errors;
+}
+
+/**
+ * Web/mobile registration form. Mirrors the API's RegisterDto. CPF is
+ * required eventually (LGPD onboarding) but the API also accepts a deferred
+ * CPF — when `cpf` is empty here we skip the modulo-11 check and the user
+ * can fill it in later from /conta/seguranca.
+ */
+export function validateRegisterForm(input: {
+  email: string;
+  password: string;
+  passwordConfirm?: string;
+  displayName: string;
+  cpf?: string;
+  birthDate?: string;
+}): FieldErrors {
+  const errors: FieldErrors = validateLoginForm({
+    email: input.email,
+    password: input.password,
+  });
+  if (input.passwordConfirm !== undefined && input.password !== input.passwordConfirm) {
+    errors.passwordConfirm = 'As senhas não conferem.';
+  }
+  const name = (input.displayName ?? '').trim();
+  if (!name) {
+    errors.displayName = 'Informe seu nome de exibição.';
+  } else if (name.length < 2) {
+    errors.displayName = 'Nome muito curto.';
+  } else if (name.length > 60) {
+    errors.displayName = 'Nome muito longo (máx 60 caracteres).';
+  }
+  if (input.cpf) {
+    const cleaned = input.cpf.replace(/\D/g, '');
+    if (cleaned.length !== 11 || !isValidCPF(cleaned)) {
+      errors.cpf = 'CPF inválido.';
+    }
+  }
+  if (input.birthDate) {
+    const d = new Date(input.birthDate);
+    if (Number.isNaN(d.getTime())) {
+      errors.birthDate = 'Data de nascimento inválida.';
+    } else {
+      const ageMs = Date.now() - d.getTime();
+      const years = ageMs / (365.25 * 24 * 3600 * 1000);
+      if (years < 18) errors.birthDate = 'Você precisa ter pelo menos 18 anos.';
+      if (years > 120) errors.birthDate = 'Data de nascimento inválida.';
+    }
+  }
+  return errors;
+}
+
+/**
+ * Listing-creation form. Title length, price range, photo count, weight,
+ * and category presence — all the user-facing constraints the API also
+ * enforces. Fast feedback in the form prevents a 400 round-trip when the
+ * user picks an out-of-range price or forgets a photo.
+ */
+export function validateSellListingForm(input: {
+  title?: string;
+  description?: string;
+  priceBrl?: number | string;
+  categoryId?: string;
+  shippingWeightG?: number | string;
+  photoCount?: number;
+}): FieldErrors {
+  const errors: FieldErrors = {};
+  const title = (input.title ?? '').trim();
+  if (!title) {
+    errors.title = 'Informe um título.';
+  } else if (title.length < 4) {
+    errors.title = 'Título muito curto (mín 4 caracteres).';
+  } else if (title.length > 80) {
+    errors.title = 'Título muito longo (máx 80 caracteres).';
+  }
+  if ((input.description ?? '').length > 4000) {
+    errors.description = 'Descrição muito longa (máx 4000 caracteres).';
+  }
+  const price = typeof input.priceBrl === 'string' ? Number(input.priceBrl.replace(',', '.')) : input.priceBrl;
+  if (price === undefined || !Number.isFinite(price)) {
+    errors.priceBrl = 'Informe um preço.';
+  } else if (price < 5) {
+    errors.priceBrl = 'Preço mínimo é R$ 5,00.';
+  } else if (price > 10000) {
+    errors.priceBrl = 'Preço máximo é R$ 10.000,00.';
+  }
+  if (!input.categoryId) {
+    errors.categoryId = 'Escolha uma categoria.';
+  }
+  const weight = typeof input.shippingWeightG === 'string' ? Number(input.shippingWeightG) : input.shippingWeightG;
+  if (weight === undefined || !Number.isFinite(weight)) {
+    errors.shippingWeightG = 'Informe o peso para envio.';
+  } else if (weight < 50) {
+    errors.shippingWeightG = 'Peso mínimo: 50g.';
+  } else if (weight > 30000) {
+    errors.shippingWeightG = 'Peso máximo: 30kg.';
+  }
+  if ((input.photoCount ?? 0) < 1) {
+    errors.photos = 'Adicione pelo menos uma foto.';
+  } else if ((input.photoCount ?? 0) > 20) {
+    errors.photos = 'Máximo de 20 fotos por anúncio.';
+  }
+  return errors;
+}
+
+
