@@ -59,37 +59,10 @@ export class PaymentsService {
     );
   }
 
-  private async getAndValidateOrder(orderId: string, userId: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-    });
-    if (!order) {
-      throw new NotFoundException('Pedido não encontrado.');
-    }
-    if (order.buyerId !== userId) {
-      throw new ForbiddenException('Acesso negado ao pedido.');
-    }
-    if (order.status !== 'PENDING') {
-      throw new BadRequestException('Pedido já foi pago ou não está pendente.');
-    }
-    // Dual-payment guard (red-team finding R-04, pen-test track 4).
-    // Previously the service overwrote `order.paymentId` on every
-    // create{Pix,Card,Boleto} call, orphaning the previous Mercado
-    // Pago payment. A buyer who generated a PIX QR then switched to
-    // a card (or vice-versa) could end up paying BOTH — MP processes
-    // them independently, the webhook for the card flips the order
-    // to PAID, and the PIX webhook arrives later with a paymentId that
-    // no longer matches `order.paymentId`, so our handler silently
-    // records it as a no-op. The buyer is charged twice with no
-    // automatic refund. We refuse the second create-payment call
-    // when the order already has an active paymentId pending.
-    if (order.paymentId) {
-      throw new BadRequestException(
-        'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
-      );
-    }
-    return order;
-  }
+  // (getAndValidateOrder + nextAttemptNumber + recordPaymentAttempt were
+  // folded into reserveAttempt() so order read, amount validation, and
+  // Payment row insert all happen under the same row lock — defends against
+  // R-04 dual-payment AND any future totalBrl-mutation race.)
 
   private validateAmount(amountBrl: number, orderId: string): void {
     if (!Number.isFinite(amountBrl) || amountBrl <= 0) {
@@ -109,60 +82,109 @@ export class PaymentsService {
   }
 
   /**
-   * Next attempt number for this order. Payment rows are 1-based and
-   * unique per (orderId, attemptNumber), so the current count + 1 is
-   * the next slot. Used by first-time-create AND retry paths so a
-   * retry that comes in before the first row was written (very fast
-   * double-tap) still gets attemptNumber=1 via the @@unique fallback
-   * — the unique violation surfaces as a 409 that the client retries.
+   * Atomically reserve a Payment slot for a new attempt: read+lock the order,
+   * re-validate state and amount under the lock, allocate attemptNumber, derive
+   * the deterministic idempotency key, and insert a PENDING Payment row in the
+   * SAME transaction. Done before the network call so:
+   *
+   *   1. The amount the caller will charge is the amount that was on the order
+   *      at the moment we authorized the charge — no race with concurrent
+   *      mutations (defense in depth; the order schema doesn't currently expose
+   *      a totalBrl-mutating endpoint, but locking is cheap and forward-compat).
+   *   2. The @@unique([orderId, idempotencyKey]) constraint fires here, before
+   *      a duplicate attempt can ever reach Mercado Pago — backstop against
+   *      double-charge if MP-side dedup ever misfires.
+   *   3. If the network call fails, the PENDING row remains and the retry
+   *      flow can advance attemptNumber cleanly.
    */
-  private async nextAttemptNumber(orderId: string): Promise<number> {
-    const count = await this.prisma.payment.count({ where: { orderId } });
-    return count + 1;
+  private async reserveAttempt(
+    orderId: string,
+    userId: string,
+    method: 'PIX' | 'CREDIT_CARD' | 'BOLETO',
+    extra?: string,
+  ): Promise<{ amountBrl: number; attemptNumber: number; idempotencyKey: string; paymentId: string }> {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId } });
+      if (!order) throw new NotFoundException('Pedido não encontrado.');
+      if (order.buyerId !== userId) throw new ForbiddenException('Acesso negado ao pedido.');
+      if (order.status !== 'PENDING') {
+        throw new BadRequestException('Pedido já foi pago ou não está pendente.');
+      }
+      if (order.paymentId) {
+        throw new BadRequestException(
+          'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
+        );
+      }
+      const amountBrl = Number(order.totalBrl);
+      this.validateAmount(amountBrl, orderId);
+
+      // Lock the order row by writing a no-op-ish field. Prisma's update takes
+      // an exclusive row lock for the rest of the transaction, serializing
+      // concurrent payment-creation attempts on the same order.
+      await tx.order.update({ where: { id: orderId }, data: { updatedAt: new Date() } });
+
+      const count = await tx.payment.count({ where: { orderId } });
+      const attemptNumber = count + 1;
+      const mpMethod = method === 'CREDIT_CARD' ? 'card' : method === 'BOLETO' ? 'boleto' : 'pix';
+      const idempotencyKey = MercadoPagoClient.deriveIdempotencyKey(
+        mpMethod,
+        orderId,
+        amountBrl,
+        attemptNumber,
+        extra,
+      );
+      const payment = await tx.payment.create({
+        data: {
+          orderId,
+          attemptNumber,
+          method,
+          status: 'PENDING',
+          amountBrl: new Decimal(amountBrl.toFixed(2)),
+          idempotencyKey,
+        },
+      });
+      return { amountBrl, attemptNumber, idempotencyKey, paymentId: payment.id };
+    });
   }
 
-  /**
-   * Write the Payment row for a brand-new (or retried) attempt. Called
-   * after the provider accepts the request so we have a `providerPaymentId`
-   * to capture. parentPaymentId links the retry chain for audit.
-   */
-  private async recordPaymentAttempt(
-    orderId: string,
-    attemptNumber: number,
-    method: 'PIX' | 'CREDIT_CARD' | 'BOLETO',
-    amountBrl: number,
-    providerPaymentId: string,
-    parentPaymentId: string | null,
-  ) {
-    return this.prisma.payment.create({
-      data: {
-        orderId,
-        attemptNumber,
-        method,
-        status: 'PENDING',
-        amountBrl: new Decimal(amountBrl.toFixed(2)),
-        providerPaymentId,
-        parentPaymentId: parentPaymentId ?? undefined,
-      },
+  /** Bind the provider's payment id back to our pre-allocated Payment row. */
+  private async finalizeAttempt(paymentId: string, orderId: string, providerPaymentId: string) {
+    await this.prisma.$transaction([
+      this.prisma.payment.update({
+        where: { id: paymentId },
+        data: { providerPaymentId },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { paymentId: providerPaymentId },
+      }),
+    ]);
+  }
+
+  /** Roll back a reservation when the provider call fails outright. */
+  private async abandonAttempt(paymentId: string, reason: string) {
+    await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: { status: 'FAILED', failureReason: reason.slice(0, 500) },
     });
   }
 
   async createPixPayment(orderId: string, userId: string) {
-    const order = await this.getAndValidateOrder(orderId, userId);
-    const amountBrl = Number(order.totalBrl);
-    this.validateAmount(amountBrl, orderId);
-    const attemptNumber = await this.nextAttemptNumber(orderId);
-    this.logger.log(`Creating PIX payment for order ${orderId} (attempt ${attemptNumber})`);
-    const result = await this.mercadoPago.createPixPayment(
-      orderId,
-      amountBrl,
-      `Vintage.br - Pedido ${orderId}`,
-    );
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: { paymentId: String(result.id) },
-    });
-    await this.recordPaymentAttempt(orderId, attemptNumber, 'PIX', amountBrl, String(result.id), null);
+    const reservation = await this.reserveAttempt(orderId, userId, 'PIX');
+    this.logger.log(`Creating PIX payment for order ${orderId} (attempt ${reservation.attemptNumber})`);
+    let result;
+    try {
+      result = await this.mercadoPago.createPixPayment(
+        orderId,
+        reservation.amountBrl,
+        `Vintage.br - Pedido ${orderId}`,
+        reservation.attemptNumber,
+      );
+    } catch (e) {
+      await this.abandonAttempt(reservation.paymentId, String(e));
+      throw e;
+    }
+    await this.finalizeAttempt(reservation.paymentId, orderId, String(result.id));
     return result;
   }
 
@@ -172,41 +194,46 @@ export class PaymentsService {
     installments: number,
     cardToken?: string,
   ) {
-    const order = await this.getAndValidateOrder(orderId, userId);
-    const amountBrl = Number(order.totalBrl);
-    this.validateAmount(amountBrl, orderId);
-    const attemptNumber = await this.nextAttemptNumber(orderId);
-    this.logger.log(`Creating card payment for order ${orderId} (attempt ${attemptNumber})`);
-    const result = await this.mercadoPago.createCardPayment(
+    const reservation = await this.reserveAttempt(
       orderId,
-      amountBrl,
-      installments,
-      cardToken ?? '',
+      userId,
+      'CREDIT_CARD',
+      `${installments}:${cardToken ?? ''}`,
     );
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: { paymentId: String(result.id) },
-    });
-    await this.recordPaymentAttempt(orderId, attemptNumber, 'CREDIT_CARD', amountBrl, String(result.id), null);
+    this.logger.log(`Creating card payment for order ${orderId} (attempt ${reservation.attemptNumber})`);
+    let result;
+    try {
+      result = await this.mercadoPago.createCardPayment(
+        orderId,
+        reservation.amountBrl,
+        installments,
+        cardToken ?? '',
+        reservation.attemptNumber,
+      );
+    } catch (e) {
+      await this.abandonAttempt(reservation.paymentId, String(e));
+      throw e;
+    }
+    await this.finalizeAttempt(reservation.paymentId, orderId, String(result.id));
     return result;
   }
 
   async createBoletoPayment(orderId: string, userId: string) {
-    const order = await this.getAndValidateOrder(orderId, userId);
-    const amountBrl = Number(order.totalBrl);
-    this.validateAmount(amountBrl, orderId);
-    const attemptNumber = await this.nextAttemptNumber(orderId);
-    this.logger.log(`Creating boleto payment for order ${orderId} (attempt ${attemptNumber})`);
-    const result = await this.mercadoPago.createBoletoPayment(
-      orderId,
-      amountBrl,
-      `Vintage.br - Pedido ${orderId}`,
-    );
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: { paymentId: String(result.id) },
-    });
-    await this.recordPaymentAttempt(orderId, attemptNumber, 'BOLETO', amountBrl, String(result.id), null);
+    const reservation = await this.reserveAttempt(orderId, userId, 'BOLETO');
+    this.logger.log(`Creating boleto payment for order ${orderId} (attempt ${reservation.attemptNumber})`);
+    let result;
+    try {
+      result = await this.mercadoPago.createBoletoPayment(
+        orderId,
+        reservation.amountBrl,
+        `Vintage.br - Pedido ${orderId}`,
+        reservation.attemptNumber,
+      );
+    } catch (e) {
+      await this.abandonAttempt(reservation.paymentId, String(e));
+      throw e;
+    }
+    await this.finalizeAttempt(reservation.paymentId, orderId, String(result.id));
     return result;
   }
 
@@ -682,8 +709,12 @@ export class PaymentsService {
     if (!paymentId || typeof paymentId !== 'string' || paymentId.length > 128) {
       throw new BadRequestException('paymentId inválido.');
     }
+    // Buyers AND sellers may read payment status for their own orders. The
+    // buyer needs it to confirm receipt-of-payment; the seller needs it to
+    // verify the funds before shipping. Returning 404 on "exists but you don't
+    // own it" keeps the endpoint from doubling as an ownership oracle.
     const order = await this.prisma.order.findFirst({
-      where: { paymentId, buyerId: userId },
+      where: { paymentId, OR: [{ buyerId: userId }, { sellerId: userId }] },
       select: { id: true },
     });
     if (!order) {

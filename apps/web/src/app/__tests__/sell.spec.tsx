@@ -110,32 +110,47 @@ describe('SellPage', () => {
     });
   });
 
-  it('shows error when submitting without photos', async () => {
+  it('blocks submit when required fields are missing (validateSellListingForm)', async () => {
+    // Empty submit now triggers the L4 client-side gate, which collects every
+    // missing field (title, price, category, weight, photos) and surfaces a
+    // single top-level "Confira os campos destacados" message while marking
+    // each input with an inline error. The fast-feedback path replaces the
+    // single-shot "Adicione pelo menos uma foto" message that the previous
+    // version emitted because photos was the only thing the old guard checked.
     mockFetch({ id: 'new-listing-id' });
-    localStorage.setItem('vintage_token', 'test-token');
     render(<SellPage />);
+    await waitFor(() => screen.getByLabelText('Categoria'));
 
-    // Submit the form directly to bypass HTML5 required validation
     const form = document.querySelector('form') as HTMLFormElement;
     fireEvent.submit(form);
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Adicione pelo menos uma foto');
+      expect(screen.getByRole('alert')).toHaveTextContent(/confira os campos|adicione pelo menos uma foto/i);
     });
   });
 
-  it('shows error and redirects when not logged in', async () => {
+  it('surfaces field-level validation errors when submitting an empty form', async () => {
+    // Auth gating moved to middleware.ts (server-side cookie check) plus the
+    // API's 401 → clearAuthToken → /auth/login redirect path. The local
+    // localStorage('vintage_token') sentinel was a UX-only marker that
+    // misled users when the cookie was fine but the sentinel had drifted;
+    // removing it lets the API be the single source of truth. The form's
+    // job here is to surface its own validation messages — title, price,
+    // category, weight, and "add at least one photo" — before any network
+    // call goes out. (M7 + L4 fix.)
     mockFetch({ id: 'new-listing-id' });
-    // No token in localStorage
     render(<SellPage />);
 
-    // Submit the form directly to bypass HTML5 required validation
     const form = document.querySelector('form') as HTMLFormElement;
     fireEvent.submit(form);
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/auth/login');
+      // validateSellListingForm fires first and 0 photos surfaces in the
+      // top-level error region as well.
+      expect(screen.getByRole('alert')).toBeInTheDocument();
     });
+    // No premature redirect — middleware/API own that path now.
+    expect(mockPush).not.toHaveBeenCalledWith('/auth/login');
   });
 
   it('shows loading text while submitting', async () => {

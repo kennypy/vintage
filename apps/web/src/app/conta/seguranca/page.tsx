@@ -325,6 +325,14 @@ export default function SegurancaPage() {
               </p>
               <div className="flex items-center justify-center bg-gray-50 p-4 rounded-lg">
                 {qrBlobUrl ? (
+                  // Intentional raw <img>: src is a runtime blob: URL produced
+                  // by URL.createObjectURL on the QR PNG bytes the API returns.
+                  // next/image's optimizer can't handle blob: schemes (CSP also
+                  // blocks data:), so the canonical pattern here is a native
+                  // <img> with explicit width/height to reserve layout space.
+                  // The web app uses a standalone eslint.config.mjs without
+                  // eslint-plugin-next, so there's no @next/next/no-img-element
+                  // rule to disable here — the plain <img> is fine as-is.
                   <img src={qrBlobUrl} alt="QR code 2FA" width={180} height={180} />
                 ) : (
                   <div className="w-[180px] h-[180px] flex items-center justify-center text-xs text-gray-400">

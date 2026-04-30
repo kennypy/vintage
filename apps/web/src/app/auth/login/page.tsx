@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { validateLoginForm, type FieldErrors } from '@vintage/shared';
 import { apiPost, setAuthToken } from '@/lib/api';
 import { TurnstileWidget } from '@/components/TurnstileWidget';
 
@@ -12,11 +13,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    // Client-side gate so the user gets immediate feedback on shape errors
+    // (empty fields, malformed e-mail, sub-8-char password) without a
+    // round-trip. The API still validates on every request — this is purely
+    // a UX layer that mirrors validateLoginForm in @vintage/shared so web
+    // and mobile show the same messages for the same input.
+    const errs = validateLoginForm({ email, password });
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setLoading(true);
 
     try {
@@ -73,8 +83,12 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
               required
+              aria-invalid={Boolean(fieldErrors.email)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
+            {fieldErrors.email && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>
+            )}
           </div>
 
           <div>
@@ -86,8 +100,12 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Sua senha"
               required
+              aria-invalid={Boolean(fieldErrors.password)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
+            {fieldErrors.password && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.password}</p>
+            )}
           </div>
 
           <TurnstileWidget
