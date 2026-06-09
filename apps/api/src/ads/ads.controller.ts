@@ -34,7 +34,7 @@ function extractIp(req: Request): string {
   return req.ip ?? req.socket.remoteAddress ?? '0.0.0.0';
 }
 
-@Controller('api/v1/ads')
+@Controller('ads')
 export class AdsController {
   constructor(private readonly adsService: AdsService) {}
 
