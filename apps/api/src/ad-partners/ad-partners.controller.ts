@@ -22,7 +22,7 @@ import { AudienceQueryDto } from './dto/audience-query.dto';
 // Internal admin endpoints — protected by JWT (platform admin only)
 // ─────────────────────────────────────────────────────────────────────────────
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/admin/ad-partners')
+@Controller('admin/ad-partners')
 export class AdPartnersAdminController {
   constructor(private readonly service: AdPartnersService) {}
 
@@ -49,7 +49,7 @@ export class AdPartnersAdminController {
 // Partner-facing endpoints — authenticated via X-Partner-Key header
 // ─────────────────────────────────────────────────────────────────────────────
 @UseGuards(AdPartnerAuthGuard)
-@Controller('api/v1/partner')
+@Controller('partner')
 export class AdPartnersController {
   constructor(private readonly service: AdPartnersService) {}
 
