@@ -11,7 +11,7 @@ interface JwtPayload {
 }
 
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/audience')
+@Controller('audience')
 export class AudienceController {
   constructor(private readonly audienceService: AudienceService) {}
 

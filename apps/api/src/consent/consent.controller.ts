@@ -20,7 +20,7 @@ interface JwtPayload {
 }
 
 @UseGuards(JwtAuthGuard)
-@Controller('api/v1/consent')
+@Controller('consent')
 export class ConsentController {
   constructor(private readonly consentService: ConsentService) {}
 
