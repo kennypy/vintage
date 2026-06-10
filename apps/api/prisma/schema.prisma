@@ -227,6 +227,13 @@ model Listing {
   @@index([status])
   @@index([createdAt])
   @@index([priceBrl])
+  // Composite indexes for the two hottest list-paged-by-newest patterns:
+  //   - feed/search facet: WHERE status='ACTIVE' ORDER BY createdAt DESC
+  //   - my-listings: WHERE sellerId=? AND status IN (...) ORDER BY createdAt DESC
+  // PostgreSQL can use the leading column for equality and the trailing
+  // column for ordering, avoiding a sort on the heap for both queries.
+  @@index([status, createdAt])
+  @@index([sellerId, status, createdAt])
 }
 
 model ListingImage {
@@ -376,6 +383,11 @@ model Payment {
   attemptNumber     Int           @default(1)
   parentPaymentId   String?
   providerPaymentId String?       // MP reference, null until the provider responds
+  // Deterministic SHA-256 of (method:orderId:amountBrl:attemptNumber). Sent to
+  // Mercado Pago as X-Idempotency-Key AND persisted here so the @@unique
+  // constraint below prevents the app from ever creating two Payment rows for
+  // the same logical attempt (defense in depth on top of MP's own dedup).
+  idempotencyKey    String?
   method            PaymentMethod
   status            PaymentStatus @default(PENDING)
   amountBrl         Decimal       @db.Decimal(10, 2)
@@ -388,6 +400,7 @@ model Payment {
   retry  Payment[] @relation("PaymentRetryChain")
 
   @@unique([orderId, attemptNumber])
+  @@unique([orderId, idempotencyKey])
   @@index([orderId])
   @@index([providerPaymentId])
   @@index([status])

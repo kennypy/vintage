@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { validateSellListingForm, type FieldErrors } from '@vintage/shared';
 import { apiGet, apiPost, apiPostForm } from '@/lib/api';
 
 interface Category {
@@ -44,6 +45,7 @@ export default function SellPage() {
   const [weight, setWeight] = useState('');
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(false);
 
   // Fetch categories on mount
@@ -76,12 +78,13 @@ export default function SellPage() {
     );
 
     try {
-      const token =
-        typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-      if (!token) {
-        throw new Error('Você precisa estar logado para publicar um anuncio.');
-      }
-
+      // Auth gating happens at the route level (middleware.ts) and the API
+      // (HttpOnly session cookie). The legacy localStorage('vintage_token')
+      // marker only ever stored a sentinel '1', never the actual token —
+      // checking it here was a UX guard that duplicated the API's 401 path
+      // and gave a false sense of "logged in" when the cookie had been
+      // server-side-revoked. Let the upload call go through; a 401 from
+      // the API will trigger clearAuthToken + redirect to /auth/login.
       const formData = new FormData();
       formData.append('file', photo.file);
 
@@ -152,16 +155,20 @@ export default function SellPage() {
     e.preventDefault();
     setError('');
 
-    const token =
-      typeof window !== 'undefined' ? localStorage.getItem('vintage_token') : null;
-    if (!token) {
-      setError('Voce precisa estar logado para publicar um anuncio.');
-      router.push('/auth/login');
-      return;
-    }
-
-    if (photos.length === 0) {
-      setError('Adicione pelo menos uma foto.');
+    // The route is gated by middleware.ts; if the session cookie went stale
+    // mid-flow, the API mutation below will 401 and apiPost's interceptor
+    // routes to /auth/login.
+    const validationErrors = validateSellListingForm({
+      title,
+      description,
+      priceBrl: price,
+      categoryId,
+      shippingWeightG: weight,
+      photoCount: photos.length,
+    });
+    setFieldErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      setError('Confira os campos destacados e tente novamente.');
       return;
     }
 
@@ -306,8 +313,12 @@ export default function SellPage() {
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Ex: Vestido midi estampado Farm"
             required
+            aria-invalid={Boolean(fieldErrors.title)}
             className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
           />
+          {fieldErrors.title && (
+            <p className="mt-1 text-xs text-red-600">{fieldErrors.title}</p>
+          )}
         </div>
 
         {/* Description */}
@@ -409,8 +420,12 @@ export default function SellPage() {
               onChange={(e) => setPrice(e.target.value)}
               placeholder="0,00"
               required
+              aria-invalid={Boolean(fieldErrors.priceBrl)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
+            {fieldErrors.priceBrl && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.priceBrl}</p>
+            )}
           </div>
           <div>
             <label htmlFor="weight" className="block text-sm font-medium text-gray-700 mb-1">Peso (g) <span className="text-gray-400 font-normal">(opcional)</span></label>
@@ -421,8 +436,12 @@ export default function SellPage() {
               value={weight}
               onChange={(e) => setWeight(e.target.value)}
               placeholder="Ex: 300"
+              aria-invalid={Boolean(fieldErrors.shippingWeightG)}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-600 focus:border-transparent"
             />
+            {fieldErrors.shippingWeightG && (
+              <p className="mt-1 text-xs text-red-600">{fieldErrors.shippingWeightG}</p>
+            )}
           </div>
         </div>
 

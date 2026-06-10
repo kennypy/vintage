@@ -138,6 +138,33 @@ If ANY step fails, you MUST fix it before pushing. Do not skip steps. Do not use
 - Shared types should live in `packages/shared/` whenever possible.
 - If a feature genuinely cannot apply to one platform (e.g., push notifications on web, or browser-only APIs), document the exception in the PR description.
 
+#### Documented platform-specific routes (intentional, not parity gaps)
+
+These routes are intentionally single-platform. Adding them to the other platform is **not** required to land a PR; treat them as documented exceptions to the parity rule above.
+
+| Route / Screen | Lives on | Why it doesn't ship to the other platform |
+|---|---|---|
+| `/admin` (operations console) | Web only | Internal staff tool; mobile clients are user-facing only |
+| `/about`, `/sobre`, `/help`, `/ajuda`, `/contato`, `/contact`, `/press`, `/community-guidelines`, `/diretrizes-comunidade`, `/privacidade`, `/privacy`, `/termos`, `/terms` | Web only | Marketing / SEO / legal-page content. Mobile shows the same content via in-app webview links to these pages |
+| `/robots.txt`, `/sitemap.xml`, `/.well-known/*` | Web only | Crawler/protocol surface; mobile app has no equivalent |
+| `welcome` first-run primer screen | Mobile only | Native onboarding, OS-permission primers, biometric enrolment — none apply on web |
+| Push notification permission flow / FCM/APNs token registration | Mobile only | No browser equivalent for native push tokens (web push is a separate roadmap item, not currently scoped) |
+| Biometric unlock (Touch ID / Face ID) | Mobile only | No equivalent browser API surface on the platforms we ship to |
+| Camera-roll listing creation | Mobile only | Web uses `<input type="file">` for the same capability; the camera-roll picker is the native mobile equivalent already |
+
+If you add a new platform-specific feature, add a row above explaining **why** the other platform genuinely can't host it. "Faster to ship just one" is not a valid reason — open the parity work as a follow-up issue at minimum.
+
+#### Paired-platform features that must land together
+
+Some features must roll out to both platforms in the **same PR** because shipping one without the other creates an inconsistent identity / onboarding experience:
+
+- **Google OAuth login** (deferred to Phase 9). When it lands on mobile (`apps/mobile/src/screens/auth/login.tsx`), it MUST also land on web (`apps/web/src/app/auth/login/page.tsx`) in the same PR. Same for the register flow.
+- **Apple OAuth login** (Phase 9). Same paired-platform rule.
+- **2FA enrollment** (already shipped on both; preserve parity for any future second-factor methods).
+- **Account deletion / data export (LGPD)**. UI surface must exist on both platforms.
+
+The rule of thumb: anything that touches the auth/identity surface must ship on both platforms simultaneously, even if only one client requests the feature.
+
 ### Commit Hygiene
 - Run the full pre-push checklist above before every commit that will be pushed
 - Do not commit code with lint errors

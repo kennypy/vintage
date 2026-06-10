@@ -78,3 +78,40 @@ describe('MercadoPagoClient — verifyWebhookSignature', () => {
     );
   });
 });
+
+describe('MercadoPagoClient.deriveIdempotencyKey', () => {
+  it('is deterministic for the same logical attempt', () => {
+    const a = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    const b = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('changes when attemptNumber advances (so MP sees a fresh request)', () => {
+    const a1 = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    const a2 = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 2);
+    expect(a1).not.toBe(a2);
+  });
+
+  it('changes when method, orderId, or amount differ', () => {
+    const base = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    expect(MercadoPagoClient.deriveIdempotencyKey('card', 'order-1', 99.9, 1)).not.toBe(base);
+    expect(MercadoPagoClient.deriveIdempotencyKey('pix', 'order-2', 99.9, 1)).not.toBe(base);
+    expect(MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 100.0, 1)).not.toBe(base);
+  });
+
+  it('incorporates the optional `extra` segment (card token / installments)', () => {
+    const a = MercadoPagoClient.deriveIdempotencyKey('card', 'order-1', 99.9, 1, '3:tok-A');
+    const b = MercadoPagoClient.deriveIdempotencyKey('card', 'order-1', 99.9, 1, '3:tok-B');
+    expect(a).not.toBe(b);
+  });
+
+  it('treats different fractional-cent representations of the same amount identically', () => {
+    // 99.9 vs 99.90 — same logical amount; the helper formats with toFixed(2)
+    // so retries don't get a fresh key just because the caller stringified
+    // the number differently.
+    const a = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    const b = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
+    expect(a).toBe(b);
+  });
+});

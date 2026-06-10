@@ -56,6 +56,23 @@ export async function unregisterPushToken(token: string): Promise<void> {
 }
 
 /**
+ * Best-effort cleanup invoked from logout(). Resolves the current native
+ * push token and unregisters it from the backend so the next user on this
+ * device cannot receive the previous user's pushes. Swallows every error —
+ * a flaky network or a missing FCM/APNs credential must NEVER block logout.
+ */
+export async function unregisterCurrentDevicePushToken(): Promise<void> {
+  try {
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    if (tokenData?.data) {
+      await unregisterPushToken(tokenData.data);
+    }
+  } catch {
+    // Intentional swallow — see docstring.
+  }
+}
+
+/**
  * Configure how notifications appear when the app is in the foreground.
  */
 export function configureForegroundNotifications(): void {

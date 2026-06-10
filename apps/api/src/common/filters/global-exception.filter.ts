@@ -86,8 +86,48 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   }
 
   private truncate(value: string): string {
-    const max = 400;
+    // Tighter cap in production: 240 chars is enough to convey "what's wrong"
+    // without giving Prisma/AWS SDK/driver text room to leak field names,
+    // table names, or internal hostnames. Dev keeps the wider 400-char view
+    // so the actionable cause stays visible.
+    const max = process.env.NODE_ENV === 'production' ? 240 : 400;
     return value.length > max ? `${value.slice(0, max)}…` : value;
+  }
+
+  /**
+   * Strip common Prisma/driver leak patterns from a message in production:
+   *   - "PrismaClient*Error: ..." prefixes that an `Error` toString includes
+   *   - "Unique constraint failed on the fields: (`x`, `y`)" → "Conflict"
+   *   - "Foreign key constraint failed on the field: `x`" → "Conflict"
+   *   - "Invalid `prisma.x.y()` invocation" preludes
+   *   - Internal IPs in parens (e.g. "ECONNREFUSED 10.0.0.1:5432")
+   * This belt-and-braces layer runs on top of the existing truncate +
+   * stripStack so even a developer mistake — passing a raw Prisma error
+   * message into an HttpException — doesn't leak schema details.
+   */
+  private sanitizeForProd(value: string): string {
+    if (process.env.NODE_ENV !== 'production') return value;
+    return value
+      .replace(/PrismaClient[A-Za-z]*Error:?\s*/gi, '')
+      .replace(/Invalid `[^`]*` invocation[^.\n]*\.?/gi, '')
+      .replace(
+        /Unique constraint failed on the fields?: \([^)]*\)/gi,
+        'conflict',
+      )
+      .replace(
+        /Foreign key constraint failed on the field: `[^`]*`/gi,
+        'conflict',
+      )
+      // IPv4 + optional :port redaction. The linter rejects nested
+      // quantifiers like `(?:\d{1,3}\.){3}` AND optional groups whose
+      // contents have variable-width quantifiers (`(?::\d{1,5})?`),
+      // even when the whole regex is provably ReDoS-safe. We split it
+      // into two passes: octet-only first, then port-only on the same
+      // string. Each individual regex is straight-line so the linter
+      // is happy.
+      .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, '[redacted-host]')
+      .replace(/\[redacted-host\]:\d{1,5}\b/g, '[redacted-host]')
+      .trim();
   }
 
   /** For HttpException responses: keep the documented shape + cap
@@ -98,15 +138,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     status: number,
   ): Record<string, unknown> {
     const out: Record<string, unknown> = { statusCode: status };
+    const cleanString = (s: string) =>
+      this.truncate(this.sanitizeForProd(this.stripStack(s)));
     for (const key of ['message', 'error', 'code']) {
       const v = raw[key];
       if (typeof v === 'string') {
-        out[key] = this.truncate(this.stripStack(v));
+        out[key] = cleanString(v);
       } else if (Array.isArray(v)) {
         // class-validator puts error strings in `message` as an array.
         out[key] = v
           .filter((it) => typeof it === 'string')
-          .map((it) => this.truncate(this.stripStack(it as string)));
+          .map((it) => cleanString(it as string));
       } else if (v !== undefined) {
         out[key] = v;
       }
@@ -121,7 +163,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         typeof v === 'number' ||
         typeof v === 'boolean'
       ) {
-        out[k] = typeof v === 'string' ? this.truncate(this.stripStack(v)) : v;
+        out[k] = typeof v === 'string' ? cleanString(v) : v;
       }
     }
     return out;

@@ -18,6 +18,13 @@ interface CachedFlags {
   fetchedAt: number;
 }
 
+// Re-fetch flags from the server every 24h even on cache hits. Without a TTL
+// a user who launches the app once, gets flags cached, and stays online but
+// never opens the screen that triggers a refresh would keep the original
+// flag values for the lifetime of the app install — so a backend flag flip
+// (e.g. enabling MERCADOPAGO_PAYOUT) would never reach the device.
+const FEATURE_FLAGS_TTL_MS = 24 * 60 * 60 * 1000;
+
 export async function fetchFeatureFlags(): Promise<Record<string, boolean>> {
   try {
     const controller = new AbortController();
@@ -60,4 +67,22 @@ export async function getCachedFlags(): Promise<Record<string, boolean>> {
     // Ignore parse errors
   }
   return {};
+}
+
+/**
+ * Returns cached flags if they are still fresh. Used by the boot path to
+ * decide between an immediate render off the cache vs awaiting a fetch.
+ * Anything older than FEATURE_FLAGS_TTL_MS triggers a refetch by the caller.
+ */
+export async function getFreshCachedFlags(): Promise<Record<string, boolean> | null> {
+  try {
+    const raw = await secureGet(CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as CachedFlags;
+    if (typeof cached.fetchedAt !== 'number') return null;
+    if (Date.now() - cached.fetchedAt > FEATURE_FLAGS_TTL_MS) return null;
+    return cached.flags;
+  } catch {
+    return null;
+  }
 }

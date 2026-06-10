@@ -62,6 +62,26 @@ export class MercadoPagoClient {
     return this.accessToken.length > 0;
   }
 
+  /**
+   * Deterministic idempotency key for a payment attempt. Same inputs always
+   * produce the same key — but a retry (attemptNumber+1) yields a fresh key,
+   * so MP doesn't replay the prior failed result for the new attempt. Exposed
+   * statically so PaymentsService can derive + persist the same key it will
+   * eventually hand to MP, enabling the @@unique([orderId, idempotencyKey])
+   * DB constraint to act as a backstop against double-charge.
+   */
+  static deriveIdempotencyKey(
+    method: 'pix' | 'card' | 'boleto',
+    orderId: string,
+    amountBrl: number,
+    attemptNumber: number,
+    extra?: string,
+  ): string {
+    const parts = [method, orderId, amountBrl.toFixed(2), String(attemptNumber)];
+    if (extra) parts.push(extra);
+    return crypto.createHash('sha256').update(parts.join(':')).digest('hex');
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -106,6 +126,7 @@ export class MercadoPagoClient {
     orderId: string,
     amountBrl: number,
     description: string,
+    attemptNumber = 1,
   ) {
     if (!this.isConfigured) {
       if (this.nodeEnv === 'production') {
@@ -114,10 +135,12 @@ export class MercadoPagoClient {
       return this.mockPixPayment(orderId, amountBrl);
     }
 
-    const idempotencyKey = crypto
-      .createHash('sha256')
-      .update(`pix:${orderId}:${amountBrl}`)
-      .digest('hex');
+    const idempotencyKey = MercadoPagoClient.deriveIdempotencyKey(
+      'pix',
+      orderId,
+      amountBrl,
+      attemptNumber,
+    );
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',
@@ -153,6 +176,7 @@ export class MercadoPagoClient {
     amountBrl: number,
     installments: number,
     cardToken: string,
+    attemptNumber = 1,
   ) {
     if (!this.isConfigured) {
       if (this.nodeEnv === 'production') {
@@ -161,10 +185,13 @@ export class MercadoPagoClient {
       return this.mockCardPayment(orderId, amountBrl, installments);
     }
 
-    const idempotencyKey = crypto
-      .createHash('sha256')
-      .update(`card:${orderId}:${amountBrl}:${installments}:${cardToken}`)
-      .digest('hex');
+    const idempotencyKey = MercadoPagoClient.deriveIdempotencyKey(
+      'card',
+      orderId,
+      amountBrl,
+      attemptNumber,
+      `${installments}:${cardToken}`,
+    );
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',
@@ -222,6 +249,7 @@ export class MercadoPagoClient {
     orderId: string,
     amountBrl: number,
     description: string,
+    attemptNumber = 1,
   ) {
     if (!this.isConfigured) {
       if (this.nodeEnv === 'production') {
@@ -230,10 +258,12 @@ export class MercadoPagoClient {
       return this.mockBoletoPayment(orderId, amountBrl);
     }
 
-    const idempotencyKey = crypto
-      .createHash('sha256')
-      .update(`boleto:${orderId}:${amountBrl}`)
-      .digest('hex');
+    const idempotencyKey = MercadoPagoClient.deriveIdempotencyKey(
+      'boleto',
+      orderId,
+      amountBrl,
+      attemptNumber,
+    );
     const payment = await this.request<MercadoPagoPaymentResponse>(
       'POST',
       '/v1/payments',

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { colors } from '../../src/theme/colors';
@@ -48,10 +48,16 @@ export default function ReturnsListScreen() {
       ) : items.length === 0 ? (
         <Text style={styles.empty}>Nenhuma devolução ainda.</Text>
       ) : (
-        <ScrollView>
-          {items.map((ret) => (
+        // FlatList virtualization: a power-seller's "received" tab can grow
+        // unbounded over time. The previous ScrollView mounted every card on
+        // first render; FlatList only mounts what's visible + a small
+        // windowing buffer.
+        <FlatList
+          data={items}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          renderItem={({ item: ret }) => (
             <TouchableOpacity
-              key={ret.id}
               style={styles.card}
               onPress={() => router.push(`/returns/${ret.id}`)}
             >
@@ -63,8 +69,8 @@ export default function ReturnsListScreen() {
                 Solicitada em {new Date(ret.createdAt).toLocaleDateString('pt-BR')}
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          )}
+        />
       )}
     </View>
   );

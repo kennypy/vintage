@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { apiGet, apiPatch, apiPostForm } from '@/lib/api';
 
 interface Profile {
@@ -132,7 +133,14 @@ export default function EditarPerfilPage() {
         <div className="flex items-center gap-4 mb-6">
           <div className="w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border border-gray-200">
             {avatarUrl ? (
-              <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+              <Image
+                src={avatarUrl}
+                alt="Avatar"
+                width={80}
+                height={80}
+                className="w-full h-full object-cover"
+                unoptimized
+              />
             ) : (
               <span className="text-xl font-semibold text-gray-500">{initial}</span>
             )}

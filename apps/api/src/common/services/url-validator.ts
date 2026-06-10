@@ -141,3 +141,29 @@ export function assertSafeS3Endpoint(raw: string): void {
     );
   }
 }
+
+/**
+ * Generic startup-time validation for an internal-service endpoint env var
+ * (Meilisearch, internal Redis URL, etc.). Same scheme + literal-block as
+ * the S3 helper, but with the env-var name in the error so misconfigurations
+ * are easy to diagnose. Throws a plain Error (not HttpException) so it's safe
+ * to call from bootstrap before Nest's HTTP machinery is up.
+ */
+export function assertSafeInternalEndpointAtStartup(raw: string, varName: string): void {
+  if (!raw) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${varName} is not a valid URL: ${raw}`);
+  }
+  if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol)) {
+    throw new Error(`${varName} must use http or https: got ${parsed.protocol}`);
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (isBlockedHostnameLiteral(hostname)) {
+    throw new Error(
+      `${varName} points to a blocked host (loopback, metadata, or private IP): ${hostname}`,
+    );
+  }
+}

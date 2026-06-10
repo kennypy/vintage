@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/services/redis.service';
+import { assertSafeUrl } from '../common/services/url-validator';
 
 @ApiTags('health')
 @Controller('health')
@@ -41,10 +42,18 @@ export class HealthController {
       checks.redis = 'error';
     }
 
-    // Meilisearch ping
+    // Meilisearch ping — SSRF-validated on every probe.
+    // The literal-block check rejects metadata/loopback/private-IP literals if
+    // MEILISEARCH_HOST is ever misconfigured or rewritten at runtime (config
+    // injection, compromised secret store). In production we additionally
+    // resolve the hostname to defend against DNS rebinding; this is gated off
+    // in dev/test because docker-compose service names ("meilisearch") don't
+    // resolve via the host's DNS and would false-positive.
     const meiliHost = this.config.get<string>('MEILISEARCH_HOST', '');
     if (meiliHost) {
       try {
+        const verifyDns = this.config.get<string>('NODE_ENV') === 'production';
+        await assertSafeUrl(meiliHost, { resolve: verifyDns });
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 2000);
         const resp = await fetch(`${meiliHost.replace(/\/$/, '')}/health`, {
