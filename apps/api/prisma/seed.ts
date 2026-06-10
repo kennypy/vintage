@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
+import { MeiliSearch } from 'meilisearch';
 import * as path from 'path';
 
 loadEnv({ path: path.join(__dirname, '../.env') });
@@ -253,7 +254,18 @@ async function main() {
   // will bounce them with `TOS_UPDATE_REQUIRED` (409). Keep this in sync with
   // AuthService.getCurrentTosVersion()'s default.
   const seedTosVersion = process.env.TOS_VERSION ?? '1.0.0';
-  const seedAcceptedTos = { acceptedTosAt: new Date(), acceptedTosVersion: seedTosVersion };
+  // emailVerifiedAt is REQUIRED for login: AuthService rejects any account
+  // with a null emailVerifiedAt (EMAIL_VERIFICATION_REQUIRED). Local dev has
+  // no SMTP, so the verification email can never be delivered/clicked — seeded
+  // users would be permanently unable to log in. Folding it in here (applied in
+  // both `create` and `update`) keeps every seeded account login-ready, and
+  // re-seeds verify any pre-existing rows too. `verified` below is the separate
+  // seller blue-check flag, not email verification.
+  const seedAcceptedTos = {
+    acceptedTosAt: new Date(),
+    acceptedTosVersion: seedTosVersion,
+    emailVerifiedAt: new Date(),
+  };
 
   // Primary test user (the one used to login during dev)
   const userTeste = await prisma.user.upsert({
@@ -470,6 +482,73 @@ async function main() {
   }
 
   console.log(`  ✅ ${listingData.length} active listings`);
+
+  // ---------------------------------------------------------------------------
+  // Meilisearch — index the active listings so the search box works right
+  // after seeding. The running API indexes on listing create/update via
+  // SearchService.indexListing(); the seed writes rows straight to Postgres,
+  // so without this step the "listings" index stays empty and search returns
+  // nothing until a listing is created through the app. Document shape mirrors
+  // ListingsService.syncSearchIndex() exactly so the same filters/sorts apply.
+  // Best-effort: an unreachable/unconfigured Meilisearch must NEVER fail the
+  // seed — search is non-critical for local dev (browsing reads Postgres).
+  // ---------------------------------------------------------------------------
+  try {
+    const meiliHost = process.env.MEILISEARCH_HOST || 'http://localhost:7700';
+    const meili = new MeiliSearch({
+      host: meiliHost,
+      apiKey: process.env.MEILISEARCH_API_KEY || '',
+    });
+    const index = meili.index('listings');
+
+    // Apply the same index settings SearchService.onModuleInit() sets, so
+    // filters/sorts work even before the API boots. Settings are idempotent.
+    await index.updateSearchableAttributes([
+      'title', 'description', 'category', 'brand', 'color', 'size',
+    ]);
+    await index.updateFilterableAttributes([
+      'categoryId', 'brandId', 'condition', 'size', 'color', 'priceBrl', 'status',
+    ]);
+    await index.updateSortableAttributes(['priceBrl', 'createdAt', 'viewCount']);
+
+    const activeListings = await prisma.listing.findMany({
+      where: { status: 'ACTIVE' },
+      include: {
+        images: { orderBy: { position: 'asc' }, take: 1 },
+        category: { select: { namePt: true } },
+        brand: { select: { name: true } },
+      },
+    });
+
+    const documents = activeListings.map((l) => ({
+      id: l.id,
+      title: l.title,
+      description: l.description,
+      sellerId: l.sellerId,
+      categoryId: l.categoryId,
+      brandId: l.brandId ?? null,
+      category: l.category?.namePt ?? null,
+      brand: l.brand?.name ?? null,
+      condition: l.condition,
+      size: l.size ?? null,
+      color: l.color ?? null,
+      priceBrl: Number(l.priceBrl),
+      status: l.status,
+      viewCount: l.viewCount,
+      imageUrl: l.images[0]?.url ?? null,
+      createdAt: l.createdAt.getTime(),
+    }));
+
+    if (documents.length > 0) {
+      await index.addDocuments(documents);
+    }
+    console.log(`  ✅ Indexed ${documents.length} listings into Meilisearch`);
+  } catch (err) {
+    console.warn(
+      `  ⚠️  Meilisearch indexing skipped — search stays empty until the API ` +
+        `indexes a listing (browsing still works): ${String(err).slice(0, 160)}`,
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Authenticity requests (for the isAuthentic listings)

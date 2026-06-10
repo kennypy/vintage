@@ -100,11 +100,17 @@ async function bootstrap() {
 
   // SSRF: validate operator-controlled internal endpoints at startup so
   // misconfigurations (e.g. MEILISEARCH_HOST pointed at a metadata IP) are
-  // caught at boot, not on the first health probe.
-  assertSafeInternalEndpointAtStartup(
-    config.get<string>('MEILISEARCH_HOST', ''),
-    'MEILISEARCH_HOST',
-  );
+  // caught at boot, not on the first health probe. Loopback/private hosts are
+  // the norm in local dev (Meilisearch on localhost:7700, Docker service names
+  // on the bridge network), so this check only applies in production, where
+  // these endpoints must resolve to real, non-private hosts. Without the gate
+  // the API crashes at boot on every developer machine.
+  if (nodeEnv === 'production') {
+    assertSafeInternalEndpointAtStartup(
+      config.get<string>('MEILISEARCH_HOST', ''),
+      'MEILISEARCH_HOST',
+    );
+  }
 
   // Security: fail if critical secrets use defaults in production
   if (nodeEnv === 'production') {
