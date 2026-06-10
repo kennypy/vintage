@@ -236,7 +236,11 @@ function migrate() {
   step(7, 8, 'Applying database migrations');
   if (RESET_DB) {
     warn('--reset: dropping database before migrating');
-    run('npx prisma migrate reset --force --skip-seed', { cwd: join(ROOT, 'apps/api') });
+    // Prisma 7 removed the `--skip-seed` flag; `migrate reset` now runs the
+    // seed configured in prisma.config.ts (migrations.seed) automatically.
+    // The seed() step below is idempotent — it checks for an existing user and
+    // skips — so a freshly reset DB ends up seeded exactly once either way.
+    run('npx prisma migrate reset --force', { cwd: join(ROOT, 'apps/api') });
   } else {
     run('npx prisma migrate deploy', { cwd: join(ROOT, 'apps/api') });
   }
@@ -254,8 +258,12 @@ function seed() {
   const check = runQuiet(`docker compose exec -T postgres psql -U vintage -d vintage_dev -tAc "${checkSql}"`);
   const alreadySeeded = check.status === 0 && check.stdout && check.stdout.trim() === '1';
 
-  if (alreadySeeded && !RESET_DB) {
-    ok('Database already seeded — skipping (use --reset to wipe and reseed)');
+  if (alreadySeeded) {
+    ok(
+      RESET_DB
+        ? 'Database seeded during reset — skipping duplicate seed'
+        : 'Database already seeded — skipping (use --reset to wipe and reseed)',
+    );
     return;
   }
   run('npx ts-node prisma/seed.ts', { cwd: join(ROOT, 'apps/api') });
