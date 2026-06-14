@@ -270,10 +270,19 @@ export class OrdersCronService {
     for (const ret of stale) {
       try {
         await this.prisma.$transaction(async (tx) => {
-          await tx.orderReturn.update({
-            where: { id: ret.id },
+          // Conditional claim: only escalate a return that is STILL 'RECEIVED'.
+          // The unconditional update used to stamp 'DISPUTED' even over a
+          // return that inspectApprove had concurrently moved to 'REFUNDED',
+          // then create a fresh OPEN dispute on an already-refunded order —
+          // a second refund waiting to happen. count===0 means another action
+          // already advanced the return; skip it.
+          const claim = await tx.orderReturn.updateMany({
+            where: { id: ret.id, status: 'RECEIVED' },
             data: { status: 'DISPUTED' },
           });
+          if (claim.count === 0) {
+            return;
+          }
           const existing = await tx.dispute.findUnique({
             where: { orderId: ret.order.id },
           });

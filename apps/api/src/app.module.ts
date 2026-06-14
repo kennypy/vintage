@@ -163,6 +163,12 @@ export class AppModule implements NestModule {
       .apply(CsrfMiddleware)
       .exclude(
         { path: 'payments/webhook', method: RequestMethod.POST },
+        // Inbound Caf identity-verification webhook. Authenticated by
+        // HMAC-SHA256 over the raw body (CafWebhookController), not a browser
+        // session — an external sender cannot present an X-CSRF-Token, so
+        // leaving this in the CSRF net would 403 every delivery (same
+        // fail-closed showstopper class as D-03 on payments/webhook).
+        { path: 'webhooks/caf', method: RequestMethod.POST },
         { path: 'auth/register', method: RequestMethod.POST },
         { path: 'auth/login', method: RequestMethod.POST },
         { path: 'auth/2fa/confirm-login', method: RequestMethod.POST },

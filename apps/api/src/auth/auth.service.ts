@@ -1616,9 +1616,21 @@ export class AuthService {
     if (!valid) {
       throw new UnauthorizedException('Senha incorreta');
     }
+    // Account-enumeration guard. Returning a distinguishable
+    // ConflictException here turned this authenticated endpoint into an
+    // oracle: any single throwaway account could probe arbitrary addresses
+    // (409 "já está em uso" vs 200 success) and enumerate the whole user
+    // base — the same class the team already neutralised on forgot-password
+    // and email-verification. When the target is already registered, we do
+    // NOT create a token or send mail, but we return the SAME generic
+    // success the happy path returns. confirmEmailChange() re-checks
+    // uniqueness at redemption time, so this is the authoritative gate.
     const taken = await this.prisma.user.findUnique({ where: { email: newEmail } });
     if (taken) {
-      throw new ConflictException('Este email já está em uso.');
+      return {
+        success: true,
+        message: 'Enviamos um link de confirmação para o novo email.',
+      };
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');

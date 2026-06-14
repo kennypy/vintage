@@ -31,7 +31,7 @@ export class DisputesService {
   async create(buyerId: string, dto: CreateDisputeDto) {
     const order = await this.prisma.order.findUnique({
       where: { id: dto.orderId },
-      include: { dispute: true },
+      include: { dispute: true, returnRequest: true },
     });
 
     if (!order) {
@@ -40,6 +40,19 @@ export class DisputesService {
 
     if (order.buyerId !== buyerId) {
       throw new ForbiddenException('Apenas o comprador pode abrir uma disputa');
+    }
+
+    // Mutual exclusion with the return flow. The return state machine keeps
+    // order.status === 'DELIVERED' until inspection, so without this check a
+    // buyer with an active return could ALSO open a dispute on the same order
+    // and have BOTH pipelines refund totalBrl independently (the dispute
+    // resolve and the return inspectApprove lock different rows). This mirrors
+    // the symmetric guard in returns.service.create() that blocks a return
+    // when a dispute already exists.
+    if (order.returnRequest) {
+      throw new ConflictException(
+        'Já existe uma solicitação de devolução para este pedido. Não é possível abrir uma disputa em paralelo.',
+      );
     }
 
     if (order.status !== 'DELIVERED') {
@@ -437,6 +450,19 @@ export class DisputesService {
         create: { userId: buyerId, balanceBrl: 0, pendingBrl: 0 },
         update: {},
       });
+      // Idempotency backstop (same pattern as payouts.service refund guard).
+      // Refuse to credit twice for the same order — defends against any path
+      // that could drive two REFUNDs at the same order (e.g. a return refund
+      // plus a dispute refund) from doubling the buyer's wallet credit.
+      const existingRefund = await tx.walletTransaction.findFirst({
+        where: { walletId: buyerWallet.id, referenceId: orderId, type: 'REFUND' },
+      });
+      if (existingRefund) {
+        this.logger.warn(
+          `Dispute refund for order ${orderId} skipped — a REFUND ledger entry already exists.`,
+        );
+        return;
+      }
       await tx.wallet.update({
         where: { id: buyerWallet.id },
         data: { balanceBrl: { increment: refundAmount } },

@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdCampaignStatus } from '@prisma/client';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../common/guards/admin.guard';
 import { AdPartnerAuthGuard, PartnerRequest } from './ad-partner-auth.guard';
 import { AdPartnersService } from './ad-partners.service';
 import { CreatePartnerDto } from './dto/create-partner.dto';
@@ -19,9 +19,17 @@ import { CreateCreativeDto } from './dto/create-creative.dto';
 import { AudienceQueryDto } from './dto/audience-query.dto';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Internal admin endpoints — protected by JWT (platform admin only)
+// Internal admin endpoints — platform admin only.
+//
+// MUST use AdminGuard (JWT auth + role==='ADMIN'), NOT bare JwtAuthGuard.
+// JwtAuthGuard only proves the caller is *some* authenticated user; it does
+// not check role. With it, any logged-in USER could mint partner API keys
+// (createPartner returns a cleartext key granting /partner/* + LGPD audience
+// export), rotate/hijack any partner's key, or deactivate partners. These
+// service methods take no actor id and do no ownership check, so the guard is
+// the only authorization control on the route.
 // ─────────────────────────────────────────────────────────────────────────────
-@UseGuards(JwtAuthGuard)
+@UseGuards(AdminGuard)
 @Controller('admin/ad-partners')
 export class AdPartnersAdminController {
   constructor(private readonly service: AdPartnersService) {}
