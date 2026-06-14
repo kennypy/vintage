@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { assertSafeUrl } from '../common/services/url-validator';
+import { safeFetch } from '../common/services/url-validator';
 
 export interface NFeResponse {
   nfeId: string;
@@ -115,18 +115,16 @@ export class NFeClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
 
-    // Re-validate against SSRF at request time — not just at config-load
-    // — to defend against DNS rebinding. `assertSafeUrl` resolves the
-    // hostname and rejects private/reserved IPs.
-    await assertSafeUrl(url, { resolve: true });
-
     let lastError: unknown;
     for (let attempt = 0; attempt <= HTTP_RETRY_DELAYS_MS.length; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
 
       try {
-        const response = await fetch(url, {
+        // safeFetch re-validates against SSRF at request time AND pins the
+        // connection to the validated IP, closing the DNS-rebinding window
+        // a plain validate-then-fetch leaves open.
+        const response = await safeFetch(url, {
           method,
           headers: {
             Authorization: this.authHeader(),

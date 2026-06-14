@@ -596,9 +596,16 @@ export class OrdersService {
       throw new NotFoundException('Pedido não encontrado');
     }
 
-    if (userId !== null && order.buyerId !== userId && order.sellerId !== userId) {
+    // Authorization. userId === null is the trusted internal/carrier path
+    // (tracking-poller flips SHIPPED → DELIVERED on a real carrier event).
+    // For the HTTP path we accept ONLY the buyer: the seller must not be
+    // able to assert delivery on the buyer's behalf, because deliveredAt
+    // starts the dispute window AND the auto-confirm / escrow-release clock.
+    // A seller marking their own just-shipped order "delivered" would
+    // compress the buyer's real window to dispute a never-arrived item.
+    if (userId !== null && order.buyerId !== userId) {
       throw new ForbiddenException(
-        'Apenas comprador ou vendedor podem marcar este pedido como entregue.',
+        'Apenas o comprador pode marcar este pedido como entregue.',
       );
     }
 

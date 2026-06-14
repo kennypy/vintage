@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import * as dns from 'dns';
 import * as net from 'net';
+import { Agent } from 'undici';
 
 /**
  * Centralized URL / hostname validation helpers used across the API
@@ -145,6 +146,73 @@ export async function assertSafeUrl(raw: string, options: { resolve?: boolean } 
     }
   }
   return parsed;
+}
+
+/**
+ * SSRF-safe `fetch`. Validates scheme + literal host, resolves the
+ * hostname, refuses if ANY resolved address is private/reserved, then
+ * PINS the TCP connection to a vetted IP via an undici dispatcher whose
+ * lookup returns only that address.
+ *
+ * Why pinning matters: plain `assertSafeUrl(resolve:true)` followed by
+ * `fetch(url)` re-resolves the hostname a second time inside fetch — an
+ * attacker who controls the DNS for the host can answer a public IP on
+ * the validation lookup and a private one (127.0.0.1 / 169.254.169.254)
+ * microseconds later on the connect lookup (classic DNS rebinding). By
+ * connecting to the already-validated IP we close that window. TLS SNI /
+ * cert validation still uses the original hostname (undici sets the
+ * servername from the URL), so HTTPS to a named host keeps working.
+ *
+ * Use this anywhere the server fetches an operator- or user-supplied URL.
+ */
+export async function safeFetch(rawUrl: string, init?: RequestInit): Promise<Response> {
+  // Scheme + literal-IP block (no resolve here — we do the resolve below
+  // so we can capture the addresses to pin to).
+  const url = await assertSafeUrl(rawUrl, { resolve: false });
+  const host =
+    url.hostname.startsWith('[') && url.hostname.endsWith(']')
+      ? url.hostname.slice(1, -1)
+      : url.hostname;
+
+  let resolved: dns.LookupAddress[];
+  try {
+    resolved = await dns.promises.lookup(host, { all: true });
+  } catch {
+    throw new BadRequestException('Não foi possível resolver o host.');
+  }
+  if (resolved.length === 0) {
+    throw new BadRequestException('Host não resolveu para nenhum endereço.');
+  }
+  // Refuse if ANY answer is private — a mixed response must not let a
+  // private record slip through on connect.
+  for (const a of resolved) {
+    if (isPrivateOrReservedIp(a.address)) {
+      throw new BadRequestException('Host resolve para um endereço privado (SSRF).');
+    }
+  }
+  const pinned = resolved[0];
+
+  const dispatcher = new Agent({
+    connect: {
+      // Ignore the hostname and hand back the vetted IP. Re-checked here
+      // as belt-and-braces in case the Agent is ever reused.
+      lookup: (
+        _hostname: string,
+        _options: unknown,
+        callback: (err: Error | null, address: string, family: number) => void,
+      ): void => {
+        if (isPrivateOrReservedIp(pinned.address)) {
+          callback(new Error('SSRF: pinned address is private'), '', 0);
+          return;
+        }
+        callback(null, pinned.address, pinned.family);
+      },
+    },
+  });
+
+  // `dispatcher` is an undici extension to RequestInit not present in the
+  // DOM lib types; cast to attach it to the global fetch call.
+  return fetch(url.toString(), { ...init, dispatcher } as RequestInit);
 }
 
 /**

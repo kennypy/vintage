@@ -9,7 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { assertSafeUrl } from '../common/services/url-validator';
+import { assertSafeUrl, safeFetch } from '../common/services/url-validator';
 import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
 export interface CreateTicketInput {
@@ -455,8 +455,12 @@ export class SupportService {
     const secret = this.config.get<string>('SUPPORT_CRM_WEBHOOK_SECRET', '');
     if (!url || !secret) return;
 
+    // Note: validation happens inside safeFetch below (which also pins the
+    // connection to the vetted IP against DNS rebinding). We still do a
+    // cheap pre-check so an obviously-bad config URL is logged before we
+    // build the payload.
     try {
-      await assertSafeUrl(url, { resolve: true });
+      await assertSafeUrl(url, { resolve: false });
     } catch (err) {
       await this.logCrmFailure(event, ticketId, 0, `unsafe URL: ${String(err).slice(0, 120)}`);
       return;
@@ -479,7 +483,7 @@ export class SupportService {
     let status = 0;
     let errorMsg = '';
     try {
-      const res = await fetch(url, {
+      const res = await safeFetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
