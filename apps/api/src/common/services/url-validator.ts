@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import * as dns from 'dns';
 import * as net from 'net';
+import { Agent } from 'undici';
 
 /**
  * Centralized URL / hostname validation helpers used across the API
@@ -35,9 +36,20 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   if (net.isIPv6(ip)) {
     const lower = ip.toLowerCase();
     if (lower === '::1' || lower === '::') return true;
-    // IPv4-mapped IPv6 -> fall through to IPv4 check
+    // IPv4-mapped IPv6 -> fall through to IPv4 check.
+    // Dotted form, e.g. ::ffff:127.0.0.1
     const mapped = lower.match(/^::ffff:([\d.]+)$/);
     if (mapped) return isPrivateOrReservedIp(mapped[1]);
+    // Hex-compressed form, e.g. ::ffff:7f00:1 (== 127.0.0.1). Without this
+    // an attacker can express a loopback/metadata address in v4-mapped hex
+    // and dodge the dotted check above.
+    const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (hexMapped) {
+      const hi = parseInt(hexMapped[1], 16);
+      const lo = parseInt(hexMapped[2], 16);
+      const ipv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      return isPrivateOrReservedIp(ipv4);
+    }
     // Unique local (fc00::/7), link local (fe80::/10)
     if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
     if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true;
@@ -69,9 +81,22 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   return false;
 }
 
+/**
+ * Strip the surrounding brackets WHATWG URL keeps on IPv6 literals
+ * (`new URL('http://[::1]/').hostname === '[::1]'`). Without unwrapping,
+ * `net.isIP('[::1]')` is 0 and `BLOCKED_HOSTNAMES.has('[::1]')` is false,
+ * so loopback/metadata/ULA IPv6 literals (`[::1]`, `[::ffff:169.254.169.254]`,
+ * `[fd00::1]`) slip past the literal check while `fetch()` strips the brackets
+ * and dials the target anyway — an SSRF bypass of the centralized guard.
+ */
+function unwrapIpv6(hostname: string): string {
+  const h = hostname.toLowerCase();
+  return h.startsWith('[') && h.endsWith(']') ? h.slice(1, -1) : h;
+}
+
 /** Synchronous hostname-only validation — catches literal IPs and known bad names. */
 export function isBlockedHostnameLiteral(hostname: string): boolean {
-  const h = hostname.toLowerCase();
+  const h = unwrapIpv6(hostname);
   if (BLOCKED_HOSTNAMES.has(h)) return true;
   if (net.isIP(h)) return isPrivateOrReservedIp(h);
   return false;
@@ -99,9 +124,15 @@ export async function assertSafeUrl(raw: string, options: { resolve?: boolean } 
     throw new BadRequestException('Host não permitido (SSRF).');
   }
   if (options.resolve) {
+    // Unwrap an IPv6 literal so dns.lookup gets a resolvable argument
+    // (it rejects the bracketed form) and so a literal v6 address is
+    // re-validated as an IP rather than treated as a name.
+    const lookupHost = hostname.startsWith('[') && hostname.endsWith(']')
+      ? hostname.slice(1, -1)
+      : hostname;
     let addresses: string[];
     try {
-      addresses = await dns.promises.lookup(hostname, { all: true }).then((res) => res.map((a) => a.address));
+      addresses = await dns.promises.lookup(lookupHost, { all: true }).then((res) => res.map((a) => a.address));
     } catch {
       throw new BadRequestException('Não foi possível resolver o host.');
     }
@@ -115,6 +146,73 @@ export async function assertSafeUrl(raw: string, options: { resolve?: boolean } 
     }
   }
   return parsed;
+}
+
+/**
+ * SSRF-safe `fetch`. Validates scheme + literal host, resolves the
+ * hostname, refuses if ANY resolved address is private/reserved, then
+ * PINS the TCP connection to a vetted IP via an undici dispatcher whose
+ * lookup returns only that address.
+ *
+ * Why pinning matters: plain `assertSafeUrl(resolve:true)` followed by
+ * `fetch(url)` re-resolves the hostname a second time inside fetch — an
+ * attacker who controls the DNS for the host can answer a public IP on
+ * the validation lookup and a private one (127.0.0.1 / 169.254.169.254)
+ * microseconds later on the connect lookup (classic DNS rebinding). By
+ * connecting to the already-validated IP we close that window. TLS SNI /
+ * cert validation still uses the original hostname (undici sets the
+ * servername from the URL), so HTTPS to a named host keeps working.
+ *
+ * Use this anywhere the server fetches an operator- or user-supplied URL.
+ */
+export async function safeFetch(rawUrl: string, init?: RequestInit): Promise<Response> {
+  // Scheme + literal-IP block (no resolve here — we do the resolve below
+  // so we can capture the addresses to pin to).
+  const url = await assertSafeUrl(rawUrl, { resolve: false });
+  const host =
+    url.hostname.startsWith('[') && url.hostname.endsWith(']')
+      ? url.hostname.slice(1, -1)
+      : url.hostname;
+
+  let resolved: dns.LookupAddress[];
+  try {
+    resolved = await dns.promises.lookup(host, { all: true });
+  } catch {
+    throw new BadRequestException('Não foi possível resolver o host.');
+  }
+  if (resolved.length === 0) {
+    throw new BadRequestException('Host não resolveu para nenhum endereço.');
+  }
+  // Refuse if ANY answer is private — a mixed response must not let a
+  // private record slip through on connect.
+  for (const a of resolved) {
+    if (isPrivateOrReservedIp(a.address)) {
+      throw new BadRequestException('Host resolve para um endereço privado (SSRF).');
+    }
+  }
+  const pinned = resolved[0];
+
+  const dispatcher = new Agent({
+    connect: {
+      // Ignore the hostname and hand back the vetted IP. Re-checked here
+      // as belt-and-braces in case the Agent is ever reused.
+      lookup: (
+        _hostname: string,
+        _options: unknown,
+        callback: (err: Error | null, address: string, family: number) => void,
+      ): void => {
+        if (isPrivateOrReservedIp(pinned.address)) {
+          callback(new Error('SSRF: pinned address is private'), '', 0);
+          return;
+        }
+        callback(null, pinned.address, pinned.family);
+      },
+    },
+  });
+
+  // `dispatcher` is an undici extension to RequestInit not present in the
+  // DOM lib types; cast to attach it to the global fetch call.
+  return fetch(url.toString(), { ...init, dispatcher } as RequestInit);
 }
 
 /**

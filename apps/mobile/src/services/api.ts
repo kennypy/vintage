@@ -67,9 +67,21 @@ export async function getCsrfToken(): Promise<string> {
   // CSRF fetch is awaited from inside apiFetch with no upper bound.
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  // Attach the access token so the server binds the CSRF token to this
+  // user (CsrfMiddleware). Without it the token is minted "anon" and is
+  // rejected on the first authenticated mutating request — which would
+  // still self-heal via the 403-CSRF retry, but at the cost of a wasted
+  // round-trip on every cache miss.
+  const accessToken = await getToken();
+  const csrfHeaders: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}/auth/csrf-token`, { signal: controller.signal });
+    res = await fetch(`${API_BASE_URL}/auth/csrf-token`, {
+      headers: csrfHeaders,
+      signal: controller.signal,
+    });
   } catch (err) {
     clearTimeout(timeoutId);
     if (err instanceof Error && err.name === 'AbortError') {

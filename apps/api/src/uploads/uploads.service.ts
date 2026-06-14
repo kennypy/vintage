@@ -55,7 +55,11 @@ const MAGIC_BYTES: Record<string, number[]> = {
 const VIDEO_MIME_SIGNATURES: Array<{ mime: string; offset: number; bytes: number[] }> = [
   { mime: 'video/mp4', offset: 4, bytes: [0x66, 0x74, 0x79, 0x70] },       // 'ftyp'
   { mime: 'video/quicktime', offset: 4, bytes: [0x66, 0x74, 0x79, 0x70] }, // 'ftyp' (QuickTime MOV)
-  { mime: 'video/quicktime', offset: 0, bytes: [0x00, 0x00, 0x00] },        // QuickTime fallback
+  // Removed the `offset:0, bytes:[0x00,0x00,0x00]` "QuickTime fallback":
+  // it accepted ANY file whose first three bytes are 0x00 (arbitrary
+  // binaries / polyglots), defeating magic-byte validation for the video
+  // surface. Real MP4/MOV files carry the `ftyp` box at offset 4, which the
+  // two signatures above already match.
 ];
 
 /** Placeholder image dimensions used in dev/stub mode. */

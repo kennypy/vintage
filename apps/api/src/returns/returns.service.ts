@@ -356,6 +356,17 @@ export class ReturnsService {
         create: { userId: ret.order.buyerId, balanceBrl: 0, pendingBrl: 0 },
         update: {},
       });
+      // Idempotency backstop (same pattern as payouts.service refund guard):
+      // never credit the buyer twice for the same order. Defends against a
+      // return refund colliding with a dispute refund on the same order.
+      const existingRefund = await tx.walletTransaction.findFirst({
+        where: { walletId: buyerWallet.id, referenceId: ret.order.id, type: 'REFUND' },
+      });
+      if (existingRefund) {
+        throw new ConflictException(
+          'Reembolso já processado para este pedido.',
+        );
+      }
       await tx.wallet.update({
         where: { id: buyerWallet.id },
         data: { balanceBrl: { increment: refundAmount } },

@@ -213,7 +213,11 @@ export class ListingsService {
           select: {
             id: true, name: true, avatarUrl: true, verified: true, cpfIdentityVerified: true,
             ratingAvg: true, ratingCount: true, createdAt: true,
-            twoFaEnabled: true,
+            // NOTE: do NOT expose twoFaEnabled here — this is the public,
+            // unauthenticated GET /listings/:id projection. A seller's 2FA
+            // status is account-hardening metadata that lets an attacker
+            // single out un-protected high-value sellers for takeover/
+            // social-engineering. Search results never included it either.
           },
         },
       },

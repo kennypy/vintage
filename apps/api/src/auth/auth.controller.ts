@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -100,8 +100,12 @@ export class AuthController {
   @Get('csrf-token')
   @ApiOperation({ summary: 'Obter token CSRF para requisições mutáveis' })
   @ApiResponse({ status: 200, description: 'Token CSRF gerado' })
-  getCsrfToken() {
-    return { csrfToken: this.csrfMiddleware.generateToken() };
+  getCsrfToken(@Req() req: Request) {
+    // Bind the token to the caller's session (cookie or Bearer) so it
+    // can't be replayed as another user. Authenticated clients should
+    // send their credential on this request (web does via credentials:
+    // 'include'; mobile attaches the Bearer access token).
+    return { csrfToken: this.csrfMiddleware.generateTokenForRequest(req) };
   }
 
   @Post('register')

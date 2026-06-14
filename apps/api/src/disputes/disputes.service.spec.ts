@@ -204,7 +204,12 @@ describe('DisputesService', () => {
         upsert: jest.fn().mockResolvedValue({ id: 'wallet-1' }),
         update: jest.fn().mockResolvedValue({}),
       },
-      walletTransaction: { create: jest.fn().mockResolvedValue({}) },
+      walletTransaction: {
+        // findFirst backs the idempotency guard in applyWalletRefundFallback;
+        // default null = no prior REFUND for this order, so the credit proceeds.
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({}),
+      },
       orderListingSnapshot: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
     });
 

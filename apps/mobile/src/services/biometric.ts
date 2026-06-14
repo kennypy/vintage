@@ -5,14 +5,19 @@ import { secureGet, secureSet, secureDelete } from './secureStorage';
 // user explicitly opts in on the login screen (never by default).
 const BIOMETRIC_ENROLLED_KEY = 'biometric:enrolled';
 
-// Credentials stashed under expo-secure-store (iOS Keychain / Android
-// Keystore). We stash email + password because the API requires them
-// for the POST /auth/login call; the secure-store backing is encrypted
-// at rest and only unlocked while the device is unlocked. Exfiltration
-// requires physical device access AND device passcode, at which point
-// the user's bigger problems have already landed.
+// What we stash under expo-secure-store (iOS Keychain / Android Keystore):
+// the REFRESH TOKEN, never the password. The refresh token is opaque,
+// rotates on every use, and can be revoked server-side; the password is
+// the master credential (reused across sites, grants password-change /
+// account-deletion). Storing the password meant a keychain compromise
+// handed over the whole account permanently; a refresh token can be
+// revoked and is useless once rotated. On unlock we hand the refresh
+// token to POST /auth/refresh to mint a fresh session — same transport
+// the app already uses for silent re-auth.
+const BIOMETRIC_REFRESH_KEY = 'biometric:refresh';
+// Email is kept only as a non-secret display hint for the unlock screen
+// ("Entrar como user@example.com"). It is NOT a credential.
 const BIOMETRIC_EMAIL_KEY = 'biometric:email';
-const BIOMETRIC_PASSWORD_KEY = 'biometric:password';
 
 export interface BiometricCapability {
   available: boolean;
@@ -47,48 +52,62 @@ export async function isBiometricEnrolled(): Promise<boolean> {
 }
 
 /**
- * Opt-in. Called from the login screen after a successful password
- * login when the user taps "Ativar biometria". Stashes credentials
- * in the secure enclave and marks the opt-in flag. We run a quick
- * biometric auth first so the gesture matches the intent.
+ * Opt-in. Called from the login screen after a successful login when the
+ * user taps "Ativar biometria". Stashes the REFRESH TOKEN (not the
+ * password) in the secure enclave and marks the opt-in flag. We run a
+ * quick biometric auth first so the gesture matches the intent.
  */
-export async function enrollBiometric(email: string, password: string): Promise<boolean> {
+export async function enrollBiometric(email: string, refreshToken: string): Promise<boolean> {
   const ok = await prompt('Confirme para ativar desbloqueio por biometria');
   if (!ok) return false;
   await secureSet(BIOMETRIC_EMAIL_KEY, email);
-  await secureSet(BIOMETRIC_PASSWORD_KEY, password);
+  await secureSet(BIOMETRIC_REFRESH_KEY, refreshToken);
   await secureSet(BIOMETRIC_ENROLLED_KEY, 'true');
   return true;
 }
 
 /**
- * Opt-out. Called from settings. Clears the stored credentials and
- * the enrollment flag. Intentionally does NOT re-prompt — revoking
- * biometric should be as easy as enabling it.
+ * Refresh-token rotation hook. POST /auth/refresh rotates the refresh
+ * token on every use (reuse-detecting rotation, server-side), so after a
+ * silent refresh the stored token is stale and the NEXT biometric unlock
+ * would fail. Call this whenever the app rotates tokens so the enclave
+ * keeps the live refresh token. No-op when biometric isn't enrolled.
+ */
+export async function updateBiometricRefreshToken(refreshToken: string): Promise<void> {
+  if (!(await isBiometricEnrolled())) return;
+  await secureSet(BIOMETRIC_REFRESH_KEY, refreshToken);
+}
+
+/**
+ * Opt-out. Called from settings. Clears the stored token and the
+ * enrollment flag. Intentionally does NOT re-prompt — revoking biometric
+ * should be as easy as enabling it.
  */
 export async function unenrollBiometric(): Promise<void> {
   await Promise.all([
     secureDelete(BIOMETRIC_EMAIL_KEY),
-    secureDelete(BIOMETRIC_PASSWORD_KEY),
+    secureDelete(BIOMETRIC_REFRESH_KEY),
     secureDelete(BIOMETRIC_ENROLLED_KEY),
   ]);
 }
 
 /**
- * Read-back with biometric gate. Returns the stored credentials iff
- * the user successfully authenticates; null otherwise. Never returns
- * credentials without the live biometric prompt passing.
+ * Read-back with biometric gate. Returns the stored refresh token (plus
+ * the non-secret email hint) iff the user successfully authenticates;
+ * null otherwise. The caller exchanges the refresh token at
+ * POST /auth/refresh for a fresh access+refresh pair. Never returns the
+ * token without the live biometric prompt passing.
  */
-export async function unlockWithBiometric(): Promise<{ email: string; password: string } | null> {
+export async function unlockWithBiometric(): Promise<{ email: string; refreshToken: string } | null> {
   if (!(await isBiometricEnrolled())) return null;
   const ok = await prompt('Entrar com biometria');
   if (!ok) return null;
-  const [email, password] = await Promise.all([
+  const [email, refreshToken] = await Promise.all([
     secureGet(BIOMETRIC_EMAIL_KEY),
-    secureGet(BIOMETRIC_PASSWORD_KEY),
+    secureGet(BIOMETRIC_REFRESH_KEY),
   ]);
-  if (!email || !password) return null;
-  return { email, password };
+  if (!email || !refreshToken) return null;
+  return { email, refreshToken };
 }
 
 async function prompt(reason: string): Promise<boolean> {
