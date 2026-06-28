@@ -159,11 +159,41 @@ async function bootstrap() {
       'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
       'APPLE_CLIENT_ID',
       'S3_ACCESS_KEY', 'S3_SECRET_KEY',
+      // When GOOGLE_VISION_API_KEY is unset, image analysis is disabled and
+      // EVERY upload degrades to a moderation FLAG (fail-to-review), which
+      // floods the admin moderation queue rather than silently passing
+      // content through. Surface it at boot so an operator notices that
+      // automated moderation isn't actually running.
+      'GOOGLE_VISION_API_KEY',
     ];
     for (const key of optionalSecrets) {
       if (!config.get<string>(key)) {
         logger.warn(`Optional secret ${key} is not set — related features will be unavailable`);
       }
+    }
+
+    // Payout / KYC deadlock guard. Enabling PIX payouts only makes sense if
+    // users can actually reach cpfIdentityVerified=true — and the ONLY code
+    // paths that set that flag are the Serpro (Track B) and Caf (Track C)
+    // identity flows, gated by IDENTITY_VERIFICATION_ENABLED and
+    // IDENTITY_DOCUMENT_ENABLED respectively. If payouts are on but both
+    // identity tracks are off, no user can ever pass the cpfIdentityVerified
+    // gate in PayoutsService.requestPayout, so every withdrawal is rejected
+    // at the API boundary — a silent, total payout outage. Fail fast at boot
+    // instead of discovering it when the first seller tries to cash out.
+    const isTruthy = (v: string | undefined): boolean =>
+      ['true', '1', 'yes'].includes((v ?? '').toLowerCase());
+    const payoutEnabled = isTruthy(config.get<string>('MERCADOPAGO_PAYOUT_ENABLED'));
+    const serproEnabled = isTruthy(config.get<string>('IDENTITY_VERIFICATION_ENABLED'));
+    const cafEnabled = isTruthy(config.get<string>('IDENTITY_DOCUMENT_ENABLED'));
+    if (payoutEnabled && !serproEnabled && !cafEnabled) {
+      throw new Error(
+        'MERCADOPAGO_PAYOUT_ENABLED=true requires at least one identity-verification ' +
+          'track (IDENTITY_VERIFICATION_ENABLED or IDENTITY_DOCUMENT_ENABLED) to also be ' +
+          'enabled. Payouts gate on cpfIdentityVerified, which only the Serpro/Caf flows ' +
+          'can set — with both off, every payout request is rejected. Enable a KYC track ' +
+          'or set MERCADOPAGO_PAYOUT_ENABLED=false.',
+      );
     }
   }
 

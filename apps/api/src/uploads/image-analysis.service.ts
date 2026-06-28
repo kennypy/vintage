@@ -300,7 +300,8 @@ export class ImageAnalysisService {
    * PLUS SafeSearch moderation findings. Never throws — a Vision
    * outage silently degrades to `{ suggestions: {}, moderation: null }`
    * so uploads don't break during third-party incidents. Callers
-   * decide whether to gate on moderation=null (fail-open for launch).
+   * decide how to treat moderation=null; the upload pipeline routes it
+   * to FLAG (fail-to-review, see classifyModeration), NOT fail-open.
    */
   async analyze(imageBuffer: Buffer): Promise<AnalysisResult> {
     if (!this.apiKey) {

@@ -59,8 +59,11 @@ export class PayoutsService {
     // shipped, the gate was cpfChecksumValid (Modulo-11 only), which
     // trivially passes for every registered user and wasn't a real
     // protection. Now the bar is cpfIdentityVerified — true only
-    // after a KYC provider (Serpro / Caf / Mercado Pago callback)
-    // has confirmed CPF is ATIVO at Receita and the name matches.
+    // after a KYC provider (Serpro Track B or Caf Track C; there is no
+    // Mercado Pago path that sets this flag) has confirmed the CPF is
+    // ATIVO at Receita and the name matches. NOTE: if BOTH identity
+    // tracks are disabled, no user can ever satisfy this gate — main.ts
+    // refuses to boot with payouts enabled in that configuration.
     // This blocks payouts to unverified accounts at the API boundary,
     // which is a cleaner UX than letting MP's own KYC reject the
     // transfer 30 seconds later.
