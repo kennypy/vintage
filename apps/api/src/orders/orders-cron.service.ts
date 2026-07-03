@@ -22,6 +22,15 @@ class OrderStateRaceSignal extends Error {
   }
 }
 
+/**
+ * A PENDING order older than this whose payment never completed (the buyer
+ * abandoned checkout, or every attempt failed) is dead. Order creation
+ * marks the listing SOLD, so without this sweep the listing stays locked
+ * forever. No money changed hands, so there is nothing to refund — we just
+ * cancel and free the listing.
+ */
+const PENDING_PAYMENT_TIMEOUT_HOURS = 24;
+
 @Injectable()
 export class OrdersCronService {
   private readonly logger = new Logger(OrdersCronService.name);
@@ -235,6 +244,91 @@ export class OrdersCronService {
         }
         this.logger.error(
           `Failed to auto-cancel order ${order.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Auto-cancel orders stuck in PENDING past PENDING_PAYMENT_TIMEOUT_HOURS
+   * whose payment never completed. We skip any order that still has an
+   * in-flight (PENDING) or SUCCEEDED payment — the reconciliation poller
+   * owns those, and cancelling would strand a payment that is about to (or
+   * did) go through. A truly dead PENDING order otherwise pins its listing
+   * as SOLD forever; here we cancel it and release the listing. No money
+   * was captured, so there is nothing to refund.
+   * Runs every hour.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async cancelStalePendingOrders() {
+    if (!(await this.cronLock.acquire('orders:cancelStalePending'))) return;
+
+    const cutoff = new Date(
+      Date.now() - PENDING_PAYMENT_TIMEOUT_HOURS * 60 * 60 * 1000,
+    );
+
+    const dead = await this.prisma.order.findMany({
+      where: {
+        status: 'PENDING',
+        createdAt: { lt: cutoff },
+        payments: { none: { status: { in: ['PENDING', 'SUCCEEDED'] } } },
+      },
+      select: { id: true, listingId: true },
+    });
+
+    if (dead.length === 0) return;
+
+    this.logger.log(
+      `Cancelling ${dead.length} stale PENDING order(s) past ${PENDING_PAYMENT_TIMEOUT_HOURS}h with no completed payment`,
+    );
+
+    for (const order of dead) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // Conditional cancel: only PENDING→CANCELLED. count===0 means the
+          // order advanced (a late webhook or the reconciliation poller
+          // settled it to PAID, or another instance cancelled it) between
+          // the findMany above and this write. Rolling back keeps us from
+          // reactivating a listing that just sold.
+          const res = await tx.order.updateMany({
+            where: { id: order.id, status: 'PENDING' },
+            data: { status: 'CANCELLED' },
+          });
+          if (res.count === 0) {
+            throw new OrderStateRaceSignal(order.id);
+          }
+
+          // Order creation marked the listing SOLD — release it so it can
+          // be sold again.
+          await tx.listing.update({
+            where: { id: order.listingId },
+            data: { status: 'ACTIVE' },
+          });
+
+          // Order never reached PAID → no dispute window ever opened.
+          // Purge the snapshot if one exists.
+          await tx.orderListingSnapshot.deleteMany({
+            where: { orderId: order.id },
+          });
+        });
+
+        // Listing is ACTIVE again — re-add it to search.
+        this.listings.syncSearchIndex(order.listingId).catch(
+          warnAndSwallow(this.logger, 'orders-cron.search-sync'),
+        );
+
+        this.logger.log(
+          `Cancelled stale PENDING order ${order.id} — listing ${order.listingId} reactivated`,
+        );
+      } catch (err) {
+        if (err instanceof OrderStateRaceSignal) {
+          this.logger.debug(
+            `stale-pending cancel skipped — order ${err.orderId} state changed under us`,
+          );
+          continue;
+        }
+        this.logger.error(
+          `Failed to cancel stale PENDING order ${order.id}: ${String(err).slice(0, 200)}`,
         );
       }
     }

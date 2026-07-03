@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { MercadoPagoClient } from './mercadopago.client';
+import {
+  MercadoPagoClient,
+  MercadoPagoRateLimitedError,
+} from './mercadopago.client';
 import * as crypto from 'crypto';
 
 function createClient(
@@ -113,5 +116,99 @@ describe('MercadoPagoClient.deriveIdempotencyKey', () => {
     const a = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
     const b = MercadoPagoClient.deriveIdempotencyKey('pix', 'order-1', 99.9, 1);
     expect(a).toBe(b);
+  });
+});
+
+describe('MercadoPagoClient.request — retry / backoff', () => {
+  const realFetch = global.fetch;
+  let client: MercadoPagoClient;
+  let fetchMock: jest.Mock;
+
+  function createConfiguredClient(): Promise<MercadoPagoClient> {
+    return Test.createTestingModule({
+      providers: [
+        MercadoPagoClient,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string, defaultValue?: string) => {
+              if (key === 'MERCADOPAGO_ACCESS_TOKEN') return 'test-access-token';
+              if (key === 'NODE_ENV') return 'production';
+              return defaultValue ?? '';
+            }),
+          },
+        },
+      ],
+    })
+      .compile()
+      .then((m: TestingModule) => m.get<MercadoPagoClient>(MercadoPagoClient));
+  }
+
+  const res = (status: number, bodyObj: unknown) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => bodyObj,
+    text: async () => JSON.stringify(bodyObj),
+  });
+
+  const approved = {
+    id: 'p1',
+    status: 'approved',
+    status_detail: 'accredited',
+    transaction_amount: 10,
+  };
+
+  beforeEach(async () => {
+    client = await createConfiguredClient();
+    // Skip the real 2s/4s/8s waits so the retry path runs instantly.
+    jest.spyOn(client as unknown as { sleep: () => Promise<void> }, 'sleep').mockResolvedValue(undefined);
+    fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    global.fetch = realFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('retries a 429 then succeeds, reusing the same request', async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(429, { message: 'rate limited' }))
+      .mockResolvedValueOnce(res(200, approved));
+
+    const out = await client.getPaymentStatus('p1');
+
+    expect(out.status).toBe('approved');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries transient network errors (ECONNRESET) then succeeds', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce(res(200, approved));
+
+    const out = await client.getPaymentStatus('p1');
+
+    expect(out.status).toBe('approved');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws MercadoPagoRateLimitedError after exhausting retries on 503', async () => {
+    fetchMock.mockResolvedValue(res(503, { message: 'unavailable' }));
+
+    await expect(client.getPaymentStatus('p1')).rejects.toBeInstanceOf(
+      MercadoPagoRateLimitedError,
+    );
+    // 1 initial + 3 retries.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('does NOT retry a non-retryable 400 — fails fast', async () => {
+    fetchMock.mockResolvedValue(res(400, { message: 'bad request' }));
+
+    await expect(client.getPaymentStatus('p1')).rejects.toThrow(
+      /Mercado Pago API error: 400/,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

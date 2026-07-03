@@ -17,6 +17,27 @@ export class MercadoPagoPayoutUnavailableError extends Error {
   }
 }
 
+/**
+ * Raised when a request keeps hitting a retryable status (429 rate limit
+ * or 5xx) after exhausting the backoff budget. Callers that must not fail
+ * hard on a transient MP hiccup (e.g. the reconciliation poller) can catch
+ * this specifically and leave the work for the next tick, rather than
+ * treating it like a permanent error.
+ */
+export class MercadoPagoRateLimitedError extends Error {
+  constructor(public readonly status: number) {
+    super(
+      `Mercado Pago temporarily unavailable (HTTP ${status}) after retries`,
+    );
+    this.name = 'MercadoPagoRateLimitedError';
+  }
+}
+
+/** HTTP statuses worth retrying — transient rate-limit / server errors. */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+/** Max retries after the first attempt: backoff waits 2s, 4s, 8s. */
+const MAX_REQUEST_RETRIES = 3;
+
 interface MercadoPagoPaymentResponse {
   id: string;
   status: string;
@@ -100,23 +121,71 @@ export class MercadoPagoClient {
     const url = `${this.baseUrl}${path}`;
     this.logger.debug(`${method} ${path}`);
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    // Retry transient failures (429 rate limit, 5xx) with exponential
+    // backoff. The idempotency key is reused across retries — that is
+    // exactly what it is for: MP dedups the retried POST to a single
+    // charge, so a retry can never double-charge. Non-retryable errors
+    // (4xx other than 429) throw immediately.
+    let lastStatus = 0;
+    for (let attempt = 0; attempt <= MAX_REQUEST_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await this.sleep(this.backoffDelayMs(attempt));
+        this.logger.warn(
+          `Retrying ${method} ${path} (attempt ${attempt + 1}/${MAX_REQUEST_RETRIES + 1}) after HTTP ${lastStatus}`,
+        );
+      }
 
-    if (!response.ok) {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      } catch (networkErr) {
+        // Transient network failure (DNS, reset, timeout) — treat like a
+        // 5xx and retry until the budget is spent, then surface.
+        lastStatus = 0;
+        if (attempt < MAX_REQUEST_RETRIES) continue;
+        throw networkErr;
+      }
+
+      if (response.ok) {
+        return (await response.json()) as T;
+      }
+
+      lastStatus = response.status;
+      if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_REQUEST_RETRIES) {
+        continue;
+      }
+
       const errorText = String(await response.text()).slice(0, 200);
       this.logger.error(
         `Mercado Pago API error: ${response.status} - ${errorText}`,
       );
+      if (RETRYABLE_STATUSES.has(response.status)) {
+        // Retries exhausted on a transient status — typed so callers can
+        // distinguish "MP is flaky right now" from a permanent 4xx.
+        throw new MercadoPagoRateLimitedError(response.status);
+      }
       throw new Error(
         `Mercado Pago API error: ${response.status} - ${errorText}`,
       );
     }
 
-    return (await response.json()) as T;
+    // Unreachable in practice (the loop either returns or throws), but keeps
+    // the type checker satisfied that a value is always produced.
+    throw new MercadoPagoRateLimitedError(lastStatus);
+  }
+
+  /** Backoff before retry `attempt` (1→2s, 2→4s, 3→8s). */
+  protected backoffDelayMs(attempt: number): number {
+    return 1000 * 2 ** attempt;
+  }
+
+  /** Overridable sleep so tests can run the retry path without real waits. */
+  protected sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
