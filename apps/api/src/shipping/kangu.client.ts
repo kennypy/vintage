@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as QRCode from 'qrcode';
+import { assertShippingMockAllowed } from './shipping-mock.util';
 
 export interface KanguRate {
   serviceName: string;
@@ -31,10 +32,12 @@ export class KanguClient {
   private readonly logger = new Logger(KanguClient.name);
   private readonly apiUrl: string;
   private readonly apiKey: string | undefined;
+  private readonly nodeEnv: string;
 
   constructor(private config: ConfigService) {
     this.apiUrl = this.config.get<string>('KANGU_API_URL', 'https://portal.kangu.com.br/tms/transporte');
     this.apiKey = this.config.get<string>('KANGU_API_KEY');
+    this.nodeEnv = this.config.get<string>('NODE_ENV', 'development');
   }
 
   async calculateRates(
@@ -44,6 +47,7 @@ export class KanguClient {
   ): Promise<KanguRate[]> {
     if (!this.apiKey) {
       this.logger.warn('KANGU_API_KEY not configured, returning mock rates');
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'rates');
       return this.mockRates();
     }
 
@@ -69,6 +73,7 @@ export class KanguClient {
 
       if (!response.ok) {
         this.logger.error(`Kangu API error: ${response.status}`);
+        assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'rates');
         return this.mockRates();
       }
 
@@ -85,6 +90,7 @@ export class KanguClient {
       }));
     } catch (err) {
       this.logger.error(`Kangu rate calculation failed: ${String(err).slice(0, 200)}`);
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'rates');
       return this.mockRates();
     }
   }
@@ -97,6 +103,7 @@ export class KanguClient {
   ): Promise<KanguLabel> {
     if (!this.apiKey) {
       this.logger.warn('KANGU_API_KEY not configured, returning mock label');
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'label');
       return this.mockLabel(orderId);
     }
 
@@ -116,6 +123,7 @@ export class KanguClient {
       });
 
       if (!response.ok) {
+        assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'label');
         return this.mockLabel(orderId);
       }
 
@@ -138,12 +146,14 @@ export class KanguClient {
       };
     } catch (err) {
       this.logger.error(`Kangu label generation failed: ${String(err).slice(0, 200)}`);
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'label');
       return this.mockLabel(orderId);
     }
   }
 
   async findDropoffPoints(cep: string): Promise<KanguDropoffPoint[]> {
     if (!this.apiKey) {
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'dropoff');
       return this.mockDropoffPoints(cep);
     }
 
@@ -156,7 +166,10 @@ export class KanguClient {
         },
       );
 
-      if (!response.ok) return this.mockDropoffPoints(cep);
+      if (!response.ok) {
+        assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'dropoff');
+        return this.mockDropoffPoints(cep);
+      }
 
       const data = (await response.json()) as Array<{
         nomeFantasia?: string;
@@ -179,6 +192,7 @@ export class KanguClient {
       }));
     } catch (err) {
       this.logger.error(`Kangu dropoff lookup failed: ${String(err).slice(0, 200)}`);
+      assertShippingMockAllowed(this.nodeEnv, 'Kangu', 'dropoff');
       return this.mockDropoffPoints(cep);
     }
   }

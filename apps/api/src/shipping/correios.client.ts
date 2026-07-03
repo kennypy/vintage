@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
+import { assertShippingMockAllowed } from './shipping-mock.util';
 
 export interface CorreiosRate {
   serviceCode: string;
@@ -28,12 +29,15 @@ export class CorreiosClient {
   private readonly token: string;
   private readonly baseUrl: string;
 
+  private readonly nodeEnv: string;
+
   constructor(private configService: ConfigService) {
     this.token = this.configService.get<string>('CORREIOS_TOKEN', '');
     this.baseUrl = this.configService.get<string>(
       'CORREIOS_API_URL',
       'https://api.correios.com.br',
     );
+    this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
   }
 
   private get isConfigured(): boolean {
@@ -80,6 +84,7 @@ export class CorreiosClient {
     dimensions?: { length: number; width: number; height: number },
   ): Promise<CorreiosRate[]> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Correios', 'rates');
       return this.mockRates(weightG);
     }
 
@@ -119,6 +124,7 @@ export class CorreiosClient {
     weightG: number,
   ): Promise<CorreiosLabel> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Correios', 'label');
       return this.mockLabel(orderId);
     }
 
@@ -145,6 +151,7 @@ export class CorreiosClient {
    */
   async getTracking(code: string): Promise<CorreiosTrackingEvent[]> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Correios', 'tracking');
       return this.mockTracking();
     }
 
@@ -180,6 +187,7 @@ export class CorreiosClient {
     }>
   > {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Correios', 'agencies');
       return this.mockAgencies(cep);
     }
 

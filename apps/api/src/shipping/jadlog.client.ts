@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
+import { assertShippingMockAllowed } from './shipping-mock.util';
 
 export interface JadlogRate {
   serviceCode: string;
@@ -28,12 +29,15 @@ export class JadlogClient {
   private readonly token: string;
   private readonly baseUrl: string;
 
+  private readonly nodeEnv: string;
+
   constructor(private configService: ConfigService) {
     this.token = this.configService.get<string>('JADLOG_TOKEN', '');
     this.baseUrl = this.configService.get<string>(
       'JADLOG_API_URL',
       'https://www.jadlog.com.br/api',
     );
+    this.nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
   }
 
   private get isConfigured(): boolean {
@@ -79,6 +83,7 @@ export class JadlogClient {
     weightG: number,
   ): Promise<JadlogRate[]> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Jadlog', 'rates');
       return this.mockRates(weightG);
     }
 
@@ -113,6 +118,7 @@ export class JadlogClient {
     weightG: number,
   ): Promise<JadlogLabel> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Jadlog', 'label');
       return this.mockLabel(orderId);
     }
 
@@ -139,6 +145,7 @@ export class JadlogClient {
    */
   async getTracking(code: string): Promise<JadlogTrackingEvent[]> {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Jadlog', 'tracking');
       return this.mockTracking();
     }
 
@@ -174,6 +181,7 @@ export class JadlogClient {
     }>
   > {
     if (!this.isConfigured) {
+      assertShippingMockAllowed(this.nodeEnv, 'Jadlog', 'partner-points');
       return this.mockPartnerPoints(cep);
     }
 

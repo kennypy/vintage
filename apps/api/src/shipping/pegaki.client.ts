@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as QRCode from 'qrcode';
+import { assertShippingMockAllowed } from './shipping-mock.util';
 
 export interface PegakiDropoffPoint {
   name: string;
@@ -25,10 +26,12 @@ export class PegakiClient {
   private readonly logger = new Logger(PegakiClient.name);
   private readonly apiUrl: string;
   private readonly apiKey: string | undefined;
+  private readonly nodeEnv: string;
 
   constructor(private config: ConfigService) {
     this.apiUrl = this.config.get<string>('PEGAKI_API_URL', 'https://api.pegaki.com.br/v1');
     this.apiKey = this.config.get<string>('PEGAKI_API_KEY');
+    this.nodeEnv = this.config.get<string>('NODE_ENV', 'development');
   }
 
   async generateLabel(
@@ -39,6 +42,7 @@ export class PegakiClient {
   ): Promise<PegakiLabel> {
     if (!this.apiKey) {
       this.logger.warn('PEGAKI_API_KEY not configured, returning mock label');
+      assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'label');
       return this.mockLabel(orderId);
     }
 
@@ -60,7 +64,10 @@ export class PegakiClient {
         signal: AbortSignal.timeout(10000),
       });
 
-      if (!response.ok) return this.mockLabel(orderId);
+      if (!response.ok) {
+        assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'label');
+        return this.mockLabel(orderId);
+      }
 
       const data = (await response.json()) as {
         label_url?: string;
@@ -81,12 +88,14 @@ export class PegakiClient {
       };
     } catch (err) {
       this.logger.error(`Pegaki label generation failed: ${String(err).slice(0, 200)}`);
+      assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'label');
       return this.mockLabel(orderId);
     }
   }
 
   async findDropoffPoints(cep: string): Promise<PegakiDropoffPoint[]> {
     if (!this.apiKey) {
+      assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'dropoff');
       return this.mockDropoffPoints(cep);
     }
 
@@ -99,7 +108,10 @@ export class PegakiClient {
         },
       );
 
-      if (!response.ok) return this.mockDropoffPoints(cep);
+      if (!response.ok) {
+        assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'dropoff');
+        return this.mockDropoffPoints(cep);
+      }
 
       const data = (await response.json()) as Array<{
         name?: string;
@@ -122,6 +134,7 @@ export class PegakiClient {
       }));
     } catch (err) {
       this.logger.error(`Pegaki dropoff lookup failed: ${String(err).slice(0, 200)}`);
+      assertShippingMockAllowed(this.nodeEnv, 'Pegaki', 'dropoff');
       return this.mockDropoffPoints(cep);
     }
   }
