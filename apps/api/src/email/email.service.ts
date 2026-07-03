@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { MetricsService } from '../metrics/metrics.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class EmailService {
@@ -10,7 +12,11 @@ export class EmailService {
   private readonly fromAddress: string;
   private readonly isDev: boolean;
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    private readonly metrics: MetricsService,
+    private readonly auditLog: AuditLogService,
+  ) {
     const smtpHost = this.config.get<string>('SMTP_HOST');
     this.fromAddress =
       this.config.get<string>('EMAIL_FROM') ||
@@ -282,9 +288,21 @@ export class EmailService {
       });
       this.logger.log(`Email enviado para ${to}: ${subject}`);
     } catch (error) {
+      // The send is intentionally non-fatal (a dropped email must not fail
+      // the primary action), so without a metric + audit row a failed
+      // password-reset / order-confirmation email is completely invisible.
+      // Bump the counter and record an audit row so ops can see it.
       this.logger.error(
         `Falha ao enviar email para ${to}: ${String(error).slice(0, 200)}`,
       );
+      this.metrics.emailSendFailed.inc();
+      await this.auditLog.record({
+        actorId: null,
+        action: 'email.send_failed',
+        targetType: 'email',
+        targetId: to,
+        metadata: { subject, error: String(error).slice(0, 200) },
+      });
     }
   }
 

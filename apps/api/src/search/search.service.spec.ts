@@ -1,6 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { SearchService } from './search.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+const mockPrisma = {
+  $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+  listing: {
+    findMany: jest.fn().mockResolvedValue([]),
+    count: jest.fn().mockResolvedValue(0),
+  },
+};
 
 const mockIndex = {
   search: jest.fn(),
@@ -37,6 +46,7 @@ describe('SearchService', () => {
       providers: [
         SearchService,
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -61,6 +71,46 @@ describe('SearchService', () => {
         offset: 0,
         limit: 20,
       }));
+    });
+
+    it('falls back to Postgres (no 500) when Meilisearch is down', async () => {
+      mockIndex.search.mockRejectedValue(new Error('ECONNREFUSED meili'));
+      mockPrisma.listing.findMany.mockResolvedValueOnce([
+        {
+          id: 'l1',
+          title: 'Camisa',
+          description: 'linda camisa',
+          sellerId: 's1',
+          categoryId: 'c1',
+          brandId: null,
+          category: { namePt: 'Roupas' },
+          brand: null,
+          condition: 'GOOD',
+          size: 'M',
+          color: 'azul',
+          priceBrl: 50,
+          status: 'ACTIVE',
+          viewCount: 3,
+          images: [{ url: 'http://img/1.jpg' }],
+          createdAt: new Date(0),
+        },
+      ]);
+      mockPrisma.listing.count.mockResolvedValueOnce(1);
+
+      const result = await service.search('camisa', {}, 'newest', 1, 20);
+
+      // Degraded but not a 500 — Postgres answered.
+      expect(mockPrisma.listing.findMany).toHaveBeenCalled();
+      expect(result.total).toBe(1);
+      // Hit shape matches the indexed-document shape callers expect.
+      expect(result.hits[0]).toMatchObject({
+        id: 'l1',
+        title: 'Camisa',
+        imageUrl: 'http://img/1.jpg',
+        priceBrl: 50,
+        category: 'Roupas',
+        createdAt: 0,
+      });
     });
 
     it('should build filter string from filters', async () => {

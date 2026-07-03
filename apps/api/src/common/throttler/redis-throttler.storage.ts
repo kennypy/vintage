@@ -40,6 +40,16 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
 
   constructor(private readonly redis: RedisService) {}
 
+  /**
+   * Whether the Redis backend is currently reachable. HashThrottlerGuard
+   * uses this to fail CLOSED on routes marked @FailClosedThrottle() when the
+   * store would otherwise fail open (see the class doc). All other routes
+   * keep failing open.
+   */
+  isBackendAvailable(): boolean {
+    return this.redis.isAvailable();
+  }
+
   async increment(
     key: string,
     ttl: number,

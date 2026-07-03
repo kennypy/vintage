@@ -64,6 +64,15 @@ export class SmsService {
   }
 
   /**
+   * Mask runs of 3+ digits down to their last 2 (e.g. `123456` → `****56`)
+   * so a dev/staging log confirms a code was sent without exposing the full
+   * 2FA token. Used only on the dev-fallback log line.
+   */
+  static maskCodes(text: string): string {
+    return text.replace(/\d{3,}/g, (m) => '*'.repeat(m.length - 2) + m.slice(-2));
+  }
+
+  /**
    * Send an SMS. Throws on transport failure so callers can surface
    * "please try again" to the user — otherwise a silently-dropped 2FA
    * code would lock users out. In dev mode we never throw, we just log.
@@ -73,10 +82,12 @@ export class SmsService {
       throw new Error(`Invalid phone number format (must be E.164): ${to}`);
     }
     if (!this.configured || !this.client) {
-      // Dev fallback: log full SMS content so the developer can read the code.
-      // In production this branch is unreachable because startup fails on
-      // placeholder Twilio creds via main.ts secret validation.
-      this.logger.log(`[SMS DEV] Para: ${to}\n${body}`);
+      // Dev fallback: confirm the send without turning staging logs into a
+      // 2FA-code oracle. We mask digit runs to their last 2 digits — enough
+      // for a developer to correlate the code they typed, not enough for a
+      // log reader to authenticate. In production this branch is unreachable
+      // (startup fails on placeholder Twilio creds via main.ts validation).
+      this.logger.log(`[SMS DEV] Para: ${to} — ${SmsService.maskCodes(body)}`);
       return;
     }
 

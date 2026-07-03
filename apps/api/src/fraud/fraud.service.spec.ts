@@ -177,6 +177,15 @@ describe('FraudService', () => {
       expect(decision.action).toBe('ALLOW');
       expect(mockPrisma.fraudFlag.create).not.toHaveBeenCalled();
     });
+
+    it('fails CLOSED (BLOCK) when the evaluator itself errors — never ALLOW', async () => {
+      // Unlike browse/upload evaluators, a payout moves money OUT. A DB
+      // hiccup must not auto-approve a drain-pattern withdrawal.
+      mockPrisma.fraudRule.findFirst.mockRejectedValue(new Error('pg down'));
+
+      const decision = await service.evaluatePayout('user-1', 'method-1');
+      expect(decision.action).toBe('BLOCK');
+    });
   });
 
   describe('resolveFlag', () => {

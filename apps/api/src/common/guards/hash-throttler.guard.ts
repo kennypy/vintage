@@ -1,5 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { FAIL_CLOSED_THROTTLE_KEY } from '../throttler/fail-closed-throttle.decorator';
+import { RedisThrottlerStorage } from '../throttler/redis-throttler.storage';
 
 /**
  * Rate limiter keyed by the AUTHENTICATED user id when available,
@@ -26,6 +32,34 @@ import { ThrottlerGuard } from '@nestjs/throttler';
  */
 @Injectable()
 export class HashThrottlerGuard extends ThrottlerGuard {
+  /**
+   * Routes marked @FailClosedThrottle() (login, register, password reset)
+   * must NOT lose their brute-force protection when Redis is down. The
+   * store fails open by default; here we intercept those routes and return
+   * 503 while the backend is unreachable, rather than waving the request
+   * through uncounted. Every other route keeps the fail-open behaviour.
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const failClosed = this.reflector.getAllAndOverride<boolean>(
+      FAIL_CLOSED_THROTTLE_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if (failClosed) {
+      const storage = this.storageService as Partial<RedisThrottlerStorage>;
+      if (
+        typeof storage.isBackendAvailable === 'function' &&
+        !storage.isBackendAvailable()
+      ) {
+        throw new ServiceUnavailableException(
+          'Serviço de proteção contra abuso temporariamente indisponível. Tente novamente em instantes.',
+        );
+      }
+    }
+
+    return super.canActivate(context);
+  }
+
   protected async getTracker(
     req: Record<string, unknown>,
   ): Promise<string> {

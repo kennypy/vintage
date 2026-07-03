@@ -78,6 +78,17 @@ export class MetricsService implements OnModuleInit {
     registers: [this.registry],
   });
 
+  // Email delivery
+  // Incremented when a transactional email (password reset, email-change
+  // confirm, order confirmation) fails to send. The send path swallows the
+  // error so the primary action still succeeds, so this counter + an
+  // AuditLog row are the ONLY signal ops gets. Alert on rate-of-change.
+  readonly emailSendFailed = new Counter({
+    name: 'vintage_email_send_failed_total',
+    help: 'Transactional emails that failed to send (SMTP / transport error).',
+    registers: [this.registry],
+  });
+
   // Fire-and-forget side effects
   // Incremented by common/utils/fire-and-forget.ts#warnAndSwallow.
   // A spike under a particular `tag` (e.g. `offer.notify`, `search.sync`)
