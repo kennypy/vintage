@@ -5,6 +5,7 @@ import { OrdersService } from './orders.service';
 import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
 import { MercadoPagoClient } from '../payments/mercadopago.client';
+import { ConfigService } from '@nestjs/config';
 
 jest.mock('@vintage/shared', () => ({
   SHIPPING_DEADLINE_DAYS: 5,
@@ -74,6 +75,12 @@ describe('OrdersCronService', () => {
         { provide: ListingsService, useValue: listings },
         { provide: CronLockService, useValue: cronLock },
         { provide: MercadoPagoClient, useValue: mercadoPago },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+          },
+        },
       ],
     }).compile();
     service = module.get(OrdersCronService);
@@ -314,6 +321,91 @@ describe('OrdersCronService', () => {
       cronLock.acquire.mockResolvedValue(false);
       await service.escalateStaleReturns();
       expect(prisma.orderReturn.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('escalateStuckShipments', () => {
+    const stuckOrder = {
+      id: 'o-stuck',
+      buyerId: 'buyer',
+      trackingCode: 'BR123',
+      carrier: 'CORREIOS',
+    };
+
+    // tx handle exposing the calls this cron makes, so we can assert the
+    // dispute is opened NOT_RECEIVED on the buyer's behalf.
+    function txWithDispute(claimCount: number, existingDispute: unknown = null) {
+      const create = jest.fn();
+      const updateMany = jest.fn().mockResolvedValue({ count: claimCount });
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            order: { updateMany, update: jest.fn() },
+            dispute: {
+              findUnique: jest.fn().mockResolvedValue(existingDispute),
+              create,
+            },
+          }),
+      );
+      return { create, updateMany };
+    }
+
+    it('only targets SHIPPED orders older than the threshold with no dispute', async () => {
+      prisma.order.findMany.mockResolvedValue([]);
+      await service.escalateStuckShipments();
+      const where = prisma.order.findMany.mock.calls[0][0].where;
+      expect(where.status).toBe('SHIPPED');
+      expect(where.shippedAt.lt).toBeInstanceOf(Date);
+      expect(where.dispute).toEqual({ is: null });
+      // Default threshold is 30 days.
+      const ageMs = Date.now() - where.shippedAt.lt.getTime();
+      expect(ageMs).toBeGreaterThanOrEqual(30 * 24 * 60 * 60 * 1000 - 2000);
+    });
+
+    it('opens a NOT_RECEIVED dispute on the buyer’s behalf and flips to DISPUTED', async () => {
+      prisma.order.findMany.mockResolvedValue([stuckOrder]);
+      const { create, updateMany } = txWithDispute(1);
+
+      await service.escalateStuckShipments();
+
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: 'o-stuck', status: 'SHIPPED' },
+        data: { status: 'DISPUTED' },
+      });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orderId: 'o-stuck',
+            openedById: 'buyer',
+            reason: 'NOT_RECEIVED',
+            status: 'OPEN',
+          }),
+        }),
+      );
+    });
+
+    it('skips (no dispute created) when the order left SHIPPED under us', async () => {
+      prisma.order.findMany.mockResolvedValue([stuckOrder]);
+      const { create } = txWithDispute(0); // conditional flip matched nothing
+
+      await service.escalateStuckShipments();
+
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('does not open a second dispute if one already exists', async () => {
+      prisma.order.findMany.mockResolvedValue([stuckOrder]);
+      const { create } = txWithDispute(1, { id: 'existing' });
+
+      await service.escalateStuckShipments();
+
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('respects the lock', async () => {
+      cronLock.acquire.mockResolvedValue(false);
+      await service.escalateStuckShipments();
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
     });
   });
 });
