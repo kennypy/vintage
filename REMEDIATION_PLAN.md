@@ -242,3 +242,29 @@ All 🧑. Code is ready; these are credentials. Grouped for a single procurement
 
 > When you're ready, tell me to start on step 2 — it's roughly a dozen scoped PRs I can begin
 > immediately, none of which depend on the §0 decision or any vendor contract.
+
+---
+
+## Appendix — Dependency vulnerability remediation status (npm audit)
+
+Progress on the `npm audit` findings that Dependabot also reports. The
+`--audit-level=high` CI gate is the launch-blocking one; moderates are
+tracked but do not gate.
+
+**High — all cleared (0 remaining).**
+- `form-data`, `multer`, `nodemailer`, `undici`, `ws` (+`hasown`) — resolved via root `overrides` (PR #216).
+
+**Moderate — fixed:**
+- `dompurify` → 3.4.11 — cleared 8 DOMPurify advisories (PR #217).
+- `postcss` → 8.5.16 (+`nanoid` 3.3.15) — safe minor bump, all consumers accept `^8.x`.
+
+**Moderate — assessed and DEFERRED to a Dependabot PR (CI-validated), with rationale.**
+Each is **not reachable in our usage** and each fix forces a **breaking major bump** on tightly-coupled or dev-only dependencies that cannot be responsibly verified without the full web-build / iOS-build / OTel-runtime that only CI exercises. Forcing them via a hand-patched lockfile is higher risk than value; let Dependabot open the PR and let full CI validate the upgrade.
+
+| Advisory | Why not reachable for us | Why deferred (fix risk) |
+|---|---|---|
+| `uuid` — missing buffer bounds check in v3/v5/v6 when `buf` is provided | Our consumers (`gaxios`/`google-gax`/`teeny-request`, `firebase-admin`, `xcode`) use `uuid.v4` only, no `buf` | Forces `uuid` 7/9 → 11 (major) on Google-Cloud libs and the iOS `xcode` build tool |
+| `js-yaml` — quadratic-complexity DoS via merge keys in untrusted YAML | We only parse our **own** swagger / eslint / config YAML (trusted) | 3.x consumers (`istanbul`, `cosmiconfig@3`) have no 3.x fix; forcing → 4.x/5.x removes `safeLoad`/`safeDump` and can break build/test tooling |
+| `@opentelemetry/core` — unbounded memory in W3C Baggage propagation | Requires attacker-controlled Baggage headers; low-severity moderate | `core` is version-locked to the whole `@opentelemetry/*` set (2.2.0/2.7.0); a piecemeal bump to 2.8.0 risks runtime version mismatch — needs a coordinated bump of the entire OTel set |
+
+Recommendation: enable Dependabot version-update PRs for these three so the upgrade lands with full CI (web build + e2e + OTel runtime) as the gate.
