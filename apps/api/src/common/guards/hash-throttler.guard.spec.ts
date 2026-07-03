@@ -1,4 +1,56 @@
+import { ServiceUnavailableException } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { HashThrottlerGuard } from './hash-throttler.guard';
+
+describe('HashThrottlerGuard.canActivate — fail-closed on Redis outage', () => {
+  const ctx = {
+    getHandler: () => () => undefined,
+    getClass: () => class {},
+  } as never;
+
+  function makeGuard(opts: { marked: boolean; backendUp: boolean }) {
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue(opts.marked),
+    };
+    const storage = {
+      isBackendAvailable: jest.fn().mockReturnValue(opts.backendUp),
+    };
+    return new HashThrottlerGuard(
+      {} as never,
+      storage as never,
+      reflector as never,
+    );
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('returns 503 on a @FailClosedThrottle route when Redis is down', async () => {
+    const guard = makeGuard({ marked: true, backendUp: false });
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+  });
+
+  it('delegates to the normal limiter on a marked route when Redis is up', async () => {
+    const superSpy = jest
+      .spyOn(ThrottlerGuard.prototype, 'canActivate')
+      .mockResolvedValue(true);
+    const guard = makeGuard({ marked: true, backendUp: true });
+
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(superSpy).toHaveBeenCalled();
+  });
+
+  it('fails OPEN on an unmarked (browse) route even when Redis is down', async () => {
+    const superSpy = jest
+      .spyOn(ThrottlerGuard.prototype, 'canActivate')
+      .mockResolvedValue(true);
+    const guard = makeGuard({ marked: false, backendUp: false });
+
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(superSpy).toHaveBeenCalled();
+  });
+});
 
 describe('HashThrottlerGuard.getTracker', () => {
   // getTracker() is a protected method; expose it via a tiny subclass

@@ -142,10 +142,20 @@ export class FraudService {
         reason: rule.description,
       };
     } catch (err) {
-      this.logger.warn(
-        `evaluatePayout failed for ${userId}: ${String(err).slice(0, 200)}`,
+      // Fail CLOSED for payouts. Everywhere else an evaluator error falls
+      // back to ALLOW (a browse/upload proceeding is harmless), but a
+      // payout moves money OUT. If the drain check can't run — a DB hiccup,
+      // Redis blip — we must not auto-approve: an attacker draining a
+      // compromised account would love the fraud engine to be down. BLOCK
+      // routes the seller to support (manual review) instead of waving the
+      // withdrawal through. A transient error just means "try again".
+      this.logger.error(
+        `evaluatePayout failed for ${userId} — failing closed (BLOCK): ${String(err).slice(0, 200)}`,
       );
-      return { action: 'ALLOW' };
+      return {
+        action: 'BLOCK',
+        reason: 'Fraud evaluation unavailable — payout held for review',
+      };
     }
   }
 

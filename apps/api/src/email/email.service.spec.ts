@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from './email.service';
+import { MetricsService } from '../metrics/metrics.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+
+const mockMetrics = { emailSendFailed: { inc: jest.fn() } };
+const mockAuditLog = { record: jest.fn().mockResolvedValue(undefined) };
 
 const mockSendMail = jest.fn();
 const mockCreateTransport = jest.fn().mockReturnValue({
@@ -21,6 +26,8 @@ describe('EmailService', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           EmailService,
+          { provide: MetricsService, useValue: mockMetrics },
+          { provide: AuditLogService, useValue: mockAuditLog },
           {
             provide: ConfigService,
             useValue: {
@@ -102,6 +109,8 @@ describe('EmailService', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           EmailService,
+          { provide: MetricsService, useValue: mockMetrics },
+          { provide: AuditLogService, useValue: mockAuditLog },
           {
             provide: ConfigService,
             useValue: {
@@ -204,12 +213,22 @@ describe('EmailService', () => {
       );
     });
 
-    it('should not throw when sendMail fails', async () => {
+    it('should not throw when sendMail fails — but records a metric + audit row', async () => {
       mockSendMail.mockRejectedValue(new Error('SMTP connection failed'));
 
       await expect(
         service.sendWelcomeEmail('test@example.com', 'Maria'),
       ).resolves.toBeUndefined();
+
+      // A swallowed send is otherwise invisible; these are the only signal.
+      expect(mockMetrics.emailSendFailed.inc).toHaveBeenCalled();
+      expect(mockAuditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'email.send_failed',
+          targetType: 'email',
+          targetId: 'test@example.com',
+        }),
+      );
     });
 
     it('should escape HTML in user-provided content', async () => {

@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { MeiliSearch } from 'meilisearch';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface SearchFilters {
   categoryId?: string;
@@ -36,7 +38,10 @@ export class SearchService implements OnModuleInit {
   private readonly indexName = 'listings';
   private readonly apiKey: string;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
     const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
     const configuredHost = this.configService.get<string>('MEILISEARCH_HOST', '');
     // Only fall back to localhost in non-production. Production must set this.
@@ -182,19 +187,145 @@ export class SearchService implements OnModuleInit {
 
     const offset = (page - 1) * pageSize;
 
-    const result = await index.search(query || '', {
-      filter: filterString,
-      sort: sortOption,
-      offset,
-      limit: pageSize,
-    });
+    try {
+      const result = await index.search(query || '', {
+        filter: filterString,
+        sort: sortOption,
+        offset,
+        limit: pageSize,
+      });
+
+      return {
+        hits: result.hits,
+        total: result.estimatedTotalHits ?? 0,
+        page,
+        pageSize,
+        hasMore: offset + result.hits.length < (result.estimatedTotalHits ?? 0),
+      };
+    } catch (err) {
+      // Meilisearch is down / unreachable. Rather than 500 the core browse
+      // path, degrade to a Postgres title/description search: worse
+      // relevance and no typo-tolerance, but the catalogue stays browsable.
+      this.logger.error(
+        `Meilisearch search failed — falling back to Postgres: ${this.redactApiKey(err)}`,
+      );
+      return this.postgresFallbackSearch(query, filters, sort, page, pageSize);
+    }
+  }
+
+  /**
+   * Degraded search path used when Meilisearch is unavailable. Applies the
+   * same filters against Postgres with a case-insensitive ILIKE on title +
+   * description, and returns hits in the SAME shape as the indexed
+   * documents (see listings.service.syncSearchIndex) so callers don't have
+   * to branch on which backend answered.
+   */
+  private async postgresFallbackSearch(
+    query: string,
+    filters: SearchFilters,
+    sort: string,
+    page: number,
+    pageSize: number,
+  ) {
+    const where: Prisma.ListingWhereInput = { status: 'ACTIVE' };
+
+    if (query && query.trim()) {
+      where.OR = [
+        { title: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
+      ];
+    }
+    if (
+      filters.categoryId &&
+      (UUID_RE.test(filters.categoryId) || CUID_RE.test(filters.categoryId))
+    ) {
+      where.categoryId = filters.categoryId;
+    }
+    if (
+      filters.brandId &&
+      (UUID_RE.test(filters.brandId) || CUID_RE.test(filters.brandId))
+    ) {
+      where.brandId = filters.brandId;
+    }
+    if (filters.condition && ALLOWED_CONDITIONS.has(filters.condition)) {
+      where.condition = filters.condition as Prisma.ListingWhereInput['condition'];
+    }
+    if (filters.size && ALLOWED_SIZES.has(filters.size.toUpperCase())) {
+      where.size = filters.size.toUpperCase();
+    }
+    if (filters.color && SAFE_TEXT_RE.test(filters.color)) {
+      where.color = filters.color;
+    }
+    const priceFilter: Prisma.DecimalFilter = {};
+    if (
+      filters.minPrice !== undefined &&
+      Number.isFinite(filters.minPrice) &&
+      filters.minPrice >= 0
+    ) {
+      priceFilter.gte = filters.minPrice;
+    }
+    if (
+      filters.maxPrice !== undefined &&
+      Number.isFinite(filters.maxPrice) &&
+      filters.maxPrice >= 0
+    ) {
+      priceFilter.lte = filters.maxPrice;
+    }
+    if (priceFilter.gte !== undefined || priceFilter.lte !== undefined) {
+      where.priceBrl = priceFilter;
+    }
+
+    const orderByMap: Record<string, Prisma.ListingOrderByWithRelationInput> = {
+      newest: { createdAt: 'desc' },
+      oldest: { createdAt: 'asc' },
+      price_asc: { priceBrl: 'asc' },
+      price_desc: { priceBrl: 'desc' },
+      popular: { viewCount: 'desc' },
+    };
+    const orderBy = orderByMap[sort] ?? { createdAt: 'desc' };
+
+    const offset = (page - 1) * pageSize;
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.listing.findMany({
+        where,
+        orderBy,
+        skip: offset,
+        take: pageSize,
+        include: {
+          images: { orderBy: { position: 'asc' }, take: 1 },
+          category: { select: { namePt: true } },
+          brand: { select: { name: true } },
+        },
+      }),
+      this.prisma.listing.count({ where }),
+    ]);
+
+    const hits = rows.map((l) => ({
+      id: l.id,
+      title: l.title,
+      description: l.description,
+      sellerId: l.sellerId,
+      categoryId: l.categoryId,
+      brandId: l.brandId ?? null,
+      category: l.category?.namePt ?? null,
+      brand: l.brand?.name ?? null,
+      condition: l.condition,
+      size: l.size ?? null,
+      color: l.color ?? null,
+      priceBrl: Number(l.priceBrl),
+      status: l.status,
+      viewCount: l.viewCount,
+      imageUrl: l.images[0]?.url ?? null,
+      createdAt: l.createdAt.getTime(),
+    }));
 
     return {
-      hits: result.hits,
-      total: result.estimatedTotalHits ?? 0,
+      hits,
+      total,
       page,
       pageSize,
-      hasMore: offset + result.hits.length < (result.estimatedTotalHits ?? 0),
+      hasMore: offset + hits.length < total,
     };
   }
 }

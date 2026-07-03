@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
+import { FailClosedThrottle } from '../common/throttler/fail-closed-throttle.decorator';
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
@@ -109,6 +110,7 @@ export class AuthController {
   }
 
   @Post('register')
+  @FailClosedThrottle()
   @UseGuards(CaptchaGuard)
   @ApiOperation({
     summary: 'Cadastrar novo usuário',
@@ -134,6 +136,7 @@ export class AuthController {
 
   @Post('login')
   @Throttle(LOGIN_THROTTLE)
+  @FailClosedThrottle()
   @UseGuards(CaptchaGuard)
   @ApiOperation({
     summary: 'Entrar na conta (retorna requiresTwoFa:true se 2FA ativo)',
@@ -400,6 +403,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @Throttle(PASSWORD_THROTTLE)
+  @FailClosedThrottle()
   @UseGuards(CaptchaGuard)
   @ApiOperation({
     summary: 'Solicitar redefinição de senha por email',
@@ -412,6 +416,7 @@ export class AuthController {
 
   @Post('reset-password')
   @Throttle(PASSWORD_THROTTLE)
+  @FailClosedThrottle()
   @ApiOperation({ summary: 'Redefinir senha com token recebido por email' })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);
