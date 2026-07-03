@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from './orders.service';
 import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
+import { MercadoPagoClient } from '../payments/mercadopago.client';
 import { SHIPPING_DEADLINE_DAYS, RETURN_INSPECTION_DAYS } from '@vintage/shared';
 import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
@@ -40,6 +41,7 @@ export class OrdersCronService {
     private readonly ordersService: OrdersService,
     private readonly cronLock: CronLockService,
     private readonly listings: ListingsService,
+    private readonly mercadoPago: MercadoPagoClient,
   ) {}
 
   /**
@@ -149,6 +151,27 @@ export class OrdersCronService {
         const itemAmount = Number(order.itemPriceBrl);
         const refundAmount = Number(order.totalBrl);
 
+        // Prefer refunding to the original payment method — CDC / Decreto
+        // 7.962 expect the money back, not store credit imposed on the
+        // buyer. The MP refund runs BEFORE (and outside) the transaction
+        // because it is network I/O, and it is idempotent: refundPayment
+        // keys on refund:<paymentId>:<amount>, so if the transaction below
+        // fails and the order is retried next tick, MP dedups to a single
+        // refund rather than paying the buyer twice. Any failure (rate
+        // limit, MP down, no paymentId) falls through to the wallet-credit
+        // path so the buyer is always made whole.
+        let refundedToSource = false;
+        if (order.paymentId) {
+          try {
+            await this.mercadoPago.refundPayment(order.paymentId, refundAmount);
+            refundedToSource = true;
+          } catch (refundErr) {
+            this.logger.warn(
+              `Source refund failed for order ${order.id}; falling back to wallet credit: ${String(refundErr).slice(0, 200)}`,
+            );
+          }
+        }
+
         await this.prisma.$transaction(async (tx) => {
           // Conditional cancel: only flip PAID→CANCELLED. updateMany
           // returns the affected-row count; zero means the order left
@@ -163,7 +186,12 @@ export class OrdersCronService {
           // and the outer catch swallows it silently.
           const res = await tx.order.updateMany({
             where: { id: order.id, status: 'PAID', shippedAt: null },
-            data: { status: 'CANCELLED' },
+            data: {
+              status: 'CANCELLED',
+              refundMethod: refundedToSource
+                ? 'ORIGINAL_PAYMENT'
+                : 'WALLET_CREDIT',
+            },
           });
           if (res.count === 0) {
             throw new OrderStateRaceSignal(order.id);
@@ -191,27 +219,31 @@ export class OrdersCronService {
             });
           }
 
-          // Refund buyer (store credit)
-          const buyerWallet = await tx.wallet.upsert({
-            where: { userId: order.buyerId },
-            create: { userId: order.buyerId, balanceBrl: 0, pendingBrl: 0 },
-            update: {},
-          });
+          // Buyer refund. If the money already went back to the original
+          // payment method above, do NOT also credit the wallet — that
+          // would double-refund. Wallet credit is the fallback only.
+          if (!refundedToSource) {
+            const buyerWallet = await tx.wallet.upsert({
+              where: { userId: order.buyerId },
+              create: { userId: order.buyerId, balanceBrl: 0, pendingBrl: 0 },
+              update: {},
+            });
 
-          await tx.wallet.update({
-            where: { id: buyerWallet.id },
-            data: { balanceBrl: { increment: refundAmount } },
-          });
+            await tx.wallet.update({
+              where: { id: buyerWallet.id },
+              data: { balanceBrl: { increment: refundAmount } },
+            });
 
-          await tx.walletTransaction.create({
-            data: {
-              walletId: buyerWallet.id,
-              type: 'REFUND',
-              amountBrl: new Decimal(refundAmount.toFixed(2)),
-              referenceId: order.id,
-              description: `Reembolso (vendedor não enviou): ${order.listing.title}`,
-            },
-          });
+            await tx.walletTransaction.create({
+              data: {
+                walletId: buyerWallet.id,
+                type: 'REFUND',
+                amountBrl: new Decimal(refundAmount.toFixed(2)),
+                referenceId: order.id,
+                description: `Reembolso em carteira (vendedor não enviou): ${order.listing.title}`,
+              },
+            });
+          }
 
           // Re-activate the listing so it can be sold again
           await tx.listing.update({
@@ -231,7 +263,11 @@ export class OrdersCronService {
           warnAndSwallow(this.logger, 'orders-cron.search-sync'),
         );
 
-        this.logger.log(`Auto-cancelled order ${order.id} — buyer refunded R$${refundAmount.toFixed(2)}`);
+        this.logger.log(
+          `Auto-cancelled order ${order.id} — buyer refunded R$${refundAmount.toFixed(2)} via ${
+            refundedToSource ? 'original payment method' : 'wallet credit'
+          }`,
+        );
       } catch (err) {
         if (err instanceof OrderStateRaceSignal) {
           // Expected race — seller shipped or another instance

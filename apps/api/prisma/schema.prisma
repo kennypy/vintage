@@ -324,6 +324,9 @@ model Order {
   couponId              String?
   paymentMethod         PaymentMethod
   paymentId             String?
+  // Set by autoCancelUnshippedOrders: how the buyer was reimbursed
+  // (original payment method vs. wallet-credit fallback). Null otherwise.
+  refundMethod          RefundMethod?
   shippingLabelUrl      String?
   trackingCode          String?
   carrier               Carrier?
@@ -411,6 +414,15 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   CANCELLED
+}
+
+// How the buyer was reimbursed when an order was auto-cancelled. We prefer
+// refunding to the original payment method (CDC / Decreto 7.962 expect the
+// money back, not store credit imposed unilaterally) and fall back to wallet
+// credit only when the provider refund fails. Null until a refund path runs.
+enum RefundMethod {
+  ORIGINAL_PAYMENT
+  WALLET_CREDIT
 }
 
 // --- Returns ---

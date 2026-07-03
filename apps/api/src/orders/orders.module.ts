@@ -8,6 +8,7 @@ import { FraudModule } from '../fraud/fraud.module';
 import { ReturnsModule } from '../returns/returns.module';
 import { ReferralsModule } from '../referrals/referrals.module';
 import { SmsModule } from '../sms/sms.module';
+import { PaymentsModule } from '../payments/payments.module';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { OrdersCronService } from './orders-cron.service';
@@ -24,6 +25,8 @@ import { TrackingPollerService } from './tracking-poller.service';
     ReturnsModule,
     ReferralsModule,
     SmsModule,
+    // For autoCancelUnshippedOrders refund-to-original-method (via MercadoPagoClient).
+    PaymentsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, OrdersCronService, TrackingPollerService],
