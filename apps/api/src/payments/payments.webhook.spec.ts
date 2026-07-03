@@ -21,6 +21,9 @@ const mockMercadoPago = {
 const mockPrisma: Record<string, any> = {
   order: {
     update: jest.fn(),
+    // Settlement flips PENDING→PAID via a conditional updateMany; count>=1
+    // means we won the race. Default to the happy path.
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findFirst: jest.fn().mockResolvedValue(null),
     findUnique: jest.fn(),
   },
@@ -325,8 +328,9 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       await expect(
         service.handleWebhook(rawOf(body), body, 'valid-sig'),
       ).resolves.toEqual({ received: true });
-      // Critical: the loser's wallet / order writes must NOT hit the DB.
-      expect(mockPrisma.order.update).not.toHaveBeenCalled();
+      // Critical: the loser aborts at the processedWebhook insert, so the
+      // conditional order flip and the wallet writes must NOT hit the DB.
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
       expect(mockPrisma.walletTransaction.create).not.toHaveBeenCalled();
     });
@@ -347,12 +351,12 @@ describe('PaymentsService — Webhook Signature Verification', () => {
         listing: { title: 'Jaqueta' },
       });
       mockPrisma.wallet.upsert.mockResolvedValue({ id: 'wallet-1' });
-      // Simulate a transient DB failure on the order.update step. In
-      // production, this rolls back the entire $transaction, INCLUDING
-      // the processedWebhook.create — so MP's next retry sees no dedup
-      // row and re-processes cleanly. The test mock's $transaction
+      // Simulate a transient DB failure on the conditional PENDING→PAID
+      // flip. In production, this rolls back the entire $transaction,
+      // INCLUDING the processedWebhook.create — so MP's next retry sees no
+      // dedup row and re-processes cleanly. The test mock's $transaction
       // implementation re-throws, which is what we assert.
-      mockPrisma.order.update.mockRejectedValueOnce(new Error('connection reset'));
+      mockPrisma.order.updateMany.mockRejectedValueOnce(new Error('connection reset'));
       const body = { id: 'delivery-xyz', action: 'payment.updated', data: { id: 'pay-3' } };
 
       await expect(
@@ -371,7 +375,7 @@ describe('PaymentsService — Webhook Signature Verification', () => {
       // Dedup row written (so MP doesn't retry forever).
       expect(mockPrisma.processedWebhook.create).toHaveBeenCalled();
       // But no order or wallet activity.
-      expect(mockPrisma.order.update).not.toHaveBeenCalled();
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.wallet.update).not.toHaveBeenCalled();
     });
 
@@ -399,6 +403,69 @@ describe('PaymentsService — Webhook Signature Verification', () => {
           action: 'something.else',
         }),
       });
+    });
+  });
+
+  // Reconciliation entry point used by the lost-webhook poller. Reuses the
+  // same settlement path as the webhook, keyed on a `poller:` delivery id.
+  describe('reconcilePayment (lost-webhook recovery)', () => {
+    let service: PaymentsService;
+
+    beforeEach(async () => {
+      jest.clearAllMocks();
+      mockPrisma.processedWebhook.create.mockResolvedValue({});
+      mockPrisma.processedWebhook.findUnique.mockResolvedValue(null);
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockPrisma));
+      service = await createService('production');
+    });
+
+    it('settles an approved payment through the shared settlement path', async () => {
+      mockMercadoPago.getPaymentStatus.mockResolvedValue({
+        status: 'approved',
+        transaction_amount: 100,
+      });
+      mockPrisma.order.findFirst.mockResolvedValue({
+        id: 'order-9',
+        sellerId: 'seller-9',
+        buyerId: 'buyer-9',
+        status: 'PENDING',
+        totalBrl: 100,
+        itemPriceBrl: 80,
+        listing: { title: 'Bota' },
+      });
+      mockPrisma.wallet.upsert.mockResolvedValue({ id: 'wallet-9' });
+
+      const outcome = await service.reconcilePayment('mp-9');
+
+      expect(outcome).toBe('approved');
+      // Settled via the conditional flip, and the dedup row is keyed on the
+      // deterministic poller delivery id.
+      expect(mockPrisma.order.updateMany).toHaveBeenCalledWith({
+        where: { id: 'order-9', status: 'PENDING' },
+        data: { status: 'PAID' },
+      });
+      expect(mockPrisma.processedWebhook.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ externalEventId: 'poller:mp-9' }),
+      });
+    });
+
+    it('reports a terminally-rejected payment as failed without settling', async () => {
+      mockMercadoPago.getPaymentStatus.mockResolvedValue({ status: 'rejected' });
+
+      const outcome = await service.reconcilePayment('mp-10');
+
+      expect(outcome).toBe('failed');
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reports a still-in-flight payment as pending', async () => {
+      mockMercadoPago.getPaymentStatus.mockResolvedValue({ status: 'in_process' });
+
+      const outcome = await service.reconcilePayment('mp-11');
+
+      expect(outcome).toBe('pending');
+      expect(mockPrisma.order.updateMany).not.toHaveBeenCalled();
     });
   });
 });

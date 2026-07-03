@@ -23,6 +23,20 @@ import { FraudService } from '../fraud/fraud.service';
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
 
 /**
+ * Mercado Pago payment statuses that are terminal failures — once a
+ * payment reaches one of these it will never become approved, so the
+ * reconciliation poller can safely mark our Payment row FAILED. Note
+ * `in_process` / `authorized` / `pending` are NOT here: they are still
+ * in flight and must be left for a later reconciliation tick.
+ */
+const TERMINAL_FAILURE_STATUSES = new Set([
+  'rejected',
+  'cancelled',
+  'refunded',
+  'charged_back',
+]);
+
+/**
  * Sentinel thrown from inside the outbox $transaction when Prisma
  * returns P2002 on the ProcessedWebhook insert — i.e. MP has
  * redelivered an event we already processed. Throwing it rolls back
@@ -630,10 +644,21 @@ export class PaymentsService {
           throw err;
         }
 
-        await tx.order.update({
-          where: { id: order.id },
+        // Conditional flip: only PENDING→PAID. A concurrent settlement —
+        // a duplicate webhook delivery with a different delivery id, or
+        // the reconciliation poller (processApprovedPayment reused with a
+        // `poller:` delivery id) — may have flipped this order out of
+        // PENDING between the findFirst above and this write. count===0
+        // means we lost that race; throw the duplicate sentinel to roll
+        // the whole transaction back (our ProcessedWebhook insert AND the
+        // wallet credit below) so escrow is never opened twice.
+        const flipped = await tx.order.updateMany({
+          where: { id: order.id, status: 'PENDING' },
           data: { status: 'PAID' },
         });
+        if (flipped.count === 0) {
+          throw new DuplicateWebhookSignal(deliveryId);
+        }
 
         // Mark the matching Payment row SUCCEEDED. We resolve by
         // providerPaymentId rather than by attemptNumber so the mark
@@ -726,5 +751,43 @@ export class PaymentsService {
   async refundPayment(paymentId: string, amountBrl?: number) {
     this.logger.log(`Refunding payment ${paymentId}`);
     return this.mercadoPago.refundPayment(paymentId, amountBrl);
+  }
+
+  /**
+   * Reconciliation entry point for the lost-webhook poller
+   * (PaymentsReconciliationCron). Fetches the live Mercado Pago status
+   * for a provider payment id and, when approved, runs the EXACT same
+   * settlement path a `payment.updated` webhook would — reusing the
+   * transactional ProcessedWebhook dedup and the conditional PENDING→PAID
+   * flip so a delayed webhook and the poller can never double-settle.
+   *
+   * Returns the resolved disposition so the cron can flip the Payment row
+   * for terminal failures ('failed') while leaving still-in-flight
+   * payments ('pending') for a later tick.
+   */
+  async reconcilePayment(
+    paymentId: string,
+  ): Promise<'approved' | 'failed' | 'pending'> {
+    const status = await this.mercadoPago.getPaymentStatus(paymentId);
+
+    if (status.status === 'approved') {
+      // `poller:<id>` is a deterministic delivery id: a second poll of the
+      // same payment hits P2002 on the ProcessedWebhook insert (swallowed
+      // as a duplicate), and a real webhook keeps its own delivery id, so
+      // whichever settles first wins the conditional order flip.
+      await this.processApprovedPayment(
+        `poller:${paymentId}`,
+        'reconcile',
+        paymentId,
+        status,
+      );
+      return 'approved';
+    }
+
+    if (TERMINAL_FAILURE_STATUSES.has(status.status)) {
+      return 'failed';
+    }
+
+    return 'pending';
   }
 }

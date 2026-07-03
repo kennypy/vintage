@@ -6,11 +6,12 @@ import { FraudModule } from '../fraud/fraud.module';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { MercadoPagoClient } from './mercadopago.client';
+import { PaymentsReconciliationCron } from './payments-reconciliation.cron';
 
 @Module({
   imports: [ConfigModule, PrismaModule, NotificationsModule, FraudModule],
   controllers: [PaymentsController],
-  providers: [PaymentsService, MercadoPagoClient],
+  providers: [PaymentsService, MercadoPagoClient, PaymentsReconciliationCron],
   exports: [PaymentsService, MercadoPagoClient],
 })
 export class PaymentsModule {}
