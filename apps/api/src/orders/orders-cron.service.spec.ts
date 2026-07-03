@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from './orders.service';
 import { ListingsService } from '../listings/listings.service';
 import { CronLockService } from '../common/services/cron-lock.service';
+import { MercadoPagoClient } from '../payments/mercadopago.client';
 
 jest.mock('@vintage/shared', () => ({
   SHIPPING_DEADLINE_DAYS: 5,
@@ -29,6 +30,7 @@ describe('OrdersCronService', () => {
   let ordersService: { enterHold: jest.Mock; finalizeEscrow: jest.Mock };
   let listings: { syncSearchIndex: jest.Mock };
   let cronLock: { acquire: jest.Mock };
+  let mercadoPago: { refundPayment: jest.Mock };
 
   beforeEach(async () => {
     const txMethods = {
@@ -60,6 +62,9 @@ describe('OrdersCronService', () => {
     };
     listings = { syncSearchIndex: jest.fn().mockResolvedValue(undefined) };
     cronLock = { acquire: jest.fn().mockResolvedValue(true) };
+    mercadoPago = {
+      refundPayment: jest.fn().mockResolvedValue({ status: 'approved' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -68,6 +73,7 @@ describe('OrdersCronService', () => {
         { provide: OrdersService, useValue: ordersService },
         { provide: ListingsService, useValue: listings },
         { provide: CronLockService, useValue: cronLock },
+        { provide: MercadoPagoClient, useValue: mercadoPago },
       ],
     }).compile();
     service = module.get(OrdersCronService);
@@ -164,6 +170,63 @@ describe('OrdersCronService', () => {
       cronLock.acquire.mockResolvedValue(false);
       await service.autoCancelUnshippedOrders();
       expect(prisma.order.findMany).not.toHaveBeenCalled();
+    });
+
+    // Captures the data passed to the conditional order flip so we can
+    // assert which refund path was recorded.
+    function captureCancelData() {
+      const captured: { value?: Record<string, unknown> } = {};
+      prisma.$transaction.mockImplementation(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            order: {
+              updateMany: jest.fn(async (args: { data: Record<string, unknown> }) => {
+                captured.value = args.data;
+                return { count: 1 };
+              }),
+              update: jest.fn(),
+            },
+            wallet: {
+              findUnique: jest.fn().mockResolvedValue(null),
+              update: jest.fn(),
+              upsert: jest.fn().mockResolvedValue({ id: 'wB' }),
+            },
+            walletTransaction: { create: jest.fn() },
+            listing: { update: jest.fn() },
+            orderListingSnapshot: { deleteMany: jest.fn() },
+          }),
+      );
+      return captured;
+    }
+
+    it('refunds to the original payment method and records ORIGINAL_PAYMENT', async () => {
+      const withPayment = { ...stale, paymentId: 'mp-1' };
+      prisma.order.findMany.mockResolvedValue([withPayment]);
+      const captured = captureCancelData();
+
+      await service.autoCancelUnshippedOrders();
+
+      expect(mercadoPago.refundPayment).toHaveBeenCalledWith('mp-1', 110);
+      expect(captured.value?.status).toBe('CANCELLED');
+      expect(captured.value?.refundMethod).toBe('ORIGINAL_PAYMENT');
+    });
+
+    it('falls back to WALLET_CREDIT when the source refund fails', async () => {
+      const withPayment = { ...stale, paymentId: 'mp-2' };
+      prisma.order.findMany.mockResolvedValue([withPayment]);
+      mercadoPago.refundPayment.mockRejectedValueOnce(new Error('MP down'));
+      const captured = captureCancelData();
+
+      await service.autoCancelUnshippedOrders();
+
+      expect(mercadoPago.refundPayment).toHaveBeenCalledWith('mp-2', 110);
+      expect(captured.value?.refundMethod).toBe('WALLET_CREDIT');
+    });
+
+    it('skips the provider refund entirely when the order has no paymentId', async () => {
+      prisma.order.findMany.mockResolvedValue([stale]); // no paymentId
+      await service.autoCancelUnshippedOrders();
+      expect(mercadoPago.refundPayment).not.toHaveBeenCalled();
     });
   });
 
