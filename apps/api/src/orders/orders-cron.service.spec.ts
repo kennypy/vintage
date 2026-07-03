@@ -167,6 +167,54 @@ describe('OrdersCronService', () => {
     });
   });
 
+  describe('cancelStalePendingOrders', () => {
+    const dead = { id: 'o-pending', listingId: 'l9' };
+
+    it('cancels the order, reactivates the listing, and re-indexes it', async () => {
+      prisma.order.findMany.mockResolvedValue([dead]);
+
+      await service.cancelStalePendingOrders();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(listings.syncSearchIndex).toHaveBeenCalledWith('l9');
+    });
+
+    it('only targets PENDING orders with no in-flight or succeeded payment', async () => {
+      prisma.order.findMany.mockResolvedValue([]);
+
+      await service.cancelStalePendingOrders();
+
+      const where = prisma.order.findMany.mock.calls[0][0].where;
+      expect(where.status).toBe('PENDING');
+      expect(where.createdAt.lt).toBeInstanceOf(Date);
+      expect(where.payments).toEqual({
+        none: { status: { in: ['PENDING', 'SUCCEEDED'] } },
+      });
+    });
+
+    it('skips silently when the order left PENDING under us (late settlement race)', async () => {
+      prisma.order.findMany.mockResolvedValue([dead]);
+      prisma.$transaction.mockImplementationOnce(
+        async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            order: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn() },
+            listing: { update: jest.fn() },
+            orderListingSnapshot: { deleteMany: jest.fn() },
+          }),
+      );
+
+      await expect(service.cancelStalePendingOrders()).resolves.toBeUndefined();
+      // Race ⇒ the listing was NOT reactivated / re-indexed.
+      expect(listings.syncSearchIndex).not.toHaveBeenCalled();
+    });
+
+    it('respects the lock', async () => {
+      cronLock.acquire.mockResolvedValue(false);
+      await service.cancelStalePendingOrders();
+      expect(prisma.order.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('escalateStaleReturns', () => {
     const stale = {
       id: 'r1',
