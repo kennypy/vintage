@@ -12,6 +12,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { CronLockService } from '../common/services/cron-lock.service';
+import { ViaCepService } from './viacep.service';
 
 jest.mock('bcrypt');
 
@@ -62,6 +63,7 @@ const mockPrisma = {
 
 describe('UsersService', () => {
   let service: UsersService;
+  let viaCep: { lookup: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -99,10 +101,17 @@ describe('UsersService', () => {
             release: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: ViaCepService,
+          // Default: ViaCEP "down" (returns null) so address tests exercise
+          // the regex-only fallback path unless a test opts in.
+          useValue: { lookup: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
+    viaCep = module.get(ViaCepService);
   });
 
   describe('getProfile', () => {
@@ -517,6 +526,47 @@ describe('UsersService', () => {
           cpfChecksumValid: true,
         },
       });
+    });
+  });
+
+  describe('createAddress — ViaCEP cross-check', () => {
+    const dto = {
+      label: 'Casa',
+      street: 'Rua das Flores',
+      number: '123',
+      neighborhood: 'Centro',
+      city: 'São Paulo',
+      state: 'SP',
+      cep: '01310-000',
+    } as never;
+
+    it('creates the address when ViaCEP is down (regex-only fallback)', async () => {
+      viaCep.lookup.mockResolvedValue(null);
+      mockPrisma.address.count.mockResolvedValue(0);
+      mockPrisma.address.create.mockResolvedValue({ id: 'a1' });
+
+      await service.createAddress('user-1', dto);
+
+      expect(mockPrisma.address.create).toHaveBeenCalled();
+    });
+
+    it('rejects when the CEP belongs to a different state', async () => {
+      viaCep.lookup.mockResolvedValue({ city: 'Rio de Janeiro', state: 'RJ' });
+
+      await expect(service.createAddress('user-1', dto)).rejects.toThrow(
+        /estado RJ/,
+      );
+      expect(mockPrisma.address.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a city that matches after accent/case normalization', async () => {
+      viaCep.lookup.mockResolvedValue({ city: 'SÃO PAULO', state: 'SP' });
+      mockPrisma.address.count.mockResolvedValue(0);
+      mockPrisma.address.create.mockResolvedValue({ id: 'a2' });
+
+      await service.createAddress('user-1', dto);
+
+      expect(mockPrisma.address.create).toHaveBeenCalled();
     });
   });
 

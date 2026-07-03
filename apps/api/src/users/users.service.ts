@@ -17,6 +17,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 import { CronLockService } from '../common/services/cron-lock.service';
+import { ViaCepService } from './viacep.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
@@ -46,6 +47,7 @@ export class UsersService {
     private cpfVault: CpfVaultService,
     private notifications: NotificationsService,
     private cronLock: CronLockService,
+    private viaCep: ViaCepService,
   ) {}
 
   /** Full profile for the authenticated user — includes wallet balance and listing count. */
@@ -267,7 +269,41 @@ export class UsersService {
     });
   }
 
+  /**
+   * Validate that the CEP resolves (ViaCEP) and that the user-entered
+   * city/state actually match the postal code. A nonexistent CEP or a
+   * mismatched municipality is rejected before we persist an address that
+   * would later fail at label-generation time. If ViaCEP is unreachable we
+   * skip the cross-check (the DTO already enforced the NNNNN-NNN format) so
+   * a third-party outage can't block address creation.
+   */
+  private async assertCepMatchesLocation(
+    cep: string,
+    city: string,
+    state: string,
+  ): Promise<void> {
+    // Throws BadRequestException on erro:true; returns null when ViaCEP is down.
+    const geo = await this.viaCep.lookup(cep);
+    if (!geo) return;
+
+    if (geo.state.toUpperCase() !== state.toUpperCase()) {
+      throw new BadRequestException(
+        `O CEP informado pertence ao estado ${geo.state}, não ${state}.`,
+      );
+    }
+    if (
+      ViaCepService.normalizeCity(geo.city) !==
+      ViaCepService.normalizeCity(city)
+    ) {
+      throw new BadRequestException(
+        `O CEP informado pertence à cidade de ${geo.city}. Verifique a cidade informada.`,
+      );
+    }
+  }
+
   async createAddress(userId: string, dto: CreateAddressDto) {
+    await this.assertCepMatchesLocation(dto.cep, dto.city, dto.state);
+
     // If this is the first address or marked as default, unset other defaults
     if (dto.isDefault) {
       await this.prisma.address.updateMany({
