@@ -290,7 +290,8 @@ simultâneas).
      STALE_LISTING_DAYS="90" \
      PAUSED_CLEANUP_DAYS="180" \
      TRACKING_POLL_LOOKBACK_DAYS="30" \
-     TRACKING_POLL_BATCH_SIZE="200"
+     TRACKING_POLL_BATCH_SIZE="200" \
+     SHIPPED_STUCK_ESCALATION_DAYS="30"
    ```
 
    **CRM integration (kennypy/CRM — agent workspace)**

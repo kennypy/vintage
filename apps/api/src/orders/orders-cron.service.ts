@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Decimal } from '@prisma/client/runtime/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -36,13 +37,30 @@ const PENDING_PAYMENT_TIMEOUT_HOURS = 24;
 export class OrdersCronService {
   private readonly logger = new Logger(OrdersCronService.name);
 
+  /**
+   * A SHIPPED order older than this with no delivery confirmation is
+   * escalated to a dispute. Defaults to 30 days to match the tracking
+   * poller's lookback window (TRACKING_POLL_LOOKBACK_DAYS): past that the
+   * poller stops checking the carrier, so the order is orphaned — neither
+   * a carrier event nor buyer action will ever move it — and only a
+   * dispute gets a human involved. Keep this >= the poller lookback so we
+   * don't dispute orders that are merely slow but still being polled.
+   */
+  private readonly shippedStuckDays: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
     private readonly cronLock: CronLockService,
     private readonly listings: ListingsService,
     private readonly mercadoPago: MercadoPagoClient,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.shippedStuckDays = config.get<number>(
+      'SHIPPED_STUCK_ESCALATION_DAYS',
+      30,
+    );
+  }
 
   /**
    * Auto-confirm delivered orders whose dispute window has expired.
@@ -435,6 +453,87 @@ export class OrdersCronService {
       } catch (err) {
         this.logger.error(
           `Failed to escalate stale return ${ret.id}: ${String(err).slice(0, 200)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Auto-escalate shipments that have been SHIPPED past shippedStuckDays
+   * with no delivery confirmation. Once an order is older than the
+   * tracking poller's lookback window the poller stops checking the
+   * carrier, so nothing else will ever move it — the buyer paid, the item
+   * never arrived, and the order would otherwise sit in SHIPPED forever.
+   * We open a NOT_RECEIVED dispute on the buyer's behalf so ops can
+   * mediate (chase the carrier, refund, or confirm delivery).
+   * Runs every hour.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async escalateStuckShipments() {
+    if (!(await this.cronLock.acquire('orders:escalateStuckShipments'))) return;
+
+    const cutoff = new Date(
+      Date.now() - this.shippedStuckDays * 24 * 60 * 60 * 1000,
+    );
+
+    const stuck = await this.prisma.order.findMany({
+      where: {
+        status: 'SHIPPED',
+        shippedAt: { lt: cutoff },
+        // Skip orders that already have a dispute (orderId is unique on
+        // Dispute) — the buyer or another path already escalated.
+        dispute: { is: null },
+      },
+      select: { id: true, buyerId: true, trackingCode: true, carrier: true },
+    });
+
+    if (stuck.length === 0) return;
+
+    this.logger.log(
+      `Escalating ${stuck.length} stuck shipment(s) SHIPPED >${this.shippedStuckDays}d with no delivery`,
+    );
+
+    for (const order of stuck) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // Conditional claim: only escalate an order STILL in SHIPPED.
+          // count===0 means the tracking poller flipped it to DELIVERED (or
+          // another path moved it) between the findMany and here — skip so
+          // we never dispute an order that just arrived.
+          const claim = await tx.order.updateMany({
+            where: { id: order.id, status: 'SHIPPED' },
+            data: { status: 'DISPUTED' },
+          });
+          if (claim.count === 0) {
+            return;
+          }
+
+          // Guard the unique orderId even though the query filtered on
+          // dispute:null — a racing path could have opened one.
+          const existing = await tx.dispute.findUnique({
+            where: { orderId: order.id },
+          });
+          if (!existing) {
+            await tx.dispute.create({
+              data: {
+                orderId: order.id,
+                openedById: order.buyerId,
+                reason: 'NOT_RECEIVED',
+                description: `Encomenda enviada há mais de ${this.shippedStuckDays} dias sem confirmação de entrega (rastreio: ${
+                  order.trackingCode ?? 'n/d'
+                }${order.carrier ? `, ${order.carrier}` : ''}). Escalado automaticamente para mediação.`,
+                status: 'OPEN',
+              },
+            });
+          }
+        });
+
+        this.logger.log(
+          `Escalated stuck shipment for order ${order.id} to a dispute`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to escalate stuck shipment ${order.id}: ${String(err).slice(0, 200)}`,
         );
       }
     }
