@@ -53,6 +53,14 @@ import { CsrfMiddleware } from '../common/middleware/csrf.middleware';
     CaptchaGuard,
   ],
   controllers: [AuthController],
-  exports: [AuthService, CsrfMiddleware],
+  // JwtModule is re-exported so that AppModule (which imports AuthModule)
+  // can resolve JwtService when it applies CsrfMiddleware via
+  // consumer.apply() in its configure() hook. Without this, NestJS tries to
+  // construct CsrfMiddleware in AppModule's scope, fails to find JwtService,
+  // and the whole app crashes on boot ("Nest can't resolve dependencies of
+  // the CsrfMiddleware ... JwtService"). CSRF_SECRET is env-provided in both
+  // dev (dev-setup.mjs) and prod (hard-required), so the middleware instance
+  // AppModule builds shares the same secret as AuthController's.
+  exports: [AuthService, CsrfMiddleware, JwtModule],
 })
 export class AuthModule {}
