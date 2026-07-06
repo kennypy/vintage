@@ -119,6 +119,7 @@ const mockRedisService = {
 
 describe('AuthService', () => {
   let service: AuthService;
+  let cpfVault: { decrypt: jest.Mock };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -148,6 +149,7 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
+    cpfVault = module.get(CpfVaultService);
   });
 
   describe('register', () => {
@@ -324,6 +326,41 @@ describe('AuthService', () => {
       expect(typeof result.refreshToken).toBe('string');
       expect(result.refreshToken.length).toBeGreaterThanOrEqual(60);
       expect(result).toHaveProperty('user');
+    });
+
+    it('does NOT 500 when the CPF cannot be decrypted (key mismatch) — logs in with null cpf', async () => {
+      const mockUser = {
+        id: 'user-1',
+        passwordHash: 'hashed_password',
+        name: 'Test',
+        email: 'test@example.com',
+        cpfEncrypted: 'ENC(52998224725)',
+        cpfLookupHash: 'HASH(52998224725)',
+        avatarUrl: null,
+        createdAt: new Date(),
+        isBanned: false,
+        deletedAt: null,
+        twoFaEnabled: false,
+        acceptedTosAt: new Date(),
+        acceptedTosVersion: '1.0.0',
+        emailVerifiedAt: new Date(),
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      mockJwtService.sign.mockReturnValue('access-token');
+      // Simulate a CPF_ENCRYPTION_KEY mismatch — AES-GCM auth-tag failure.
+      cpfVault.decrypt.mockImplementationOnce(() => {
+        throw new Error('Unsupported state or unable to authenticate data');
+      });
+
+      const result = await service.login(loginDto);
+
+      if (!('accessToken' in result)) {
+        throw new Error('expected tokens branch, got 2FA-pending branch');
+      }
+      expect(result.accessToken).toBe('access-token');
+      // Login succeeds; the un-decryptable CPF degrades to null instead of 500.
+      expect((result.user as { cpf: string | null } | null)?.cpf).toBeNull();
     });
 
     it('should reject invalid password', async () => {

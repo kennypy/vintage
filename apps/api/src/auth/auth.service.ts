@@ -1983,8 +1983,32 @@ export class AuthService {
     // encrypted blob. CPF only leaves the server when the owner of
     // the account is reading it.
     const { cpfEncrypted, ...rest } = row ?? {};
-    const cpf = cpfEncrypted ? this.cpfVault.decrypt(cpfEncrypted) : null;
+    const cpf = this.decryptCpfForResponse(cpfEncrypted);
     return { ...tokens, user: row ? { ...rest, cpf } : null };
+  }
+
+  /**
+   * Decrypt a stored CPF for inclusion in an auth response (login /
+   * register / me). The CPF here is a DISPLAY field only — it is not used
+   * for any security decision — so a decryption failure must NOT 500 the
+   * whole login. That happens legitimately when the row was encrypted with
+   * a different CPF_ENCRYPTION_KEY (e.g. seed data after a key change, a
+   * half-finished key rotation, or an ephemeral dev key), which otherwise
+   * throws "Unsupported state or unable to authenticate data" from AES-GCM
+   * and locks the user out entirely. Degrade to a null CPF + a warning
+   * instead. Security-critical decrypt paths (Serpro/Caf identity checks,
+   * NF-e issuance) still call cpfVault.decrypt directly and surface errors.
+   */
+  private decryptCpfForResponse(cpfEncrypted: string | null | undefined): string | null {
+    if (!cpfEncrypted) return null;
+    try {
+      return this.cpfVault.decrypt(cpfEncrypted);
+    } catch (err) {
+      this.logger.warn(
+        `CPF decrypt failed for an auth response — returning null cpf (likely a CPF_ENCRYPTION_KEY mismatch; re-seed or check the key): ${String(err).slice(0, 120)}`,
+      );
+      return null;
+    }
   }
 
   /**
@@ -2026,9 +2050,7 @@ export class AuthService {
       },
     });
 
-    const cpf = user.cpfEncrypted
-      ? this.cpfVault.decrypt(user.cpfEncrypted)
-      : null;
+    const cpf = this.decryptCpfForResponse(user.cpfEncrypted);
     return {
       accessToken,
       refreshToken: rawRefresh,
