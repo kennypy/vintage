@@ -6,6 +6,23 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CpfVaultService } from '../common/services/cpf-vault.service';
 
 /**
+ * Per-table row cap. An LGPD export is supposed to be COMPLETE, so this
+ * sits far above any realistic account — it exists only so one
+ * pathological account cannot pull unbounded rows into the heap. When a
+ * cap is actually hit we say so in the receipt and log a warning,
+ * because silently truncating a portability export would itself be a
+ * compliance failure.
+ */
+const MAX_ROWS_PER_TABLE = 50_000;
+
+/**
+ * How long a built export may sit unconsumed before we tear it down.
+ * Without this an abandoned request (client hung up, proxy stalled)
+ * keeps every buffered chunk reachable for the life of the process.
+ */
+const EXPORT_IDLE_TIMEOUT_MS = 120_000;
+
+/**
  * LGPD Art. 18(V) — portability. Produces a machine-readable
  * dump of everything we hold about a user so they can move to a
  * different platform, or just audit what we've got.
@@ -122,9 +139,10 @@ export class DataExportService {
       fraudFlags,
       consentRecords,
     ] = await Promise.all([
-      this.prisma.address.findMany({ where: { userId } }),
+      this.prisma.address.findMany({ where: { userId }, take: MAX_ROWS_PER_TABLE }),
       this.prisma.listing.findMany({
         where: { sellerId: userId },
+        take: MAX_ROWS_PER_TABLE,
         include: {
           images: { select: { url: true, position: true } },
           category: { select: { slug: true, namePt: true } },
@@ -133,14 +151,17 @@ export class DataExportService {
       }),
       this.prisma.order.findMany({
         where: { buyerId: userId },
+        take: MAX_ROWS_PER_TABLE,
         include: { listingSnapshot: true },
       }),
       this.prisma.order.findMany({
         where: { sellerId: userId },
+        take: MAX_ROWS_PER_TABLE,
         include: { listingSnapshot: true },
       }),
       this.prisma.offer.findMany({
         where: { buyerId: userId },
+        take: MAX_ROWS_PER_TABLE,
         include: {
           listing: {
             select: { id: true, title: true, sellerId: true },
@@ -149,10 +170,12 @@ export class DataExportService {
       }),
       this.prisma.message.findMany({
         where: { senderId: userId },
+        take: MAX_ROWS_PER_TABLE,
         include: { conversation: { select: { id: true } } },
       }),
       this.prisma.payoutMethod.findMany({
         where: { userId },
+        take: MAX_ROWS_PER_TABLE,
         select: {
           id: true,
           type: true,
@@ -167,11 +190,11 @@ export class DataExportService {
           createdAt: true,
         },
       }),
-      this.prisma.dispute.findMany({ where: { openedById: userId } }),
-      this.prisma.notification.findMany({ where: { userId } }),
-      this.prisma.review.findMany({ where: { reviewerId: userId } }),
-      this.prisma.review.findMany({ where: { reviewedId: userId } }),
-      this.prisma.fraudFlag.findMany({ where: { userId } }),
+      this.prisma.dispute.findMany({ where: { openedById: userId }, take: MAX_ROWS_PER_TABLE }),
+      this.prisma.notification.findMany({ where: { userId }, take: MAX_ROWS_PER_TABLE }),
+      this.prisma.review.findMany({ where: { reviewerId: userId }, take: MAX_ROWS_PER_TABLE }),
+      this.prisma.review.findMany({ where: { reviewedId: userId }, take: MAX_ROWS_PER_TABLE }),
+      this.prisma.fraudFlag.findMany({ where: { userId }, take: MAX_ROWS_PER_TABLE }),
       // LGPD Art. 18(V) completeness: every consent grant / revocation
       // tied to this user. Pre-fix the export was silent about this,
       // meaning a user couldn't audit their own consent history. The
@@ -181,6 +204,7 @@ export class DataExportService {
       // device/session events they already hold.
       this.prisma.consentRecord.findMany({
         where: { userId },
+        take: MAX_ROWS_PER_TABLE,
         orderBy: { grantedAt: 'asc' },
       }),
     ]);
@@ -220,26 +244,42 @@ export class DataExportService {
       hash.update(`${name}:${json}\n`);
     }
 
+    const rowCounts = {
+      addresses: addresses.length,
+      listings: listings.length,
+      ordersAsBuyer: ordersBuyer.length,
+      ordersAsSeller: ordersSeller.length,
+      offers: offers.length,
+      messages: messages.length,
+      payoutMethods: payoutMethods.length,
+      disputes: disputesOpened.length,
+      notifications: notifications.length,
+      reviewsWritten: reviewsWritten.length,
+      reviewsReceived: reviewsReceived.length,
+      fraudFlags: fraudFlags.length,
+      consentRecords: consentRecords.length,
+    };
+
+    // A capped table means the export is INCOMPLETE. LGPD portability
+    // requires completeness, so this is disclosed on the receipt rather
+    // than swallowed, and flagged to ops to deliver the remainder.
+    const truncatedTables = Object.entries(rowCounts)
+      .filter(([, count]) => count >= MAX_ROWS_PER_TABLE)
+      .map(([table]) => table);
+    if (truncatedTables.length > 0) {
+      this.logger.warn(
+        `export for ${userId} hit the ${MAX_ROWS_PER_TABLE}-row cap on: ${truncatedTables.join(', ')} — deliver the remainder manually`,
+      );
+    }
+
     const receipt = {
       userId,
       requestedAt: new Date().toISOString(),
       sha256: hash.digest('hex'),
       schemaVersion: 1,
-      rowCounts: {
-        addresses: addresses.length,
-        listings: listings.length,
-        ordersAsBuyer: ordersBuyer.length,
-        ordersAsSeller: ordersSeller.length,
-        offers: offers.length,
-        messages: messages.length,
-        payoutMethods: payoutMethods.length,
-        disputes: disputesOpened.length,
-        notifications: notifications.length,
-        reviewsWritten: reviewsWritten.length,
-        reviewsReceived: reviewsReceived.length,
-        fraudFlags: fraudFlags.length,
-        consentRecords: consentRecords.length,
-      },
+      rowCounts,
+      maxRowsPerTable: MAX_ROWS_PER_TABLE,
+      truncatedTables,
       note:
         'Hash cobre os arquivos JSON exportados, concatenados na forma "nome:conteúdo\\n". ' +
         'Para verificar: gere SHA256 dos arquivos na mesma ordem e compare com o campo sha256.',
@@ -261,10 +301,38 @@ export class DataExportService {
       zip.append(json, { name });
     }
     zip.append(JSON.stringify(receipt, null, 2), { name: 'receipt.json' });
-    await zip.finalize();
+
+    // Tear down an export nobody consumes, so its buffers are released.
+    const idleTimer = setTimeout(() => {
+      this.logger.warn(
+        `export stream for ${userId} was never consumed within ${EXPORT_IDLE_TIMEOUT_MS}ms — destroying`,
+      );
+      stream.destroy(new Error('export stream timed out'));
+    }, EXPORT_IDLE_TIMEOUT_MS);
+    // Don't hold the event loop open on this timer alone.
+    idleTimer.unref();
+    const clearIdleTimer = () => clearTimeout(idleTimer);
+    stream.once('end', clearIdleTimer);
+    stream.once('close', clearIdleTimer);
+    stream.once('error', clearIdleTimer);
+
+    // Deliberately NOT awaited. archiver only drains as its consumer
+    // reads, and the consumer is the controller, which cannot pipe to
+    // the response until this function returns. Awaiting finalize()
+    // therefore deadlocks as soon as the output passes archiver's ~1 MB
+    // highWaterMark: nothing drains the PassThrough, `end` never fires,
+    // the promise never settles, and every buffer stays reachable. Kick
+    // finalization off and let the consumer drive the drain.
+    void zip.finalize().catch((err: unknown) => {
+      this.logger.error(
+        `export ZIP finalize failed for ${userId}: ${String(err).slice(0, 200)}`,
+      );
+      clearIdleTimer();
+      stream.destroy(err instanceof Error ? err : new Error(String(err)));
+    });
 
     this.logger.log(
-      `export ZIP built for ${userId}: ${receipt.rowCounts.ordersAsBuyer + receipt.rowCounts.ordersAsSeller} orders, ${receipt.rowCounts.listings} listings, sha256=${receipt.sha256.slice(0, 12)}…`,
+      `export ZIP started for ${userId}: ${rowCounts.ordersAsBuyer + rowCounts.ordersAsSeller} orders, ${rowCounts.listings} listings, sha256=${receipt.sha256.slice(0, 12)}…`,
     );
 
     return stream;
