@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Readable } from 'node:stream';
+import * as crypto from 'node:crypto';
 import * as unzipper from 'node:zlib';
 import { DataExportService, maskPixKey } from './data-export.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -97,9 +98,9 @@ describe('DataExportService', () => {
   it('queries every LGPD-portability table for the correct user', async () => {
     await service.buildExport('user-1');
 
-    expect(mockPrisma.address.findMany).toHaveBeenCalledWith({
-      where: { userId: 'user-1' },
-    });
+    expect(mockPrisma.address.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-1' } }),
+    );
     expect(mockPrisma.listing.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { sellerId: 'user-1' } }),
     );
@@ -113,10 +114,57 @@ describe('DataExportService', () => {
       }),
     );
     // Fraud flags raised against the user must be included for transparency.
-    expect(mockPrisma.fraudFlag.findMany).toHaveBeenCalledWith({
-      where: { userId: 'user-1' },
-    });
+    expect(mockPrisma.fraudFlag.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-1' } }),
+    );
   });
+
+  it('bounds every table read so one account cannot pull unbounded rows', async () => {
+    await service.buildExport('user-1');
+
+    const readers = [
+      mockPrisma.address.findMany,
+      mockPrisma.listing.findMany,
+      mockPrisma.order.findMany,
+      mockPrisma.offer.findMany,
+      mockPrisma.message.findMany,
+      mockPrisma.payoutMethod.findMany,
+      mockPrisma.dispute.findMany,
+      mockPrisma.notification.findMany,
+      mockPrisma.review.findMany,
+      mockPrisma.fraudFlag.findMany,
+      mockPrisma.consentRecord.findMany,
+    ];
+    for (const reader of readers) {
+      expect(reader).toHaveBeenCalled();
+      for (const call of reader.mock.calls) {
+        expect(call[0]).toEqual(
+          expect.objectContaining({ take: expect.any(Number) }),
+        );
+      }
+    }
+  });
+
+  it('resolves without a consumer even when the archive exceeds the highWaterMark', async () => {
+    // Incompressible bodies so zlib can't shrink the archive below
+    // archiver's ~1 MB highWaterMark. Pre-fix, `await zip.finalize()`
+    // never settled here: nothing drains the PassThrough until the
+    // controller pipes it, and the controller cannot pipe until
+    // buildExport returns. Jest's timeout is the deadlock detector.
+    const bulk = Array.from({ length: 500 }, (_, i) => ({
+      id: `msg-${i}`,
+      conversationId: 'conv-1',
+      body: crypto.randomBytes(4096).toString('hex'),
+    }));
+    mockPrisma.message.findMany.mockResolvedValueOnce(bulk);
+
+    const stream = await service.buildExport('user-1');
+    const buf = await drain(stream);
+
+    expect(buf.length).toBeGreaterThan(1_048_576);
+    expect(buf[0]).toBe(0x50); // 'P'
+    expect(buf[1]).toBe(0x4b); // 'K'
+  }, 60_000);
 
   // PIX key masking is the part that MUST stay correct under
   // regression. Unit-testing the pure helper is more valuable than

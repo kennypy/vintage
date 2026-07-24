@@ -19,7 +19,8 @@
     "noFallthroughCasesInSwitch": true,
     "strict": true,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "sharp": ["../../node_modules/sharp/dist/index.d.cts"]
     }
   },
   "include": ["src/**/*", "prisma/**/*", "scripts/**/*"],

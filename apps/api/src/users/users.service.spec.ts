@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Prisma } from '@prisma/client';
 import {
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +22,8 @@ const mockPrisma = {
   user: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
   },
@@ -56,10 +60,23 @@ const mockPrisma = {
   },
   follow: {
     upsert: jest.fn(),
+    create: jest.fn(),
     findUnique: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn(),
   },
 };
+
+// followUser uses the BATCH form ($transaction([...])) so the edge insert
+// and both counter updates commit together; unfollowUser uses the
+// CALLBACK form. Handle both by default — individual tests still override.
+mockPrisma.$transaction.mockImplementation((arg: unknown) => {
+  if (typeof arg === 'function') {
+    return (arg as (tx: typeof mockPrisma) => unknown)(mockPrisma);
+  }
+  if (Array.isArray(arg)) return Promise.all(arg);
+  return arg;
+});
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -230,25 +247,63 @@ describe('UsersService', () => {
   describe('followUser', () => {
     it('should create follow relationship', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2', name: 'Maria' });
-      // createdAt set to "just now" so the service's new-edge
-      // detection (Date.now() - createdAt < 1s) fires the notification.
-      mockPrisma.follow.upsert.mockResolvedValue({ createdAt: new Date() });
+      mockPrisma.follow.create.mockResolvedValue({ createdAt: new Date() });
       mockPrisma.user.update.mockResolvedValue({});
 
       const result = await service.followUser('user-1', 'user-2');
 
       expect(result).toEqual({ following: true });
-      expect(mockPrisma.follow.upsert).toHaveBeenCalledWith(
+      expect(mockPrisma.follow.create).toHaveBeenCalledWith({
+        data: { followerId: 'user-1', followingId: 'user-2' },
+      });
+      // Both counters move, in the same transaction as the insert.
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: {
-            followerId_followingId: {
-              followerId: 'user-1',
-              followingId: 'user-2',
-            },
-          },
-          create: { followerId: 'user-1', followingId: 'user-2' },
-          update: {},
+          where: { id: 'user-2' },
+          data: { followerCount: { increment: 1 } },
         }),
+      );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: { followingCount: { increment: 1 } },
+        }),
+      );
+    });
+
+    it('does NOT re-increment when the edge already exists', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2', name: 'Maria' });
+      // P2002 = unique violation on (followerId, followingId).
+      const dup = new Prisma.PrismaClientKnownRequestError(
+        'Unique constraint failed',
+        { code: 'P2002', clientVersion: 'test' },
+      );
+      mockPrisma.follow.create.mockRejectedValue(dup);
+
+      const result = await service.followUser('user-1', 'user-2');
+
+      // Idempotent: still reports following, and the counters cannot have
+      // moved — the insert and BOTH increments go out as ONE batch
+      // $transaction, so the unique violation rolls the whole thing back.
+      //
+      // Asserting on user.update call counts would test the mock rather
+      // than the code: building the array invokes the mocks eagerly,
+      // whereas real PrismaPromises are lazy and only execute inside the
+      // transaction. What matters is that all three ops are in one batch —
+      // the bug was two unconditional increments OUTSIDE any transaction.
+      expect(result).toEqual({ following: true });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      const batch = mockPrisma.$transaction.mock.calls[0][0];
+      expect(Array.isArray(batch)).toBe(true);
+      expect(batch).toHaveLength(3);
+    });
+
+    it('propagates non-P2002 failures instead of reporting success', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-2', name: 'Maria' });
+      mockPrisma.follow.create.mockRejectedValue(new Error('db down'));
+
+      await expect(service.followUser('user-1', 'user-2')).rejects.toThrow(
+        'db down',
       );
     });
 
@@ -272,26 +327,40 @@ describe('UsersService', () => {
 
   describe('unfollowUser', () => {
     it('should remove follow relationship', async () => {
-      mockPrisma.follow.findUnique.mockResolvedValue({
-        followerId: 'user-1',
-        followingId: 'user-2',
-      });
-      mockPrisma.follow.delete.mockResolvedValue({});
+      mockPrisma.follow.deleteMany.mockResolvedValue({ count: 1 });
       mockPrisma.user.update.mockResolvedValue({});
 
       const result = await service.unfollowUser('user-1', 'user-2');
 
       expect(result).toEqual({ following: false });
-      expect(mockPrisma.follow.delete).toHaveBeenCalled();
+      expect(mockPrisma.follow.deleteMany).toHaveBeenCalledWith({
+        where: { followerId: 'user-1', followingId: 'user-2' },
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { followerCount: { decrement: 1 } },
+        }),
+      );
     });
 
-    it('should return false if not following', async () => {
-      mockPrisma.follow.findUnique.mockResolvedValue(null);
+    it('does NOT decrement when no edge was removed', async () => {
+      // A concurrent unfollow already deleted it — only the call that
+      // actually removed the row may move the counters.
+      mockPrisma.follow.deleteMany.mockResolvedValue({ count: 0 });
 
       const result = await service.unfollowUser('user-1', 'user-2');
 
       expect(result).toEqual({ following: false });
-      expect(mockPrisma.follow.delete).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('should return false if not following', async () => {
+      mockPrisma.follow.deleteMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.unfollowUser('user-1', 'user-2');
+
+      expect(result).toEqual({ following: false });
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
     });
   });
 
@@ -664,6 +733,49 @@ describe('UsersService', () => {
       expect(mockPrisma.payoutMethod.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+    });
+  });
+
+  describe('listUsersAdmin — privacy-audit trail', () => {
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      mockPrisma.user.count.mockResolvedValue(0);
+      warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('escapes CR/LF so an admin cannot forge extra audit lines', async () => {
+      await service.listUsersAdmin(
+        1,
+        20,
+        'a@b\n[privacy-audit] admin victim-id ran email-substring lookup: ceo@',
+        'admin-1',
+      );
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const line = warnSpy.mock.calls[0][0] as string;
+      // One line, and the injected newline survives only as an escape.
+      expect(line).not.toContain('\n');
+      expect(line).toContain('\\n');
+      expect(line.startsWith('[privacy-audit] admin admin-1 ')).toBe(true);
+    });
+
+    it('logs the audit line for a genuine email lookup', async () => {
+      await service.listUsersAdmin(1, 20, 'ceo@vintage.br', 'admin-1');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('ceo@vintage.br');
+    });
+
+    it('does not log for a non-email search term', async () => {
+      await service.listUsersAdmin(1, 20, 'jaqueta', 'admin-1');
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });

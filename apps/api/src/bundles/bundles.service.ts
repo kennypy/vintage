@@ -4,8 +4,10 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListingsService } from '../listings/listings.service';
 import { CreateBundleDto } from './dto/create-bundle.dto';
@@ -216,88 +218,142 @@ export class BundlesService {
     const maxWeight = Math.max(...bundle.items.map((i) => i.listing.shippingWeightG));
     const combinedShippingCost = this.calculateShipping(maxWeight);
 
-    // Create orders in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Double-check all listings are still active
-      const freshListings = await tx.listing.findMany({
-        where: { id: { in: bundle.items.map((i) => i.listingId) } },
-      });
+    // Create orders in transaction.
+    //
+    // Running at Serializable means Postgres may abort this transaction
+    // with a serialization failure (SQLSTATE 40001) under genuine
+    // contention. Prisma surfaces that as P2034, which is NOT an
+    // HttpException — so GlobalExceptionFilter fell through to its
+    // unknown-error branch and the losing buyer got an opaque
+    // 500 "Internal server error" for what is really "someone else
+    // checked out first, try again". Mapped below to a retryable 409.
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        // Claim the bundle itself. The `bundle.status !== 'OPEN'` check
+        // above ran on an unlocked read, so one buyer double-clicking could
+        // check the same bundle out twice.
+        const claimedBundle = await tx.bundle.updateMany({
+          where: { id: bundleId, status: 'OPEN' },
+          data: { status: 'CHECKED_OUT' },
+        });
+        if (claimedBundle.count === 0) {
+          throw new ConflictException({
+            code: 'BUNDLE_ALREADY_CHECKED_OUT',
+            message: 'Este pacote já foi finalizado',
+          });
+        }
 
-      const stillNonActive = freshListings.filter((l) => l.status !== 'ACTIVE');
-      if (stillNonActive.length > 0) {
-        throw new BadRequestException('Um ou mais anúncios do pacote já foram vendidos');
-      }
+        // Claim each listing with a CONDITIONAL write rather than reading
+        // its status and trusting it. The previous read-then-write ran at
+        // the Postgres default (READ COMMITTED) with no row lock, so two
+        // buyers whose bundles shared a listing both observed ACTIVE and
+        // both proceeded — two orders, two snapshots, one physical garment,
+        // and no @@unique on Order.listingId to catch it.
+        for (const item of bundle.items) {
+          const claimedListing = await tx.listing.updateMany({
+            where: { id: item.listingId, status: 'ACTIVE' },
+            data: { status: 'SOLD' },
+          });
+          if (claimedListing.count === 0) {
+            // 409, not 400: the request was well-formed and was valid when
+            // the buyer built the bundle — someone else simply won the race.
+            // A machine-readable code lets clients react without
+            // string-matching Portuguese.
+            throw new ConflictException({
+              code: 'BUNDLE_ITEM_ALREADY_SOLD',
+              message: 'Um ou mais anúncios do pacote já foram vendidos',
+              listingId: item.listingId,
+            });
+          }
+        }
 
-      const shippingPerItem = combinedShippingCost / bundle.items.length;
-      const orders = [];
+        const shippingPerItem = combinedShippingCost / bundle.items.length;
+        const orders = [];
 
-      for (const item of bundle.items) {
-        const itemPrice = Number(item.listing.priceBrl);
-        const buyerProtectionFee =
-          BUYER_PROTECTION_FIXED_BRL + itemPrice * BUYER_PROTECTION_RATE;
-        const total = itemPrice + shippingPerItem + buyerProtectionFee;
+        for (const item of bundle.items) {
+          const itemPrice = Number(item.listing.priceBrl);
+          const buyerProtectionFee =
+            BUYER_PROTECTION_FIXED_BRL + itemPrice * BUYER_PROTECTION_RATE;
+          const total = itemPrice + shippingPerItem + buyerProtectionFee;
 
-        const order = await tx.order.create({
-          data: {
-            buyerId,
-            sellerId: bundle.sellerId,
-            listingId: item.listingId,
-            status: 'PENDING',
-            totalBrl: new Decimal(total.toFixed(2)),
-            itemPriceBrl: item.listing.priceBrl,
-            shippingCostBrl: new Decimal(shippingPerItem.toFixed(2)),
-            buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
-            paymentMethod: paymentMethod as any,
-            installments: 1,
-          },
-          include: {
-            listing: {
-              include: {
-                images: { orderBy: { position: 'asc' }, take: 1 },
+          const order = await tx.order.create({
+            data: {
+              buyerId,
+              sellerId: bundle.sellerId,
+              listingId: item.listingId,
+              status: 'PENDING',
+              totalBrl: new Decimal(total.toFixed(2)),
+              itemPriceBrl: item.listing.priceBrl,
+              shippingCostBrl: new Decimal(shippingPerItem.toFixed(2)),
+              buyerProtectionFeeBrl: new Decimal(buyerProtectionFee.toFixed(2)),
+              paymentMethod: paymentMethod as any,
+              installments: 1,
+            },
+            include: {
+              listing: {
+                include: {
+                  images: { orderBy: { position: 'asc' }, take: 1 },
+                },
               },
             },
-          },
-        });
+          });
 
-        await tx.listing.update({
-          where: { id: item.listingId },
-          data: { status: 'SOLD' },
-        });
+          // Listing was already claimed ACTIVE → SOLD above.
 
-        // Freeze the listing state onto the order (see OrderListingSnapshot
-        // in schema.prisma for the full rationale). `item.listing` was
-        // fetched above with images+category+brand+seller.name.
-        await tx.orderListingSnapshot.create({
-          data: {
-            orderId: order.id,
-            listingId: item.listing.id,
-            sellerId: item.listing.sellerId,
-            sellerName: item.listing.seller.name,
-            title: item.listing.title,
-            description: item.listing.description,
-            categoryId: item.listing.categoryId,
-            categoryName: item.listing.category.namePt,
-            brandId: item.listing.brandId,
-            brandName: item.listing.brand?.name ?? null,
-            condition: item.listing.condition,
-            size: item.listing.size,
-            color: item.listing.color,
-            priceBrl: item.listing.priceBrl,
-            shippingWeightG: item.listing.shippingWeightG,
-            imageUrls: item.listing.images.map((img) => img.url),
-          },
-        });
+          // Freeze the listing state onto the order (see OrderListingSnapshot
+          // in schema.prisma for the full rationale). `item.listing` was
+          // fetched above with images+category+brand+seller.name.
+          await tx.orderListingSnapshot.create({
+            data: {
+              orderId: order.id,
+              listingId: item.listing.id,
+              sellerId: item.listing.sellerId,
+              sellerName: item.listing.seller.name,
+              title: item.listing.title,
+              description: item.listing.description,
+              categoryId: item.listing.categoryId,
+              categoryName: item.listing.category.namePt,
+              brandId: item.listing.brandId,
+              brandName: item.listing.brand?.name ?? null,
+              condition: item.listing.condition,
+              size: item.listing.size,
+              color: item.listing.color,
+              priceBrl: item.listing.priceBrl,
+              shippingWeightG: item.listing.shippingWeightG,
+              imageUrls: item.listing.images.map((img) => img.url),
+            },
+          });
 
-        orders.push(order);
+          orders.push(order);
+        }
+
+        // Bundle was already claimed OPEN → CHECKED_OUT above.
+
+        return orders;
+      },
+      // Matches orders.service.ts's single-listing checkout. The
+      // conditional claims above are the primary defence; Serializable
+      // closes the remaining read-skew window on the snapshot writes.
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2034'
+      ) {
+        this.logger.warn(
+          `Bundle checkout ${bundleId} lost a serialization conflict — buyer may retry`,
+        );
+        throw new ConflictException({
+          code: 'CHECKOUT_CONFLICT_RETRY',
+          message:
+            'Não foi possível finalizar o pacote agora — outra compra ocorreu ao mesmo tempo. Tente novamente.',
+          retryable: true,
+        });
       }
-
-      await tx.bundle.update({
-        where: { id: bundleId },
-        data: { status: 'CHECKED_OUT' },
-      });
-
-      return orders;
-    });
+      throw err;
+    }
 
     // All bundled listings transitioned ACTIVE → SOLD; drop them from search.
     for (const item of bundle.items) {

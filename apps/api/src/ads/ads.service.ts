@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { AdCampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +15,25 @@ import { RecordClickDto } from './dto/record-click.dto';
 
 // CPM cost deducted per impression = budgetBrl * cpmBrl / 1000
 const IMPRESSION_DEBIT_DIVISOR = 1000;
+
+/**
+ * One BILLABLE impression per (campaign, client) inside this window.
+ *
+ * POST /ads/serve carries no guard and is CSRF-excluded, and its sole
+ * side effect is a monetary increment of a third party's `spentBrl`.
+ * Without this, anyone can loop the endpoint and burn an advertiser's
+ * budget down until `spentBrl >= budgetBrl` drops them from rotation —
+ * and because the anonymous branch sorts by DESCENDING cpmBrl, the
+ * highest-paying advertiser is drained first, automatically.
+ *
+ * NOTE: this bounds a single client's spend rate; it does NOT prove the
+ * creative was rendered. A distributed attacker rotating IPs still
+ * inflates spend. Closing that needs a short-lived server-signed,
+ * single-use placement token issued before the debit — a change to the
+ * ad-serving contract with the clients, so it is deliberately NOT done
+ * here. Tracked as the residual on finding F21.
+ */
+const IMPRESSION_DEDUPE_WINDOW_MS = 60 * 1000;
 
 @Injectable()
 export class AdsService {
@@ -77,8 +102,20 @@ export class AdsService {
       bestCreative = sorted[0].creatives[0];
     }
 
-    // Record impression
-    const costBrl = Number(bestCampaign.cpmBrl) / IMPRESSION_DEBIT_DIVISOR;
+    // Debit at most once per (campaign, client) per window. Repeat serves
+    // inside the window still return an ad — they just aren't billable.
+    const recentImpression = await this.prisma.adImpression.findFirst({
+      where: {
+        campaignId: bestCampaign.id,
+        ipHash,
+        createdAt: { gt: new Date(now.getTime() - IMPRESSION_DEDUPE_WINDOW_MS) },
+      },
+      select: { id: true },
+    });
+    const billable = !recentImpression;
+    const costBrl = billable
+      ? Number(bestCampaign.cpmBrl) / IMPRESSION_DEBIT_DIVISOR
+      : 0;
 
     const impression = await this.prisma.adImpression.create({
       data: {
@@ -94,14 +131,16 @@ export class AdsService {
     });
 
     // Deduct cost from campaign budget (best-effort, non-blocking)
-    this.prisma.adCampaign
-      .update({
-        where: { id: bestCampaign.id },
-        data: { spentBrl: { increment: costBrl } },
-      })
-      .catch((err: unknown) =>
-        this.logger.error('Budget debit failed', String(err).slice(0, 200)),
-      );
+    if (billable) {
+      this.prisma.adCampaign
+        .update({
+          where: { id: bestCampaign.id },
+          data: { spentBrl: { increment: costBrl } },
+        })
+        .catch((err: unknown) =>
+          this.logger.error('Budget debit failed', String(err).slice(0, 200)),
+        );
+    }
 
     return {
       impressionId: impression.id,
@@ -128,6 +167,57 @@ export class AdsService {
   ) {
     const ipHash = crypto.createHash('sha256').update(ip).digest('hex');
 
+    // POST /ads/click is unauthenticated and CSRF-excluded, so every
+    // field below is attacker-chosen. Nothing used to be checked: any
+    // campaignId/creativeId pair was accepted, inflating the click/CTR
+    // figures partners are billed against and polluting the fraud
+    // dataset, and destinationUrl came back even for inactive creatives
+    // on DRAFT/PAUSED campaigns.
+    const creative = await this.prisma.adCreative.findUnique({
+      where: { id: dto.creativeId },
+      select: {
+        destinationUrl: true,
+        active: true,
+        campaignId: true,
+        campaign: { select: { status: true } },
+      },
+    });
+    if (!creative) throw new NotFoundException('Creative não encontrado.');
+    if (creative.campaignId !== dto.campaignId) {
+      throw new BadRequestException(
+        'Creative não pertence à campanha informada.',
+      );
+    }
+    if (!creative.active || creative.campaign.status !== AdCampaignStatus.ACTIVE) {
+      throw new BadRequestException('Anúncio não está ativo.');
+    }
+
+    // Bind the click to an impression WE actually served to THIS client.
+    const impression = await this.prisma.adImpression.findUnique({
+      where: { id: dto.impressionId },
+      select: { campaignId: true, creativeId: true, ipHash: true },
+    });
+    if (
+      !impression ||
+      impression.campaignId !== dto.campaignId ||
+      impression.creativeId !== dto.creativeId ||
+      impression.ipHash !== ipHash
+    ) {
+      throw new BadRequestException('Impressão inválida para este clique.');
+    }
+
+    // Consume the impression. BotDetectionService only COUNTs it, so one
+    // served impressionId could be replayed indefinitely and every replay
+    // scored as clean (all signals 0 except velocity at +0.4, under the
+    // 0.7 threshold).
+    const alreadyClicked = await this.prisma.adClick.findFirst({
+      where: { impressionId: dto.impressionId },
+      select: { id: true },
+    });
+    if (alreadyClicked) {
+      throw new ConflictException('Este clique já foi registrado.');
+    }
+
     const { score, isBot, signals } = await this.botDetection.score({
       ip,
       ipHash,
@@ -142,7 +232,7 @@ export class AdsService {
       data: {
         campaignId: dto.campaignId,
         creativeId: dto.creativeId,
-        impressionId: dto.impressionId ?? null,
+        impressionId: dto.impressionId,
         userId: userId ?? null,
         deviceId: dto.deviceId ?? null,
         ipHash,
@@ -162,13 +252,7 @@ export class AdsService {
       return { redirectUrl: null, flagged: true };
     }
 
-    const creative = await this.prisma.adCreative.findUnique({
-      where: { id: dto.creativeId },
-      select: { destinationUrl: true },
-    });
-
-    if (!creative) throw new NotFoundException('Creative não encontrado.');
-
+    // Creative was already loaded and validated above.
     return { redirectUrl: creative.destinationUrl, flagged: false };
   }
 

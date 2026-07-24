@@ -37,9 +37,13 @@ export class ConsentController {
     @Body() dto: UpdateConsentDto,
     @Req() req: Request,
   ) {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
-      ?? req.socket.remoteAddress
-      ?? '0.0.0.0';
+    // Use Express' resolved req.ip — main.ts sets `trust proxy` to
+    // TRUSTED_PROXY_HOPS so the hop count we actually run behind is what
+    // decides the client address. Reading X-Forwarded-For directly let
+    // the caller pick the IP hashed into their own LGPD ConsentRecord,
+    // so they could later repudiate a grant they made ("that address
+    // isn't mine"). Mirrors auth.controller.ts and captcha.guard.ts.
+    const ip = req.ip ?? req.socket.remoteAddress ?? '0.0.0.0';
     return this.consentService.updateConsent(user.id, dto.consentType, dto.granted, ip);
   }
 }

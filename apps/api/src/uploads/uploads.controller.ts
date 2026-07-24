@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UploadsService } from './uploads.service';
 import { UploadImageResponse } from './dto/upload-response.dto';
+import { VideoUploadConcurrencyGuard } from './video-upload-concurrency.guard';
 
 // Stream-level upload limits enforced by Multer BEFORE the file is buffered
 // in memory. The service-layer validateFileSize() runs only after the full
@@ -29,6 +30,19 @@ import { UploadImageResponse } from './dto/upload-response.dto';
 // controller, which our global exception filter translates to a 413.
 const IMAGE_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;   // 10 MB
 const VIDEO_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;  // 100 MB
+
+/**
+ * Bound the NON-file parts of every multipart body too. `fileSize` alone
+ * says nothing about how many fields or parts a client may send, so a
+ * request with thousands of tiny text fields is buffered unbounded even
+ * though no "file" ever exceeds its limit.
+ */
+const MULTIPART_LIMITS = {
+  files: 1,
+  fields: 5,
+  fieldSize: 16 * 1024, // 16 KB per text field
+  parts: 10,
+} as const;
 
 /** Subset of Multer.File used in this controller. */
 interface UploadedFileInfo {
@@ -46,7 +60,7 @@ export class UploadsController {
   @Post('listing-image')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: IMAGE_UPLOAD_LIMIT_BYTES, files: 1 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { ...MULTIPART_LIMITS, fileSize: IMAGE_UPLOAD_LIMIT_BYTES } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de imagem para anúncio' })
   @ApiResponse({ status: 201, description: 'Imagem enviada com sucesso' })
@@ -70,7 +84,7 @@ export class UploadsController {
   @Post('avatar')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: IMAGE_UPLOAD_LIMIT_BYTES, files: 1 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { ...MULTIPART_LIMITS, fileSize: IMAGE_UPLOAD_LIMIT_BYTES } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de avatar de perfil (JPEG/PNG, máx 10MB, 512x512)' })
   @ApiResponse({ status: 201, description: 'Avatar enviado', schema: { properties: { url: { type: 'string' }, key: { type: 'string' } } } })
@@ -92,8 +106,12 @@ export class UploadsController {
 
   @Post('listing-video')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: VIDEO_UPLOAD_LIMIT_BYTES, files: 1 } }))
+  // JwtAuthGuard FIRST so an unauthenticated request never consumes a
+  // concurrency slot. Both run before the interceptor, i.e. before multer
+  // buffers the 100 MB body — which is the whole point.
+  @UseGuards(JwtAuthGuard, VideoUploadConcurrencyGuard)
+  @UseInterceptors(FileInterceptor('file', { limits: { ...MULTIPART_LIMITS, fileSize: VIDEO_UPLOAD_LIMIT_BYTES } }))
+  @ApiResponse({ status: 503, description: 'Muitos envios simultâneos — tente novamente' })
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de vídeo para anúncio (MP4/MOV, máx 100MB, 30s)' })
   @ApiResponse({ status: 201, description: 'Vídeo enviado com sucesso', schema: { properties: { url: { type: 'string' }, key: { type: 'string' } } } })

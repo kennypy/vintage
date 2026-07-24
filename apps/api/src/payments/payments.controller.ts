@@ -40,6 +40,23 @@ export class PaymentsController {
     return this.paymentsService.createPixPayment(body.orderId, user.id);
   }
 
+  @Post('pix/regenerate')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Gerar novo código PIX após expiração',
+    description:
+      'Reconciles against Mercado Pago before minting. If the current instrument is still live (or already paid) it is returned unchanged and NO new payment is created. Returns 503 when the provider state cannot be confirmed — retry.',
+  })
+  @ApiResponse({ status: 201, description: 'Código PIX atual ou novo' })
+  @ApiResponse({ status: 503, description: 'Status do pagamento não confirmado — tentar novamente' })
+  regeneratePix(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreatePixDto,
+  ) {
+    return this.paymentsService.regeneratePixPayment(body.orderId, user.id);
+  }
+
   @Post('card')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)

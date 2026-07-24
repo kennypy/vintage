@@ -90,14 +90,49 @@ export class ReturnsService {
       );
     }
 
-    const created = await this.prisma.orderReturn.create({
-      data: {
-        orderId: dto.orderId,
-        requestedById: buyerId,
-        status: 'REQUESTED',
-        reason: dto.reason,
-        description: dto.description,
-      },
+    // Re-assert mutual exclusion with the dispute flow at WRITE time.
+    // The checks above ran on an unlocked findUnique, so a buyer firing
+    // POST /returns and POST /disputes concurrently had both reads see
+    // `dispute === null` and `returnRequest === null` — landing both. The
+    // two settlement pipelines then pay out independently: the return
+    // credits the buyer totalBrl, and resolving the still-OPEN dispute
+    // seller-wins credits the seller itemPriceBrl. The DB only has
+    // per-table @unique on orderId, nothing enforcing exclusion across
+    // them, so the claim has to happen here.
+    const created = await this.prisma.$transaction(async (tx) => {
+      // Lock the order row first. disputes.service.create() takes the
+      // same lock before its own check, so the two flows serialize on it
+      // and whichever commits second sees the other's row.
+      const locked = await tx.order.updateMany({
+        where: { id: dto.orderId },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count === 0) {
+        throw new NotFoundException('Pedido não encontrado');
+      }
+
+      const fresh = await tx.order.findUnique({
+        where: { id: dto.orderId },
+        select: {
+          dispute: { select: { id: true } },
+          returnRequest: { select: { id: true } },
+        },
+      });
+      if (fresh?.returnRequest || fresh?.dispute) {
+        throw new ConflictException(
+          'Já existe uma solicitação de devolução ou disputa em andamento para este pedido',
+        );
+      }
+
+      return tx.orderReturn.create({
+        data: {
+          orderId: dto.orderId,
+          requestedById: buyerId,
+          status: 'REQUESTED',
+          reason: dto.reason,
+          description: dto.description,
+        },
+      });
     });
 
     this.notifications

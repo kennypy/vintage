@@ -13,6 +13,17 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+// sharp 0.35 ships DUAL type declarations and a package `exports` map:
+//   require -> dist/index.d.cts  (`export = sharp`, callable — what we load)
+//   import  -> dist/index.d.mts  (namespace + default, NOT callable)
+// Our tsconfig uses the default node10 module resolution, which ignores
+// `exports` and picks the `types` field — the .mts one — so `sharp(buf)`
+// failed to typecheck (TS2349) even though the CommonJS module we actually
+// require IS the callable function. Switching to moduleResolution node16
+// would force module:Node16 across the whole Nest build, so instead
+// apps/api/tsconfig.json maps "sharp" straight at the require-side
+// declaration. Keep `import * as` here: under esModuleInterop=false that
+// emits a plain require(), which is exactly what the .d.cts describes.
 import * as sharp from 'sharp';
 import {
   ImageAnalysisService,
@@ -37,6 +48,21 @@ const MAX_FILENAME_LENGTH = 200;
 
 /** Maximum image width after resize. */
 const MAX_IMAGE_WIDTH = 1200;
+
+/**
+ * Hard ceiling on the DECODED pixel count of an uploaded image.
+ *
+ * The 10 MB byte gate and the 3-byte magic check say nothing about the
+ * canvas: a highly-compressible single-colour PNG of 16383×16383 is a
+ * few hundred KB on the wire but ~1 GB of RGBA once libvips materialises
+ * it — and the resize to MAX_IMAGE_WIDTH only runs AFTER that decode.
+ * On the 1 GB machines we provision, one such request OOM-kills the API
+ * for every user. sharp's own default (~268 MP) is far above what our
+ * container can survive, so we set our own.
+ *
+ * 40 MP is ~8000×5000 — well beyond any phone camera a seller will use.
+ */
+const MAX_IMAGE_PIXELS = 40_000_000;
 
 /** JPEG compression quality. */
 const JPEG_QUALITY = 80;
@@ -299,6 +325,7 @@ export class UploadsService {
       const seed = timestamp % 1000;
       const placeholderUrl = `https://picsum.photos/seed/${seed}/${PLACEHOLDER_WIDTH}/${PLACEHOLDER_HEIGHT}`;
       await this.flagIfFlagged(decision, moderation, uploaderId, placeholderUrl, key);
+      await this.recordUploadOwnership(key, uploaderId);
       return {
         url: placeholderUrl,
         key,
@@ -308,9 +335,12 @@ export class UploadsService {
       };
     }
 
+    // Reject oversized canvases from the header BEFORE any full decode.
+    const pipeline = await this.guardedSharp(file);
+
     try {
       // 6. Process with Sharp: resize + compress to JPEG
-      const processed = await sharp(file)
+      const processed = await pipeline
         .resize({ width: MAX_IMAGE_WIDTH, withoutEnlargement: true })
         .jpeg({ quality: JPEG_QUALITY })
         .toBuffer();
@@ -335,6 +365,11 @@ export class UploadsService {
       // the upload — the image is already safely in S3.
       await this.flagIfFlagged(decision, moderation, uploaderId, url, key);
 
+      // 9. Record who owns this key so deleteImage() can authorize a
+      // future delete against a server-written record, not the caller's
+      // own url string.
+      await this.recordUploadOwnership(key, uploaderId);
+
       return {
         url,
         key,
@@ -353,6 +388,41 @@ export class UploadsService {
         'Erro ao processar imagem. Tente novamente.',
       );
     }
+  }
+
+  /**
+   * Refuse an image whose declared canvas exceeds MAX_IMAGE_PIXELS,
+   * reading only the header — no full decode. `limitInputPixels` makes
+   * libvips itself refuse to materialise anything larger, so a lying
+   * header cannot get past the subsequent pipeline either.
+   *
+   * Returns a sharp instance configured with the same limits, so callers
+   * decode through the guarded pipeline rather than a fresh unguarded one.
+   */
+  private async guardedSharp(file: Buffer): Promise<sharp.Sharp> {
+    const pipeline = sharp(file, {
+      limitInputPixels: MAX_IMAGE_PIXELS,
+      failOn: 'truncated',
+    });
+
+    let meta: sharp.Metadata;
+    try {
+      meta = await pipeline.metadata();
+    } catch {
+      throw new BadRequestException('Imagem inválida ou corrompida.');
+    }
+
+    const pixels = (meta.width ?? 0) * (meta.height ?? 0);
+    if (pixels <= 0) {
+      throw new BadRequestException('Não foi possível ler as dimensões da imagem.');
+    }
+    if (pixels > MAX_IMAGE_PIXELS) {
+      throw new BadRequestException(
+        'Imagem excede o limite de resolução permitido.',
+      );
+    }
+
+    return pipeline;
   }
 
   /** Create a ListingImageFlag row when SafeSearch returned LIKELY. */
@@ -394,6 +464,36 @@ export class UploadsService {
   }
 
   /**
+   * Record server-side provenance for a key we just uploaded. This is the
+   * ONLY writer of UploadObject, which makes it the non-forgeable source of
+   * truth deleteImage() authorizes against — ownership is never inferred
+   * from the user-writable url columns. Keyed on s3Key (unique): a
+   * re-upload to the same key overwrites the S3 bytes, so ownership is
+   * transferred to the last writer.
+   *
+   * Best-effort: a failure here is logged but never fails the upload — the
+   * bytes are already stored. A missing record only means the owner cannot
+   * delete the object via DELETE /uploads/:key (fail-closed), never that
+   * someone else can.
+   */
+  private async recordUploadOwnership(
+    s3Key: string,
+    uploaderId: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.uploadObject.upsert({
+        where: { s3Key },
+        create: { s3Key, uploaderId },
+        update: { uploaderId },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to record upload ownership for ${s3Key}: ${String(err).slice(0, 200)}`,
+      );
+    }
+  }
+
+  /**
    * Upload a profile avatar. Square-crops to 512x512, stores under avatars/,
    * and returns a presigned GET URL the client can persist via PATCH /users/:id.
    */
@@ -425,11 +525,15 @@ export class UploadsService {
         where: { id: userId },
         data: { avatarUrl: placeholderUrl },
       });
+      await this.recordUploadOwnership(key, userId);
       return { url: placeholderUrl, key };
     }
 
+    // Same decode guard as the listing-image path.
+    const pipeline = await this.guardedSharp(file);
+
     try {
-      const processed = await sharp(file)
+      const processed = await pipeline
         .resize({ width: 512, height: 512, fit: 'cover' })
         .jpeg({ quality: JPEG_QUALITY })
         .toBuffer();
@@ -452,6 +556,7 @@ export class UploadsService {
         where: { id: userId },
         data: { avatarUrl: url },
       });
+      await this.recordUploadOwnership(key, userId);
       return { url, key };
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -481,19 +586,20 @@ export class UploadsService {
   }
 
   /**
-   * Delete an S3 object. The previous implementation did no ownership
-   * check — any authenticated user could delete any S3 key just by
-   * knowing it, which turned /uploads/:key into a destructive IDOR. This
-   * version resolves the key to one of three known resource types and
-   * refuses the operation if the caller isn't the owner.
+   * Delete an S3 object. Any authenticated caller can hit
+   * DELETE /uploads/:key, so ownership must be proven before we touch S3.
    *
-   *   avatars/<key>   → must match the caller's User.avatarUrl
-   *   listings/<key>  → must belong to a listing the caller owns
-   *   videos/<key>    → must belong to a listing the caller owns
+   * Ownership is decided ONLY by the server-written UploadObject table
+   * (see assertCanDelete), which UploadsService populates at upload time.
+   * It is NOT derived from ListingImage.url / ListingVideo.url /
+   * User.avatarUrl — those columns are client-writable (validated only
+   * for hostname), so a caller could otherwise mint "ownership evidence"
+   * for any key by planting it inside one of their own image URLs and
+   * delete another user's object (CWE-639 IDOR).
    *
-   * Unrecognised prefixes are refused. We never swallow-succeed on an
-   * unknown key because that would let an attacker fish for object
-   * names by observing the response.
+   * A key with no matching ownership row for this caller is refused with
+   * a 403 — we never swallow-succeed on an unknown key, which would give
+   * an attacker a fish-for-keys side channel.
    */
   async deleteImage(key: string, userId: string): Promise<void> {
     const normalised = key.trim();
@@ -515,6 +621,11 @@ export class UploadsService {
           Key: normalised,
         }),
       );
+      // Drop the provenance row now the object is gone. Scoped to the
+      // owning caller so this can never clear someone else's record.
+      await this.prisma.uploadObject.deleteMany({
+        where: { s3Key: normalised, uploaderId: userId },
+      });
       this.logger.log(`Deleted ${normalised} for user ${userId}`);
     } catch (error) {
       this.logger.error(
@@ -527,41 +638,20 @@ export class UploadsService {
   }
 
   /**
-   * Returns true when `userId` owns the resource stored at `key`. See
-   * deleteImage() above for the resolution rules. We search by URL
-   * substring (contains: key) because the DB stores the presigned URL,
-   * whose query-string changes every refresh but whose path carries
-   * the stable S3 key.
+   * Returns true only when a server-written UploadObject row records that
+   * `userId` uploaded the object stored at exactly `key`. This record is
+   * written solely by UploadsService (recordUploadOwnership), so it cannot
+   * be forged by a caller: unlike the ListingImage.url / ListingVideo.url /
+   * User.avatarUrl columns, nothing a client submits can create or point a
+   * row at a key it did not actually upload. Exact `s3Key` equality (not a
+   * substring/`contains` match) closes the substring-forgery hole.
    */
   private async assertCanDelete(key: string, userId: string): Promise<boolean> {
-    if (key.startsWith('avatars/')) {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { avatarUrl: true },
-      });
-      return Boolean(user?.avatarUrl?.includes(key));
-    }
-    if (key.startsWith('listings/')) {
-      const image = await this.prisma.listingImage.findFirst({
-        where: {
-          url: { contains: key },
-          listing: { sellerId: userId },
-        },
-        select: { id: true },
-      });
-      return image !== null;
-    }
-    if (key.startsWith('videos/')) {
-      const video = await this.prisma.listingVideo.findFirst({
-        where: {
-          url: { contains: key },
-          listing: { sellerId: userId },
-        },
-        select: { id: true },
-      });
-      return video !== null;
-    }
-    return false;
+    const record = await this.prisma.uploadObject.findFirst({
+      where: { s3Key: key, uploaderId: userId },
+      select: { id: true },
+    });
+    return record !== null;
   }
 
   /**
@@ -588,7 +678,7 @@ export class UploadsService {
     file: Buffer,
     filename: string,
     _mimeType: string,
-    _userId: string,
+    userId: string,
   ): Promise<{ url: string; key: string }> {
     // 1. Validate size (100 MB max) — chunk-based early abort
     const chunkSize = 64 * 1024;
@@ -616,6 +706,7 @@ export class UploadsService {
       if (this.nodeEnv === 'production') {
         throw new Error('S3 storage not configured — cannot upload videos in production');
       }
+      await this.recordUploadOwnership(key, userId);
       return {
         url: `https://www.w3schools.com/html/mov_bbb.mp4`, // stable dev placeholder
         key,
@@ -634,6 +725,7 @@ export class UploadsService {
       );
 
       const url = await this.generatePresignedUrl(key);
+      await this.recordUploadOwnership(key, userId);
       return { url, key };
     } catch (error) {
       if (error instanceof BadRequestException) throw error;

@@ -107,7 +107,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
    */
   private sanitizeForProd(value: string): string {
     if (process.env.NODE_ENV !== 'production') return value;
-    return value
+    // Hard cap BEFORE the replace chain. `/PrismaClient[A-Za-z]*Error:?/`
+    // backtracks O(n) at every position where the literal prefix matches,
+    // so running it over an unbounded attacker-controlled string costs
+    // ~n²/24 steps on the single event loop. A `forbidNonWhitelisted`
+    // rejection echoes the offending property name verbatim, which can be
+    // the whole ~100 kB body-parser limit — one unauthenticated POST to
+    // /auth/login was enough to burn ~10⁸ char steps before responding.
+    // Callers truncate too (see sanitizeHttpBody), but the bound lives
+    // here as well so a future caller can't reintroduce the stall.
+    const capped = value.length > 2000 ? value.slice(0, 2000) : value;
+    return capped
       .replace(/PrismaClient[A-Za-z]*Error:?\s*/gi, '')
       .replace(/Invalid `[^`]*` invocation[^.\n]*\.?/gi, '')
       .replace(
@@ -138,8 +148,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     status: number,
   ): Record<string, unknown> {
     const out: Record<string, unknown> = { statusCode: status };
+    // Order matters: truncate BEFORE sanitizing. Running the redaction
+    // regexes over the full untruncated message is the ReDoS documented
+    // in sanitizeForProd.
     const cleanString = (s: string) =>
-      this.truncate(this.sanitizeForProd(this.stripStack(s)));
+      this.sanitizeForProd(this.truncate(this.stripStack(s)));
     for (const key of ['message', 'error', 'code']) {
       const v = raw[key];
       if (typeof v === 'string') {

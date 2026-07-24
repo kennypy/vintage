@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -414,21 +415,37 @@ export class UsersService {
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    const upserted = await this.prisma.follow.upsert({
-      where: { followerId_followingId: { followerId, followingId } },
-      create: { followerId, followingId },
-      update: {},
-      // createdAt tells us whether this is a NEW follow (same ms as
-      // just now) or an idempotent re-call. We only fire the notification
-      // on the first edge so a client retrying doesn't spam the target.
-      select: { createdAt: true },
-    });
-    const isNewEdge = Date.now() - upserted.createdAt.getTime() < 1000;
-
-    await Promise.all([
-      this.prisma.user.update({ where: { id: followingId }, data: { followerCount: { increment: 1 } } }),
-      this.prisma.user.update({ where: { id: followerId }, data: { followingCount: { increment: 1 } } }),
-    ]);
+    // Insert the edge and move the counters in ONE transaction, keyed on
+    // whether the INSERT actually happened.
+    //
+    // Previously an idempotent `upsert` was followed by UNCONDITIONAL
+    // increments, so any caller could loop POST /users/:id/follow from a
+    // throwaway account and inflate a target's public followerCount
+    // without ever creating an edge. unfollowUser only decrements once
+    // per real edge, so the drift was permanent — free social proof for
+    // a fraudulent seller.
+    //
+    // The old `Date.now() - createdAt < 1000` heuristic is gone with it:
+    // it misreads a slow request, or clock skew, as a re-follow.
+    let isNewEdge = true;
+    try {
+      await this.prisma.$transaction([
+        this.prisma.follow.create({ data: { followerId, followingId } }),
+        this.prisma.user.update({ where: { id: followingId }, data: { followerCount: { increment: 1 } } }),
+        this.prisma.user.update({ where: { id: followerId }, data: { followingCount: { increment: 1 } } }),
+      ]);
+    } catch (err) {
+      // P2002 = unique violation on (followerId, followingId): the edge
+      // already exists. Idempotent no-op — counters stay untouched.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        isNewEdge = false;
+      } else {
+        throw err;
+      }
+    }
 
     if (isNewEdge) {
       const follower = await this.prisma.user.findUnique({
@@ -451,20 +468,26 @@ export class UsersService {
   }
 
   async unfollowUser(followerId: string, followingId: string) {
-    const existing = await this.prisma.follow.findUnique({
-      where: { followerId_followingId: { followerId, followingId } },
+    // Same shape as followUser: the counters move only when THIS call
+    // actually removed the edge, inside the same transaction as the
+    // delete. The previous findUnique-then-delete-then-decrement let two
+    // concurrent unfollows both observe the edge and both decrement —
+    // the mirror image of the inflation bug on the follow side.
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.follow.deleteMany({
+        where: { followerId, followingId },
+      });
+      if (deleted.count === 0) return;
+
+      await tx.user.update({
+        where: { id: followingId },
+        data: { followerCount: { decrement: 1 } },
+      });
+      await tx.user.update({
+        where: { id: followerId },
+        data: { followingCount: { decrement: 1 } },
+      });
     });
-
-    if (!existing) return { following: false };
-
-    await this.prisma.follow.delete({
-      where: { followerId_followingId: { followerId, followingId } },
-    });
-
-    await Promise.all([
-      this.prisma.user.update({ where: { id: followingId }, data: { followerCount: { decrement: 1 } } }),
-      this.prisma.user.update({ where: { id: followerId }, data: { followingCount: { decrement: 1 } } }),
-    ]);
 
     return { following: false };
   }
@@ -1013,8 +1036,13 @@ export class UsersService {
     // without leaving evidence. Audit entry is best-effort — a logging
     // failure must not break the admin tool.
     if (search && search.includes('@')) {
+      // JSON.stringify escapes CR/LF and every other control character.
+      // Interpolating the raw term let an ADMIN caller embed a newline
+      // and append forged `[privacy-audit] admin <someone-else> ...`
+      // lines — poisoning the very trail this control exists to keep and
+      // misattributing the enumeration to another admin.
       this.logger.warn(
-        `[privacy-audit] admin ${adminId} ran email-substring lookup: ${search.slice(0, 64)}`,
+        `[privacy-audit] admin ${adminId} ran email-substring lookup: ${JSON.stringify(search.slice(0, 64))}`,
       );
     }
 

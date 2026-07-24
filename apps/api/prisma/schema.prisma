@@ -166,6 +166,7 @@ model User {
   blocksReceived         UserBlock[]         @relation("UserBlocked")
   listingImageFlags      ListingImageFlag[]  @relation("ListingImageFlagUploader")
   listingImageFlagReviews ListingImageFlag[] @relation("ListingImageFlagReviewer")
+  uploadObjects          UploadObject[]
   fraudFlags             FraudFlag[]         @relation("FraudFlagSubject")
   fraudFlagReviews       FraudFlag[]         @relation("FraudFlagReviewer")
   cpfVerificationLogs    CpfVerificationLog[]
@@ -261,6 +262,28 @@ model ListingVideo {
 
   @@unique([listingId]) // One video per listing
   @@index([listingId])
+}
+
+// --- Upload provenance / ownership ---
+//
+// Server-written record of every S3 object the uploads pipeline produces,
+// and the ONLY non-forgeable source of truth for "who owns this key".
+// UploadsService is the sole writer (one row per key, at upload time).
+// deleteImage() authorizes destructive S3 deletes by EXACT (uploaderId,
+// s3Key) match against this table — never against the user-writable url
+// columns (ListingImage.url, ListingVideo.url, User.avatarUrl), which a
+// caller can set to any allowlisted-host URL and therefore cannot use to
+// prove object provenance. s3Key is unique: re-uploading to the same key
+// (which overwrites the S3 bytes) transfers ownership to the last writer.
+model UploadObject {
+  id         String   @id @default(cuid())
+  uploaderId String
+  s3Key      String   @unique
+  createdAt  DateTime @default(now())
+
+  uploader User @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([uploaderId])
 }
 
 // --- Categories & Brands ---

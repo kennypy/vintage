@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Req, Res, BadRequestException, UnauthorizedException, Headers } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Req, Res, UnauthorizedException, Headers } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
@@ -31,6 +31,9 @@ import {
   VerifyEmailDto,
 } from './dto/password.dto';
 import { RequestEmailChangeDto, ConfirmEmailChangeDto } from './dto/email-change.dto';
+import { AcceptTosDto } from './dto/accept-tos.dto';
+import { AdminSetupDto } from './dto/admin-setup.dto';
+import { AppleCallbackDto, GoogleTokenDto } from './dto/social-login.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CaptchaGuard } from './captcha.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -129,9 +132,9 @@ export class AuthController {
   @ApiOperation({ summary: 'Registrar aceitação da versão atual dos Termos de Uso' })
   acceptTos(
     @CurrentUser() user: AuthUser,
-    @Body() body: { tosVersion: string },
+    @Body() dto: AcceptTosDto,
   ) {
-    return this.authService.acceptTos(user.id, body?.tosVersion);
+    return this.authService.acceptTos(user.id, dto.tosVersion);
   }
 
   @Post('login')
@@ -341,16 +344,12 @@ export class AuthController {
   @Post('apple/callback')
   @ApiOperation({ summary: 'Callback do Apple Sign In' })
   async appleCallback(
-    @Body() body: { identityToken: string; name?: string },
+    @Body() dto: AppleCallbackDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (!body.identityToken) {
-      throw new BadRequestException('Token de identidade Apple é obrigatório');
-    }
-
     const profile = await this.appleStrategy.verifyIdentityToken(
-      body.identityToken,
-      body.name,
+      dto.identityToken,
+      dto.name,
     );
 
     const result = await this.authService.socialLogin('apple', profile);
@@ -361,13 +360,10 @@ export class AuthController {
   @Post('google/token')
   @ApiOperation({ summary: 'Login com Google via ID token (mobile)' })
   async googleTokenAuth(
-    @Body() body: { idToken: string },
+    @Body() dto: GoogleTokenDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (!body.idToken) {
-      throw new BadRequestException('ID token do Google é obrigatório');
-    }
-    const profile = await this.authService.verifyGoogleIdToken(body.idToken);
+    const profile = await this.authService.verifyGoogleIdToken(dto.idToken);
     const result = await this.authService.socialLogin('google', profile);
     this.maybeSetSessionCookies(res, result);
     return result;
@@ -470,10 +466,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Bootstrap: promover usuário autenticado a ADMIN (requer ADMIN_SETUP_KEY)' })
+  // NOTE: the body MUST be a DTO class, not an inline type literal.
+  // `@Body() body: { setupKey: string }` reflects a metatype of `Object`,
+  // which the global ValidationPipe skips entirely — the raw JSON then
+  // reached `Buffer.from(setupKey)` in the service, where an array-like
+  // `{"setupKey":{"length":1e9}}` allocated ~1 GB and stalled the event
+  // loop. Same applies to every other @Body() in this controller.
   adminSetup(
     @CurrentUser() user: AuthUser,
-    @Body() body: { setupKey: string },
+    @Body() dto: AdminSetupDto,
   ) {
-    return this.authService.adminSetup(user.id, body.setupKey);
+    return this.authService.adminSetup(user.id, dto.setupKey);
   }
 }

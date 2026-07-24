@@ -27,6 +27,25 @@ import {
 } from '@vintage/shared';
 import { warnAndSwallow } from '../common/utils/fire-and-forget';
 
+/**
+ * Collapse every whitespace run — newlines included — before a body goes
+ * out over WhatsApp/SMS.
+ *
+ * These messages are delivered from Vintage.br's own verified sender, so
+ * anything the seller can splice in reads to the buyer as a separate,
+ * legitimate platform line (e.g. an off-platform payment redirect). The
+ * charset constraint on ShipOrderDto.trackingCode is the primary control;
+ * this is the choke point, and it also covers `listing.title`, which is
+ * likewise seller-authored and interpolated into the same bodies.
+ *
+ * `\s` is used rather than an explicit control-character class so the
+ * pattern stays clear of ESLint's no-control-regex rule while still
+ * catching \n, \r, \t and the Unicode line separators U+2028/U+2029.
+ */
+function sanitizeOutboundBody(body: string): string {
+  return body.split(/\s+/u).join(' ').trim().slice(0, 1000);
+}
+
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
@@ -62,7 +81,7 @@ export class OrdersService {
       if (digits.length < 10) return;
       const to = digits.startsWith('55') ? `+${digits}` : `+55${digits}`;
       if (!SmsService.isValidE164(to)) return;
-      await this.sms.sendWhatsapp(to, body);
+      await this.sms.sendWhatsapp(to, sanitizeOutboundBody(body));
     } catch {
       // never let transport failure break the order flow
     }

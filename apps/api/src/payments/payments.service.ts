@@ -6,6 +6,7 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/client';
@@ -21,6 +22,58 @@ import { FraudService } from '../fraud/fraud.service';
 
 /** Maximum allowed transaction amount in BRL. Prevents runaway charges. */
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
+
+/**
+ * How long a reservation that never reached the provider (PENDING
+ * Payment with no providerPaymentId) is treated as still in flight.
+ *
+ * With the per-attempt AbortSignal in MercadoPagoClient, the worst-case
+ * provider call is ~134s (4 x 30s + 2s/4s/8s backoff). Anything older
+ * than this window is genuinely stalled — but "stalled" NEVER means
+ * "safe to mint". It only means "go ask Mercado Pago what actually
+ * happened" (see reconcileOrder). The old behaviour retired stalled rows
+ * and minted speculatively, which is precisely how one order ended up
+ * with two payable instruments.
+ */
+const RESERVATION_STALL_MS = 5 * 60 * 1000;
+
+/**
+ * PAYMENTS-API-ONLY status sets (`/v1/payments`, Checkout Transparente).
+ *
+ * Do NOT mix in Orders API (`/v1/orders`) strings: that API has a
+ * different taxonomy where `expired` is a top-level status and
+ * cancellation is spelled `canceled` (ONE l), versus `cancelled` (TWO l)
+ * here. An Orders string leaking into these sets never matches anything,
+ * so a terminal instrument silently reads as unclassified and we HOLD
+ * forever — a silent misclassification, not a loud failure.
+ *
+ * Expiry is NOT a status here: an expired PIX surfaces as
+ * status `cancelled` with status_detail `expired`.
+ */
+const MP_LIVE = new Set(['pending', 'in_process', 'authorized', 'in_mediation']);
+const MP_SUCCESS_TERMINAL = new Set(['approved']);
+const MP_FAILURE_TERMINAL = new Set([
+  'rejected',
+  'cancelled',
+  'refunded',
+  'charged_back',
+]);
+
+/**
+ * Outcome of asking Mercado Pago what exists for an order.
+ *
+ * `hold` is a first-class result, not an error path: search is
+ * eventually consistent, so "nothing found" is indistinguishable from
+ * "not indexed yet". Minting into that ambiguity is the double-charge.
+ */
+type ReconcileOutcome =
+  | { action: 'adopt'; detail: MpPaymentDetail }
+  | { action: 'mint' }
+  | { action: 'hold'; reason: string };
+
+type MpPaymentDetail = NonNullable<
+  Awaited<ReturnType<MercadoPagoClient['getPaymentDetail']>>
+>;
 
 /**
  * Mercado Pago payment statuses that are terminal failures — once a
@@ -105,9 +158,12 @@ export class PaymentsService {
    *      at the moment we authorized the charge — no race with concurrent
    *      mutations (defense in depth; the order schema doesn't currently expose
    *      a totalBrl-mutating endpoint, but locking is cheap and forward-compat).
-   *   2. The @@unique([orderId, idempotencyKey]) constraint fires here, before
-   *      a duplicate attempt can ever reach Mercado Pago — backstop against
-   *      double-charge if MP-side dedup ever misfires.
+   *   2. A concurrent second attempt is rejected here, before it can reach
+   *      Mercado Pago. NOTE: @@unique([orderId, idempotencyKey]) does NOT
+   *      provide this on its own — racing requests allocate different
+   *      attemptNumbers, so their derived keys differ and the constraint
+   *      never fires. The row lock plus the in-flight PENDING check below
+   *      are what actually enforce one live instrument per order.
    *   3. If the network call fails, the PENDING row remains and the retry
    *      flow can advance attemptNumber cleanly.
    */
@@ -118,6 +174,21 @@ export class PaymentsService {
     extra?: string,
   ): Promise<{ amountBrl: number; attemptNumber: number; idempotencyKey: string; paymentId: string }> {
     return this.prisma.$transaction(async (tx) => {
+      // Take the row lock BEFORE deciding anything. The lock used to be
+      // acquired AFTER the single-active-payment gate, so two concurrent
+      // creates both read paymentId === null, both passed the gate, and
+      // each reached Mercado Pago with a different idempotency key —
+      // minting two independently payable instruments for one order.
+      // Money paid against whichever instrument did NOT end up in
+      // Order.paymentId is silently swallowed: the order never flips to
+      // PAID, the seller is never credited, and neither the webhook nor
+      // the reconciliation cron issues a refund.
+      const locked = await tx.order.updateMany({
+        where: { id: orderId },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count === 0) throw new NotFoundException('Pedido não encontrado.');
+
       const order = await tx.order.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Pedido não encontrado.');
       if (order.buyerId !== userId) throw new ForbiddenException('Acesso negado ao pedido.');
@@ -129,13 +200,30 @@ export class PaymentsService {
           'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
         );
       }
+
+      // NOTE: stalled reservations are NOT retired here any more. Doing
+      // that let us mint a fresh instrument on the assumption the old one
+      // never landed — an assumption we cannot make, because the provider
+      // call may have succeeded after we stopped waiting. Reconciliation
+      // against MP happens in reconcileBeforeMint(), BEFORE this
+      // transaction, and only its verdict may clear the way to mint.
+
+      // Order.paymentId is only written by finalizeAttempt, AFTER the
+      // provider call returns, so it cannot serve as the mutex between
+      // two requests racing before either has called out. A live PENDING
+      // Payment row is the authoritative "an attempt is already in
+      // flight" signal, and we create one below inside this same lock.
+      const inFlight = await tx.payment.count({
+        where: { orderId, status: 'PENDING' },
+      });
+      if (inFlight > 0) {
+        throw new BadRequestException(
+          'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
+        );
+      }
+
       const amountBrl = Number(order.totalBrl);
       this.validateAmount(amountBrl, orderId);
-
-      // Lock the order row by writing a no-op-ish field. Prisma's update takes
-      // an exclusive row lock for the rest of the transaction, serializing
-      // concurrent payment-creation attempts on the same order.
-      await tx.order.update({ where: { id: orderId }, data: { updatedAt: new Date() } });
 
       const count = await tx.payment.count({ where: { orderId } });
       const attemptNumber = count + 1;
@@ -183,7 +271,230 @@ export class PaymentsService {
     });
   }
 
+  private async assertOrderPayable(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { buyerId: true, status: true },
+    });
+    if (!order) throw new NotFoundException('Pedido não encontrado.');
+    if (order.buyerId !== userId) {
+      throw new ForbiddenException('Acesso negado ao pedido.');
+    }
+    if (order.status !== 'PENDING') {
+      throw new BadRequestException('Pedido já foi pago ou não está pendente.');
+    }
+  }
+
+  /**
+   * Ask Mercado Pago what actually exists for this order.
+   *
+   * Two-stage on purpose:
+   *   1. SEARCH by external_reference — discovery only. The index is
+   *      eventually consistent and MP documents no freshness guarantee,
+   *      so an empty result is AMBIGUOUS ("not indexed yet"), never
+   *      proof that no instrument exists.
+   *   2. GET by id — the authority. Every candidate is confirmed
+   *      individually; nothing is decided from search output alone.
+   *
+   * The verdict is deliberately conservative: we mint only when EVERY
+   * instrument MP knows about is failure-terminal. Anything live,
+   * anything approved, anything unclassified, or any read failure means
+   * HOLD. Never mint into ambiguity — that is the double-charge.
+   */
+  private async reconcileOrder(orderId: string): Promise<ReconcileOutcome> {
+    let candidates: Array<{ id: string }>;
+    try {
+      candidates = await this.mercadoPago.searchPaymentsByExternalReference(orderId);
+    } catch (err) {
+      return { action: 'hold', reason: `search failed: ${String(err).slice(0, 120)}` };
+    }
+
+    if (candidates.length === 0) {
+      return { action: 'hold', reason: 'no instrument indexed yet (search is eventually consistent)' };
+    }
+
+    let allFailureTerminal = true;
+    for (const candidate of candidates) {
+      let detail: MpPaymentDetail | null;
+      try {
+        detail = await this.mercadoPago.getPaymentDetail(candidate.id);
+      } catch (err) {
+        return {
+          action: 'hold',
+          reason: `authority read failed for ${candidate.id}: ${String(err).slice(0, 100)}`,
+        };
+      }
+      if (!detail) {
+        return { action: 'hold', reason: `no detail returned for ${candidate.id}` };
+      }
+
+      // Adopt on the FIRST live or approved instrument — one is enough to
+      // prove minting would create a second payable instrument.
+      if (MP_LIVE.has(detail.status) || MP_SUCCESS_TERMINAL.has(detail.status)) {
+        return { action: 'adopt', detail };
+      }
+      if (!MP_FAILURE_TERMINAL.has(detail.status)) {
+        // A status in neither set: unknown to us, so unsafe to act on.
+        allFailureTerminal = false;
+      }
+    }
+
+    return allFailureTerminal
+      ? { action: 'mint' }
+      : { action: 'hold', reason: 'provider returned a status outside the known Payments-API sets' };
+  }
+
+  /** Bind an instrument MP already holds to the order, minting nothing. */
+  private async adoptInstrument(orderId: string, detail: MpPaymentDetail) {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.updateMany({
+        where: { id: orderId, paymentId: null },
+        data: { paymentId: detail.id },
+      });
+      // Attach the provider id to the stalled reservation so the
+      // reconciliation cron can see it from here on — it only sweeps rows
+      // where providerPaymentId is set.
+      const stalled = await tx.payment.findFirst({
+        where: { orderId, status: 'PENDING', providerPaymentId: null },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (stalled) {
+        await tx.payment.update({
+          where: { id: stalled.id },
+          data: { providerPaymentId: detail.id },
+        });
+      }
+    });
+    this.logger.warn(
+      `Adopted existing MP instrument ${detail.id} (status=${detail.status}) for order ${orderId} — no new payment minted`,
+    );
+  }
+
+  /**
+   * Gate every mint behind reconciliation when a reservation has stalled.
+   * Returns the adopted instrument when one already exists, or null when
+   * it is provably safe to mint.
+   */
+  private async reconcileBeforeMint(
+    orderId: string,
+    userId: string,
+  ): Promise<MpPaymentDetail | null> {
+    const stallCutoff = new Date(Date.now() - RESERVATION_STALL_MS);
+    const stalled = await this.prisma.payment.count({
+      where: {
+        orderId,
+        status: 'PENDING',
+        providerPaymentId: null,
+        createdAt: { lte: stallCutoff },
+      },
+    });
+    if (stalled === 0) return null;
+
+    await this.assertOrderPayable(orderId, userId);
+    const outcome = await this.reconcileOrder(orderId);
+
+    if (outcome.action === 'hold') {
+      this.logger.warn(`Reconcile HOLD for order ${orderId}: ${outcome.reason}`);
+      throw new ServiceUnavailableException(
+        'Não foi possível confirmar o status do pagamento anterior. Tente novamente em instantes.',
+      );
+    }
+
+    if (outcome.action === 'adopt') {
+      await this.adoptInstrument(orderId, outcome.detail);
+      return outcome.detail;
+    }
+
+    const { count } = await this.prisma.payment.updateMany({
+      where: {
+        orderId,
+        status: 'PENDING',
+        providerPaymentId: null,
+        createdAt: { lte: stallCutoff },
+      },
+      data: {
+        status: 'FAILED',
+        failureReason: 'reconciled: provider holds no live instrument',
+      },
+    });
+    this.logger.log(
+      `Reconcile MINT for order ${orderId} — retired ${count} stalled reservation(s)`,
+    );
+    return null;
+  }
+
+  /** Shape an adopted instrument like a freshly created PIX payment. */
+  private toPixResponse(orderId: string, detail: MpPaymentDetail) {
+    return {
+      id: detail.id,
+      orderId,
+      method: 'pix' as const,
+      amountBrl: detail.amountBrl,
+      qrCode: detail.qrCode,
+      qrCodeBase64: detail.qrCodeBase64,
+      pixCopiaECola: detail.qrCode,
+      expiresAt: detail.expiresAt,
+      status: detail.status,
+      adopted: true,
+    };
+  }
+
+  /**
+   * Buyer-facing "generate a new PIX code" after the QR expires.
+   *
+   * MUST route through reconciliation. A regenerate button that mints
+   * directly IS the double-charge: the buyer sees an expired QR, but the
+   * instrument may still be live at MP (our clock and MP's cancellation
+   * are not the same event), and paying the old code after a new one was
+   * minted leaves money against an instrument the order no longer points
+   * at.
+   */
+  async regeneratePixPayment(orderId: string, userId: string) {
+    await this.assertOrderPayable(orderId, userId);
+
+    const outcome = await this.reconcileOrder(orderId);
+
+    if (outcome.action === 'hold') {
+      this.logger.warn(
+        `Regenerate HOLD for order ${orderId}: ${outcome.reason}`,
+      );
+      throw new ServiceUnavailableException(
+        'Não foi possível confirmar o status do pagamento atual. Tente novamente em instantes.',
+      );
+    }
+
+    if (outcome.action === 'adopt') {
+      // Still live (or already paid) at MP — hand back what exists.
+      return this.toPixResponse(orderId, outcome.detail);
+    }
+
+    // Every instrument is failure-terminal (an expired PIX is
+    // status=cancelled / status_detail=expired), so re-pay is safe.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.updateMany({
+        where: { id: orderId, status: 'PENDING' },
+        data: { paymentId: null },
+      });
+      await tx.payment.updateMany({
+        where: { orderId, status: 'PENDING' },
+        data: {
+          status: 'FAILED',
+          failureReason: 'reconciled: instrument expired or terminally failed',
+        },
+      });
+    });
+
+    return this.createPixPayment(orderId, userId);
+  }
+
   async createPixPayment(orderId: string, userId: string) {
+    // Never mint speculatively: if a prior reservation stalled, ask MP
+    // what exists first and adopt it rather than creating a second
+    // payable instrument.
+    const adopted = await this.reconcileBeforeMint(orderId, userId);
+    if (adopted) return this.toPixResponse(orderId, adopted);
+
     const reservation = await this.reserveAttempt(orderId, userId, 'PIX');
     this.logger.log(`Creating PIX payment for order ${orderId} (attempt ${reservation.attemptNumber})`);
     let result;

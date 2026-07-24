@@ -3,25 +3,13 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { IsString, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ListingsService } from './listings.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingsDto } from './dto/search-listings.dto';
-
-class SetListingVideoDto {
-  @IsString()
-  videoUrl!: string;
-
-  @IsOptional()
-  @IsString()
-  thumbnailUrl?: string;
-
-  @IsOptional()
-  durationSeconds?: number;
-}
+import { SetListingVideoDto } from './dto/set-listing-video.dto';
 
 @ApiTags('listings')
 @Controller('listings')

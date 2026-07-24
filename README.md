@@ -81,7 +81,7 @@ vintage/
 
 35+ modelos Prisma. Core: User, Listing, ListingImage, ListingVideo, Category, Brand, Order, OrderListingSnapshot, Offer, Bundle, BundleItem, Wallet, WalletTransaction, PayoutMethod, PayoutRequest, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Coupon, Promotion, SavedSearch, PriceDropAlert, Report, DeviceToken, LoginEvent, AuthenticityRequest, NotaFiscal, PaymentFlag.
 
-Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch moderation queue), FraudRule + FraudFlag (velocity/drain signals), CpfVerificationLog (KYC audit, SHA256 hashes only), CafVerificationSession (document+liveness sessions), DeletionAuditLog (LGPD), Consent.
+Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch moderation queue), UploadObject (server-written S3 upload provenance — non-forgeable ownership source for DELETE /uploads/:key), FraudRule + FraudFlag (velocity/drain signals), CpfVerificationLog (KYC audit, SHA256 hashes only), CafVerificationSession (document+liveness sessions), DeletionAuditLog (LGPD), Consent.
 
 **Seed**: 10 categorias com 55 subcategorias + 55 marcas brasileiras e internacionais + 2 FraudRule rows (NEW_ACCOUNT_VELOCITY, PAYOUT_DRAIN). Admin promotion via `npm run admin:promote -- <email>` (seed.ts refuses to run with NODE_ENV=production).
 
@@ -184,6 +184,14 @@ npm run ci:parity               # Windows / portátil — runner Node equivalent
                                  # (scripts/ci-parity.mjs). Mesmos passos,
                                  # mesma ordem, sem dependência de bash.
 npm run ci:parity:fast          # idem, --fast (mantém node_modules)
+
+# Manutenção pontual (one-off)
+node scripts/reconcile-follow-counts.mjs           # dry run — só relata divergências
+node scripts/reconcile-follow-counts.mjs --apply   # corrige followerCount/followingCount
+                                 # Recalcula os contadores a partir das arestas
+                                 # Follow. Necessário uma vez após o FIX-21 (F24):
+                                 # a correção impede novas inflações, mas não
+                                 # conserta contadores já divergentes no banco.
 ```
 
 ## Documentação

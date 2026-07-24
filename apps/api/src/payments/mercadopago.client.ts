@@ -35,6 +35,41 @@ export class MercadoPagoRateLimitedError extends Error {
 
 /** HTTP statuses worth retrying — transient rate-limit / server errors. */
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Per-ATTEMPT timeout on the provider call.
+ *
+ * `fetch` had no signal, so it inherited undici's ~300s headers/body
+ * default. With MAX_REQUEST_RETRIES that put the worst case near 20
+ * minutes, during which the caller's reservation looks stalled and a
+ * concurrent request could mint a second payable instrument. Bounding
+ * each attempt caps the whole call at roughly
+ * (4 x 30s) + 2s + 4s + 8s = ~134s, comfortably inside the stall window
+ * in PaymentsService.
+ *
+ * Deliberately per-attempt, INSIDE the retry loop: a signal wrapping the
+ * whole loop would abort a legitimate retry sequence mid-flight.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Fixed lifetime of a PIX QR code. Exported because it is the SINGLE
+ * source of truth for expiry: it is sent to Mercado Pago as
+ * `date_of_expiration` on create, and the resulting timestamp is echoed
+ * back to clients as `expiresAt`. Clients MUST render from that value
+ * rather than starting their own countdown, or the two desync.
+ */
+export const PIX_EXPIRY_MS = 30 * 60 * 1000;
+
+/**
+ * Mercado Pago documents `date_of_expiration` as "yyyy-MM-dd'T'HH:mm:ssz"
+ * with a numeric offset. `toISOString()` emits a `Z` suffix, so we
+ * normalise it to `+00:00` to match the documented shape.
+ */
+export function formatMpExpiry(date: Date): string {
+  return date.toISOString().replace(/Z$/, '+00:00');
+}
+
 /** Max retries after the first attempt: backoff waits 2s, 4s, 8s. */
 const MAX_REQUEST_RETRIES = 3;
 
@@ -57,6 +92,8 @@ interface MercadoPagoPaymentResponse {
     external_resource_url?: string;
   };
   date_of_expiration?: string;
+  /** Set to our orderId on every create path; the reconcile discovery key. */
+  external_reference?: string;
 }
 
 @Injectable()
@@ -141,6 +178,11 @@ export class MercadoPagoClient {
           method,
           headers,
           body: body ? JSON.stringify(body) : undefined,
+          // Per-attempt deadline. A timeout surfaces as an AbortError from
+          // fetch, which the catch below treats exactly like a transient
+          // network failure — so it is retried with the SAME idempotency
+          // key and can never double-charge.
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
       } catch (networkErr) {
         // Transient network failure (DNS, reset, timeout) — treat like a
@@ -219,6 +261,12 @@ export class MercadoPagoClient {
         payment_method_id: 'pix',
         payer: { email: `order-${orderId}@vintage.br` },
         external_reference: orderId,
+        // Explicit, fixed QR lifetime. Previously unset, so the QR took
+        // MP's default and our clients had no authoritative expiry to
+        // render — the value echoed back as `expiresAt` below is now the
+        // single source of truth for both the UI countdown and the
+        // re-pay ("generate a new code") flow.
+        date_of_expiration: formatMpExpiry(new Date(Date.now() + PIX_EXPIRY_MS)),
       },
       idempotencyKey,
     );
@@ -419,6 +467,73 @@ export class MercadoPagoClient {
       statusDetail: payment.status_detail,
       transaction_amount: payment.transaction_amount,
       updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * DISCOVERY ONLY — find every instrument MP holds for an order.
+   *
+   * `external_reference` is set to the orderId on all three create paths,
+   * so this returns every attempt for that order regardless of which
+   * idempotency key produced it. That is what makes reconciliation
+   * possible without knowing the key.
+   *
+   * IMPORTANT: this index is eventually consistent and MP documents no
+   * freshness guarantee. An EMPTY result means "nothing indexed yet",
+   * NOT "no instrument exists" — callers must treat empty as ambiguous
+   * and never mint on the strength of it. Each id returned here must be
+   * confirmed via getPaymentDetail() before any decision is taken.
+   */
+  async searchPaymentsByExternalReference(
+    externalReference: string,
+  ): Promise<Array<{ id: string; status: string; statusDetail: string | null }>> {
+    if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot search payments in production');
+      }
+      return [];
+    }
+
+    const res = await this.request<{ results?: MercadoPagoPaymentResponse[] }>(
+      'GET',
+      `/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&sort=date_created&criteria=desc`,
+    );
+
+    return (res.results ?? []).map((p) => ({
+      id: String(p.id),
+      status: p.status,
+      statusDetail: p.status_detail ?? null,
+    }));
+  }
+
+  /**
+   * AUTHORITY — the definitive state of one instrument, plus everything
+   * needed to re-present an adopted PIX QR to the buyer without minting
+   * a new one.
+   */
+  async getPaymentDetail(paymentId: string) {
+    if (!this.isConfigured) {
+      if (this.nodeEnv === 'production') {
+        throw new Error('Mercado Pago not configured — cannot read payments in production');
+      }
+      return null;
+    }
+
+    const payment = await this.request<MercadoPagoPaymentResponse>(
+      'GET',
+      `/v1/payments/${encodeURIComponent(paymentId)}`,
+    );
+    const txData = payment.point_of_interaction?.transaction_data;
+
+    return {
+      id: String(payment.id),
+      status: payment.status,
+      statusDetail: payment.status_detail ?? null,
+      externalReference: payment.external_reference ?? null,
+      amountBrl: payment.transaction_amount,
+      qrCode: txData?.qr_code ?? '',
+      qrCodeBase64: txData?.qr_code_base64 ?? '',
+      expiresAt: payment.date_of_expiration ?? '',
     };
   }
 

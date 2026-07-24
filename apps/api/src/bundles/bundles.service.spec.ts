@@ -3,8 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { Prisma } from '@prisma/client';
 import { BundlesService } from './bundles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListingsService } from '../listings/listings.service';
@@ -317,9 +319,18 @@ describe('BundlesService', () => {
       mockPrisma.address.findUnique.mockResolvedValue({ id: 'addr-1', userId: 'buyer-1' });
 
       const mockTx = {
-        listing: { findMany: jest.fn(), update: jest.fn() },
+        listing: {
+          findMany: jest.fn(),
+          update: jest.fn(),
+          // Conditional claim ACTIVE → SOLD; count 1 = we won the race.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         order: { create: jest.fn() },
-        bundle: { update: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          // Conditional claim OPEN → CHECKED_OUT.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
       };
       mockTx.listing.findMany.mockResolvedValue([
@@ -340,13 +351,117 @@ describe('BundlesService', () => {
 
       expect(result.bundleId).toBe('bundle-1');
       expect(result.orders).toHaveLength(2);
-      expect(mockTx.listing.update).toHaveBeenCalledTimes(2);
-      expect(mockTx.listing.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'SOLD' } }),
+      // Listings and the bundle are now claimed with CONDITIONAL writes,
+      // so the status guard lives in the WHERE clause.
+      expect(mockTx.listing.updateMany).toHaveBeenCalledTimes(2);
+      expect(mockTx.listing.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'ACTIVE' }),
+          data: { status: 'SOLD' },
+        }),
       );
-      expect(mockTx.bundle.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'CHECKED_OUT' } }),
+      expect(mockTx.bundle.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'OPEN' }),
+          data: { status: 'CHECKED_OUT' },
+        }),
       );
+    });
+
+    it('aborts when another checkout already claimed a listing', async () => {
+      const mockTx: any = {
+        listing: {
+          findMany: jest.fn().mockResolvedValue([]),
+          update: jest.fn(),
+          // count 0 = a concurrent checkout already flipped it to SOLD.
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        order: { create: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      // 409 + machine-readable code, not a 400 — the request was valid,
+      // another buyer simply won the race.
+      let caught: any;
+      try {
+        await service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX');
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ConflictException);
+      expect(caught.getStatus()).toBe(409);
+      expect(caught.getResponse().code).toBe('BUNDLE_ITEM_ALREADY_SOLD');
+      expect(mockTx.order.create).not.toHaveBeenCalled();
+    });
+
+    // The losing buyer used to get an opaque 500 here: Postgres aborts the
+    // Serializable transaction with 40001, Prisma raises P2034, and that is
+    // not an HttpException — so GlobalExceptionFilter fell through to its
+    // generic unknown-error branch.
+    it('maps a Postgres serialization failure (P2034) to a retryable 409', async () => {
+      const conflict = new Prisma.PrismaClientKnownRequestError(
+        'Transaction failed due to a write conflict or a deadlock',
+        { code: 'P2034', clientVersion: 'test' },
+      );
+      mockPrisma.$transaction.mockRejectedValue(conflict);
+
+      let caught: any;
+      try {
+        await service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX');
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeInstanceOf(ConflictException);
+      expect(caught.getStatus()).toBe(409);
+      const body = caught.getResponse();
+      expect(body.code).toBe('CHECKOUT_CONFLICT_RETRY');
+      expect(body.retryable).toBe(true);
+      // Explicitly NOT a 500 — that was the bug.
+      expect(caught.getStatus()).not.toBe(500);
+    });
+
+    it('does not swallow non-P2034 database errors', async () => {
+      mockPrisma.$transaction.mockRejectedValue(new Error('connection reset'));
+
+      await expect(
+        service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX'),
+      ).rejects.toThrow('connection reset');
+    });
+
+    it('aborts when the bundle was already checked out concurrently', async () => {
+      const mockTx: any = {
+        listing: {
+          findMany: jest.fn().mockResolvedValue([]),
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        order: { create: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          // count 0 = the bundle was no longer OPEN.
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      let caught: any;
+      try {
+        await service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX');
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(ConflictException);
+      expect(caught.getStatus()).toBe(409);
+      expect(caught.getResponse().code).toBe('BUNDLE_ALREADY_CHECKED_OUT');
+      expect(mockTx.listing.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.order.create).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException if bundle not found', async () => {

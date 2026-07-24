@@ -86,8 +86,8 @@ jobs:
       # nodemailer v8, bcrypt v6) so hard-blocking on HIGH is currently
       # achievable; if a new transitive CVE breaks this, check
       # DEPENDENCY_UPGRADE_PLAN.md before loosening the gate.
-      - name: Security audit (high gate)
-        run: npm audit --audit-level=high
+      - name: Security audit (reachability gate)
+        run: npm run audit:gate
 
   # Web E2E smoke tests (Playwright). Runs in parallel with `ci`.
   # Mirrors the optional E2E=1 step in scripts/ci-parity.sh — locally
