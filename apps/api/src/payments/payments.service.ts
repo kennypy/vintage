@@ -23,6 +23,20 @@ import { FraudService } from '../fraud/fraud.service';
 const MAX_PAYMENT_AMOUNT_BRL = 10_000;
 
 /**
+ * How long a reservation that never reached the provider (PENDING
+ * Payment with no providerPaymentId) blocks a new attempt on the same
+ * order.
+ *
+ * The gap between reserveAttempt committing and finalizeAttempt writing
+ * the provider id is a single network call, so anything older than this
+ * was orphaned by a crash or a hard timeout. It must expire: the
+ * reconciliation cron only sweeps rows that DID reach the provider
+ * (`providerPaymentId: { not: null }`), so an orphan would otherwise sit
+ * PENDING forever and permanently brick payment on that order.
+ */
+const RESERVATION_GRACE_MS = 2 * 60 * 1000;
+
+/**
  * Mercado Pago payment statuses that are terminal failures — once a
  * payment reaches one of these it will never become approved, so the
  * reconciliation poller can safely mark our Payment row FAILED. Note
@@ -105,9 +119,12 @@ export class PaymentsService {
    *      at the moment we authorized the charge — no race with concurrent
    *      mutations (defense in depth; the order schema doesn't currently expose
    *      a totalBrl-mutating endpoint, but locking is cheap and forward-compat).
-   *   2. The @@unique([orderId, idempotencyKey]) constraint fires here, before
-   *      a duplicate attempt can ever reach Mercado Pago — backstop against
-   *      double-charge if MP-side dedup ever misfires.
+   *   2. A concurrent second attempt is rejected here, before it can reach
+   *      Mercado Pago. NOTE: @@unique([orderId, idempotencyKey]) does NOT
+   *      provide this on its own — racing requests allocate different
+   *      attemptNumbers, so their derived keys differ and the constraint
+   *      never fires. The row lock plus the in-flight PENDING check below
+   *      are what actually enforce one live instrument per order.
    *   3. If the network call fails, the PENDING row remains and the retry
    *      flow can advance attemptNumber cleanly.
    */
@@ -118,6 +135,21 @@ export class PaymentsService {
     extra?: string,
   ): Promise<{ amountBrl: number; attemptNumber: number; idempotencyKey: string; paymentId: string }> {
     return this.prisma.$transaction(async (tx) => {
+      // Take the row lock BEFORE deciding anything. The lock used to be
+      // acquired AFTER the single-active-payment gate, so two concurrent
+      // creates both read paymentId === null, both passed the gate, and
+      // each reached Mercado Pago with a different idempotency key —
+      // minting two independently payable instruments for one order.
+      // Money paid against whichever instrument did NOT end up in
+      // Order.paymentId is silently swallowed: the order never flips to
+      // PAID, the seller is never credited, and neither the webhook nor
+      // the reconciliation cron issues a refund.
+      const locked = await tx.order.updateMany({
+        where: { id: orderId },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count === 0) throw new NotFoundException('Pedido não encontrado.');
+
       const order = await tx.order.findUnique({ where: { id: orderId } });
       if (!order) throw new NotFoundException('Pedido não encontrado.');
       if (order.buyerId !== userId) throw new ForbiddenException('Acesso negado ao pedido.');
@@ -129,13 +161,46 @@ export class PaymentsService {
           'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
         );
       }
+
+      // Retire reservations orphaned by a crash between reserveAttempt
+      // and finalizeAttempt. They carry no providerPaymentId, so the
+      // reconciliation cron never sees them and they would otherwise
+      // block this order's payment path permanently.
+      const graceCutoff = new Date(Date.now() - RESERVATION_GRACE_MS);
+      const { count: retired } = await tx.payment.updateMany({
+        where: {
+          orderId,
+          status: 'PENDING',
+          providerPaymentId: null,
+          createdAt: { lte: graceCutoff },
+        },
+        data: {
+          status: 'FAILED',
+          failureReason: 'abandoned: reservation never reached the provider',
+        },
+      });
+      if (retired > 0) {
+        this.logger.warn(
+          `Retired ${retired} orphaned payment reservation(s) for order ${orderId}`,
+        );
+      }
+
+      // Order.paymentId is only written by finalizeAttempt, AFTER the
+      // provider call returns, so it cannot serve as the mutex between
+      // two requests racing before either has called out. A live PENDING
+      // Payment row is the authoritative "an attempt is already in
+      // flight" signal, and we create one below inside this same lock.
+      const inFlight = await tx.payment.count({
+        where: { orderId, status: 'PENDING' },
+      });
+      if (inFlight > 0) {
+        throw new BadRequestException(
+          'Já existe um pagamento em andamento para este pedido. Conclua ou cancele o pagamento anterior antes de criar um novo.',
+        );
+      }
+
       const amountBrl = Number(order.totalBrl);
       this.validateAmount(amountBrl, orderId);
-
-      // Lock the order row by writing a no-op-ish field. Prisma's update takes
-      // an exclusive row lock for the rest of the transaction, serializing
-      // concurrent payment-creation attempts on the same order.
-      await tx.order.update({ where: { id: orderId }, data: { updatedAt: new Date() } });
 
       const count = await tx.payment.count({ where: { orderId } });
       const attemptNumber = count + 1;

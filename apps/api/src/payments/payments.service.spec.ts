@@ -28,6 +28,9 @@ const mockConfigService = {
 const mockPrisma: Record<string, any> = {
   order: {
     update: jest.fn(),
+    // reserveAttempt locks the order row with updateMany BEFORE deciding
+    // whether an attempt is already in flight; count 1 = row exists.
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findFirst: jest.fn().mockResolvedValue(null),
     findUnique: jest.fn(),
   },
