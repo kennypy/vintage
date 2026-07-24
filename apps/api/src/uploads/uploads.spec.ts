@@ -83,9 +83,16 @@ describe('UploadsService', () => {
       listingImageFlag: {
         create: jest.fn().mockResolvedValue({}),
       },
-      // Ownership checks for deleteImage — resolve the S3 key to a
-      // DB row scoped by sellerId. Each test sets the return value
-      // via mockResolvedValueOnce.
+      // Server-written upload provenance. recordUploadOwnership() upserts
+      // one row per uploaded key; deleteImage() authorizes by an exact
+      // (uploaderId, s3Key) match against it and cleans the row up after
+      // a successful S3 delete. Each test sets findFirst via
+      // mockResolvedValueOnce.
+      uploadObject: {
+        upsert: jest.fn().mockResolvedValue({}),
+        findFirst: jest.fn(),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       listingImage: {
         findFirst: jest.fn(),
       },
@@ -437,20 +444,17 @@ describe('UploadsService', () => {
   });
 
   describe('deleteImage', () => {
-    it('deletes when the caller owns the listing the image belongs to', async () => {
+    it('deletes when a server-written ownership record matches the caller + key', async () => {
       const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
       const prisma = (service as any)._mockPrisma;
-      // Ownership check: listings/* keys resolve through ListingImage →
-      // listing.sellerId === userId.
-      prisma.listingImage.findFirst.mockResolvedValueOnce({ id: 'img-1' });
+      // Ownership is proven ONLY by a server-written UploadObject row via
+      // an EXACT (uploaderId, s3Key) match — never by a client-writable url.
+      prisma.uploadObject.findFirst.mockResolvedValueOnce({ id: 'up-1' });
 
       await service.deleteImage('listings/test.jpg', 'seller-1');
 
-      expect(prisma.listingImage.findFirst).toHaveBeenCalledWith({
-        where: {
-          url: { contains: 'listings/test.jpg' },
-          listing: { sellerId: 'seller-1' },
-        },
+      expect(prisma.uploadObject.findFirst).toHaveBeenCalledWith({
+        where: { s3Key: 'listings/test.jpg', uploaderId: 'seller-1' },
         select: { id: true },
       });
       expect(mockSend).toHaveBeenCalled();
@@ -460,13 +464,18 @@ describe('UploadsService', () => {
           Key: 'listings/test.jpg',
         }),
       );
+      // Provenance row is cleaned up (scoped to the owner) after S3 delete.
+      expect(prisma.uploadObject.deleteMany).toHaveBeenCalledWith({
+        where: { s3Key: 'listings/test.jpg', uploaderId: 'seller-1' },
+      });
     });
 
-    it('refuses when the caller does not own the listing the image belongs to', async () => {
-      // IDOR guard: a non-owner must NOT be able to destroy someone
-      // else's listing media just by knowing the S3 key.
+    it('refuses when the caller has no ownership record for the key', async () => {
+      // IDOR guard: a caller cannot destroy an object they did not upload,
+      // even after planting the victim key as a substring of their own
+      // listing-image / avatar url — ownership is not read from those columns.
       const prisma = (service as any)._mockPrisma;
-      prisma.listingImage.findFirst.mockResolvedValueOnce(null);
+      prisma.uploadObject.findFirst.mockResolvedValueOnce(null);
 
       await expect(
         service.deleteImage('listings/victim.jpg', 'attacker-1'),
@@ -475,18 +484,26 @@ describe('UploadsService', () => {
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it('refuses keys under an unknown prefix', async () => {
-      // Fail-closed: we never swallow-succeed on an unknown prefix —
-      // that would give an attacker a fish-for-keys side channel.
+    it('refuses an unknown/arbitrary key with no ownership record', async () => {
+      // Fail-closed: no record → 403, never a swallow-success that would
+      // give an attacker a fish-for-keys side channel.
+      const prisma = (service as any)._mockPrisma;
+      prisma.uploadObject.findFirst.mockResolvedValueOnce(null);
+
       await expect(
         service.deleteImage('arbitrary/path/file.jpg', 'someone'),
       ).rejects.toThrow();
       expect(mockSend).not.toHaveBeenCalled();
     });
 
+    it('refuses an empty key without touching S3', async () => {
+      await expect(service.deleteImage('   ', 'someone')).rejects.toThrow();
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
     it('surfaces a 500 when the S3 DELETE itself fails after authz', async () => {
       const prisma = (service as any)._mockPrisma;
-      prisma.listingImage.findFirst.mockResolvedValueOnce({ id: 'img-1' });
+      prisma.uploadObject.findFirst.mockResolvedValueOnce({ id: 'up-1' });
       mockSend.mockRejectedValueOnce(new Error('S3 error'));
 
       await expect(

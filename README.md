@@ -81,7 +81,7 @@ vintage/
 
 35+ modelos Prisma. Core: User, Listing, ListingImage, ListingVideo, Category, Brand, Order, OrderListingSnapshot, Offer, Bundle, BundleItem, Wallet, WalletTransaction, PayoutMethod, PayoutRequest, Favorite, Follow, Conversation, Message, Review, Dispute, Notification, Address, Coupon, Promotion, SavedSearch, PriceDropAlert, Report, DeviceToken, LoginEvent, AuthenticityRequest, NotaFiscal, PaymentFlag.
 
-Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch moderation queue), FraudRule + FraudFlag (velocity/drain signals), CpfVerificationLog (KYC audit, SHA256 hashes only), CafVerificationSession (document+liveness sessions), DeletionAuditLog (LGPD), Consent.
+Integrity & compliance: ProcessedWebhook (dedup), ListingImageFlag (SafeSearch moderation queue), UploadObject (server-written S3 upload provenance — non-forgeable ownership source for DELETE /uploads/:key), FraudRule + FraudFlag (velocity/drain signals), CpfVerificationLog (KYC audit, SHA256 hashes only), CafVerificationSession (document+liveness sessions), DeletionAuditLog (LGPD), Consent.
 
 **Seed**: 10 categorias com 55 subcategorias + 55 marcas brasileiras e internacionais + 2 FraudRule rows (NEW_ACCOUNT_VELOCITY, PAYOUT_DRAIN). Admin promotion via `npm run admin:promote -- <email>` (seed.ts refuses to run with NODE_ENV=production).
 
