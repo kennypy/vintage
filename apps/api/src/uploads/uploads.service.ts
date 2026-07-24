@@ -38,6 +38,21 @@ const MAX_FILENAME_LENGTH = 200;
 /** Maximum image width after resize. */
 const MAX_IMAGE_WIDTH = 1200;
 
+/**
+ * Hard ceiling on the DECODED pixel count of an uploaded image.
+ *
+ * The 10 MB byte gate and the 3-byte magic check say nothing about the
+ * canvas: a highly-compressible single-colour PNG of 16383×16383 is a
+ * few hundred KB on the wire but ~1 GB of RGBA once libvips materialises
+ * it — and the resize to MAX_IMAGE_WIDTH only runs AFTER that decode.
+ * On the 1 GB machines we provision, one such request OOM-kills the API
+ * for every user. sharp's own default (~268 MP) is far above what our
+ * container can survive, so we set our own.
+ *
+ * 40 MP is ~8000×5000 — well beyond any phone camera a seller will use.
+ */
+const MAX_IMAGE_PIXELS = 40_000_000;
+
 /** JPEG compression quality. */
 const JPEG_QUALITY = 80;
 
@@ -308,9 +323,12 @@ export class UploadsService {
       };
     }
 
+    // Reject oversized canvases from the header BEFORE any full decode.
+    const pipeline = await this.guardedSharp(file);
+
     try {
       // 6. Process with Sharp: resize + compress to JPEG
-      const processed = await sharp(file)
+      const processed = await pipeline
         .resize({ width: MAX_IMAGE_WIDTH, withoutEnlargement: true })
         .jpeg({ quality: JPEG_QUALITY })
         .toBuffer();
@@ -353,6 +371,41 @@ export class UploadsService {
         'Erro ao processar imagem. Tente novamente.',
       );
     }
+  }
+
+  /**
+   * Refuse an image whose declared canvas exceeds MAX_IMAGE_PIXELS,
+   * reading only the header — no full decode. `limitInputPixels` makes
+   * libvips itself refuse to materialise anything larger, so a lying
+   * header cannot get past the subsequent pipeline either.
+   *
+   * Returns a sharp instance configured with the same limits, so callers
+   * decode through the guarded pipeline rather than a fresh unguarded one.
+   */
+  private async guardedSharp(file: Buffer): Promise<sharp.Sharp> {
+    const pipeline = sharp(file, {
+      limitInputPixels: MAX_IMAGE_PIXELS,
+      failOn: 'truncated',
+    });
+
+    let meta: sharp.Metadata;
+    try {
+      meta = await pipeline.metadata();
+    } catch {
+      throw new BadRequestException('Imagem inválida ou corrompida.');
+    }
+
+    const pixels = (meta.width ?? 0) * (meta.height ?? 0);
+    if (pixels <= 0) {
+      throw new BadRequestException('Não foi possível ler as dimensões da imagem.');
+    }
+    if (pixels > MAX_IMAGE_PIXELS) {
+      throw new BadRequestException(
+        'Imagem excede o limite de resolução permitido.',
+      );
+    }
+
+    return pipeline;
   }
 
   /** Create a ListingImageFlag row when SafeSearch returned LIKELY. */
@@ -428,8 +481,11 @@ export class UploadsService {
       return { url: placeholderUrl, key };
     }
 
+    // Same decode guard as the listing-image path.
+    const pipeline = await this.guardedSharp(file);
+
     try {
-      const processed = await sharp(file)
+      const processed = await pipeline
         .resize({ width: 512, height: 512, fit: 'cover' })
         .jpeg({ quality: JPEG_QUALITY })
         .toBuffer();
