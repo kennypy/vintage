@@ -80,6 +80,42 @@ export class DisputesService {
 
     // Create dispute and update order status in a transaction
     const dispute = await this.prisma.$transaction(async (tx) => {
+      // Lock the order row and RE-CHECK before writing. Every guard above
+      // ran on an unlocked findUnique, so a buyer firing POST /disputes
+      // and POST /returns concurrently had both reads see no dispute and
+      // no return — landing both, after which the two settlement
+      // pipelines each pay out for the same order. returns.service
+      // .create() takes this same lock first, so the two serialize here.
+      const locked = await tx.order.updateMany({
+        where: { id: dto.orderId },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count === 0) {
+        throw new NotFoundException('Pedido não encontrado');
+      }
+
+      const fresh = await tx.order.findUnique({
+        where: { id: dto.orderId },
+        select: {
+          status: true,
+          dispute: { select: { id: true } },
+          returnRequest: { select: { id: true } },
+        },
+      });
+      if (fresh?.dispute) {
+        throw new ConflictException('Já existe uma disputa aberta para este pedido');
+      }
+      if (fresh?.returnRequest) {
+        throw new ConflictException(
+          'Já existe uma solicitação de devolução para este pedido. Não é possível abrir uma disputa em paralelo.',
+        );
+      }
+      if (fresh?.status !== 'DELIVERED') {
+        throw new BadRequestException(
+          'Disputas só podem ser abertas após a entrega do pedido',
+        );
+      }
+
       const createdDispute = await tx.dispute.create({
         data: {
           orderId: dto.orderId,

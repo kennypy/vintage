@@ -85,7 +85,17 @@ describe('DisputesService', () => {
 
       const mockTx = {
         dispute: { create: jest.fn().mockResolvedValue(createdDispute) },
-        order: { update: jest.fn().mockResolvedValue({}) },
+        order: {
+          update: jest.fn().mockResolvedValue({}),
+          // Row lock taken before the re-check.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          // Fresh read under the lock — still clean.
+          findUnique: jest.fn().mockResolvedValue({
+            status: 'DELIVERED',
+            dispute: null,
+            returnRequest: null,
+          }),
+        },
       };
       mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
 
@@ -95,6 +105,30 @@ describe('DisputesService', () => {
       expect(mockTx.order.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: 'DISPUTED' } }),
       );
+    });
+
+    it('aborts when a return landed concurrently, under the row lock', async () => {
+      mockPrisma.order.findUnique.mockResolvedValue(mockOrder);
+
+      const mockTx = {
+        dispute: { create: jest.fn() },
+        order: {
+          update: jest.fn().mockResolvedValue({}),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          // The racing POST /returns committed while we waited on the lock.
+          findUnique: jest.fn().mockResolvedValue({
+            status: 'DELIVERED',
+            dispute: null,
+            returnRequest: { id: 'return-1' },
+          }),
+        },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await expect(service.create('buyer-1', createDto)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockTx.dispute.create).not.toHaveBeenCalled();
     });
 
     it('should reject if order is not DELIVERED', async () => {
