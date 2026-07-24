@@ -1013,8 +1013,13 @@ export class UsersService {
     // without leaving evidence. Audit entry is best-effort — a logging
     // failure must not break the admin tool.
     if (search && search.includes('@')) {
+      // JSON.stringify escapes CR/LF and every other control character.
+      // Interpolating the raw term let an ADMIN caller embed a newline
+      // and append forged `[privacy-audit] admin <someone-else> ...`
+      // lines — poisoning the very trail this control exists to keep and
+      // misattributing the enumeration to another admin.
       this.logger.warn(
-        `[privacy-audit] admin ${adminId} ran email-substring lookup: ${search.slice(0, 64)}`,
+        `[privacy-audit] admin ${adminId} ran email-substring lookup: ${JSON.stringify(search.slice(0, 64))}`,
       );
     }
 

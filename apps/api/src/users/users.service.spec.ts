@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +21,8 @@ const mockPrisma = {
   user: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
   },
@@ -664,6 +667,49 @@ describe('UsersService', () => {
       expect(mockPrisma.payoutMethod.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
+    });
+  });
+
+  describe('listUsersAdmin — privacy-audit trail', () => {
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      mockPrisma.user.count.mockResolvedValue(0);
+      warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('escapes CR/LF so an admin cannot forge extra audit lines', async () => {
+      await service.listUsersAdmin(
+        1,
+        20,
+        'a@b\n[privacy-audit] admin victim-id ran email-substring lookup: ceo@',
+        'admin-1',
+      );
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const line = warnSpy.mock.calls[0][0] as string;
+      // One line, and the injected newline survives only as an escape.
+      expect(line).not.toContain('\n');
+      expect(line).toContain('\\n');
+      expect(line.startsWith('[privacy-audit] admin admin-1 ')).toBe(true);
+    });
+
+    it('logs the audit line for a genuine email lookup', async () => {
+      await service.listUsersAdmin(1, 20, 'ceo@vintage.br', 'admin-1');
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('ceo@vintage.br');
+    });
+
+    it('does not log for a non-email search term', async () => {
+      await service.listUsersAdmin(1, 20, 'jaqueta', 'admin-1');
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });
