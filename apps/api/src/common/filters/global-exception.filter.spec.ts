@@ -89,6 +89,51 @@ describe('GlobalExceptionFilter', () => {
     expect(body.message.endsWith('…')).toBe(true);
   });
 
+  it('caps attacker-controlled messages before the redaction regexes run (ReDoS)', () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      // A `forbidNonWhitelisted` rejection echoes the offending property
+      // name verbatim, up to the ~100 kB body-parser limit. When the
+      // redaction chain ran BEFORE truncate, /PrismaClient[A-Za-z]*Error/
+      // backtracked to the end of the string at each of the ~8000 literal
+      // matches — ~10⁸ char steps on the event loop per request.
+      const hostile = 'PrismaClient'.repeat(8000); // ~96 kB
+      const startedNs = process.hrtime.bigint();
+      filter.catch(
+        new BadRequestException(`property ${hostile} should not exist`),
+        host as never,
+      );
+      const elapsedMs = Number(process.hrtime.bigint() - startedNs) / 1e6;
+      const body = res.json.mock.calls[0][0];
+      // Prod cap is 240 chars + the horizontal-ellipsis marker.
+      expect(body.message.length).toBeLessThanOrEqual(241);
+      // Unfixed this takes seconds; fixed it is sub-millisecond.
+      expect(elapsedMs).toBeLessThan(1000);
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+
+  it('still redacts Prisma/driver leaks after the truncate-first reorder', () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      filter.catch(
+        new BadRequestException(
+          'PrismaClientKnownRequestError: Unique constraint failed on the fields: (`email`) at 10.0.0.42:5432',
+        ),
+        host as never,
+      );
+      const body = res.json.mock.calls[0][0];
+      expect(body.message).not.toContain('PrismaClientKnownRequestError');
+      expect(body.message).not.toContain('10.0.0.42');
+      expect(body.message).toContain('conflict');
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+
   it('unknown errors → 500 with generic message (prod mode redacts debug)', () => {
     const prevEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
