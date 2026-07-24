@@ -1000,5 +1000,33 @@ describe('AuthService', () => {
         service.adminSetup('user-1', 'super-secret-admin-key-zxcvbnm'),
       ).resolves.toBeDefined();
     });
+
+    // The controller now binds AdminSetupDto so ValidationPipe engages;
+    // these guard the service directly, because Buffer.from() treats ANY
+    // object with a numeric `length` as an array-like and allocates that
+    // many bytes before the comparison can reject it.
+    it('rejects an array-like body without allocating (unbounded Buffer.from)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      const startedNs = process.hrtime.bigint();
+      await expect(
+        service.adminSetup('user-1', { length: 1_000_000_000 } as never),
+      ).rejects.toThrow(/inválida/);
+      const elapsedMs = Number(process.hrtime.bigint() - startedNs) / 1e6;
+      expect(elapsedMs).toBeLessThan(1000);
+    });
+
+    it('rejects a non-string setupKey', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      await expect(
+        service.adminSetup('user-1', 12345 as never),
+      ).rejects.toThrow(/inválida/);
+    });
+
+    it('rejects an over-long setupKey before the compare', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      await expect(
+        service.adminSetup('user-1', 'x'.repeat(257)),
+      ).rejects.toThrow(/inválida/);
+    });
   });
 });

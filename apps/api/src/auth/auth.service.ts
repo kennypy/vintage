@@ -1746,6 +1746,15 @@ export class AuthService {
   }
 
   async adminSetup(userId: string, setupKey: string) {
+    // Defence in depth behind AdminSetupDto: never hand anything but a
+    // bounded string to Buffer.from(). Buffer.from() falls through to
+    // fromArrayLike() for any object carrying a numeric `length`, so a
+    // body that bypassed validation would allocate and iterate that many
+    // times before the comparison could reject it.
+    if (typeof setupKey !== 'string' || setupKey.length > 256) {
+      throw new UnauthorizedException('Chave de setup inválida.');
+    }
+
     const envKey = this.config.get<string>('ADMIN_SETUP_KEY');
     if (!envKey) {
       throw new BadRequestException(
