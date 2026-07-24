@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListingsService } from '../listings/listings.service';
 import { CreateBundleDto } from './dto/create-bundle.dto';
@@ -218,14 +219,31 @@ export class BundlesService {
 
     // Create orders in transaction
     const result = await this.prisma.$transaction(async (tx) => {
-      // Double-check all listings are still active
-      const freshListings = await tx.listing.findMany({
-        where: { id: { in: bundle.items.map((i) => i.listingId) } },
+      // Claim the bundle itself. The `bundle.status !== 'OPEN'` check
+      // above ran on an unlocked read, so one buyer double-clicking could
+      // check the same bundle out twice.
+      const claimedBundle = await tx.bundle.updateMany({
+        where: { id: bundleId, status: 'OPEN' },
+        data: { status: 'CHECKED_OUT' },
       });
+      if (claimedBundle.count === 0) {
+        throw new BadRequestException('Este pacote já foi finalizado');
+      }
 
-      const stillNonActive = freshListings.filter((l) => l.status !== 'ACTIVE');
-      if (stillNonActive.length > 0) {
-        throw new BadRequestException('Um ou mais anúncios do pacote já foram vendidos');
+      // Claim each listing with a CONDITIONAL write rather than reading
+      // its status and trusting it. The previous read-then-write ran at
+      // the Postgres default (READ COMMITTED) with no row lock, so two
+      // buyers whose bundles shared a listing both observed ACTIVE and
+      // both proceeded — two orders, two snapshots, one physical garment,
+      // and no @@unique on Order.listingId to catch it.
+      for (const item of bundle.items) {
+        const claimedListing = await tx.listing.updateMany({
+          where: { id: item.listingId, status: 'ACTIVE' },
+          data: { status: 'SOLD' },
+        });
+        if (claimedListing.count === 0) {
+          throw new BadRequestException('Um ou mais anúncios do pacote já foram vendidos');
+        }
       }
 
       const shippingPerItem = combinedShippingCost / bundle.items.length;
@@ -259,10 +277,7 @@ export class BundlesService {
           },
         });
 
-        await tx.listing.update({
-          where: { id: item.listingId },
-          data: { status: 'SOLD' },
-        });
+        // Listing was already claimed ACTIVE → SOLD above.
 
         // Freeze the listing state onto the order (see OrderListingSnapshot
         // in schema.prisma for the full rationale). `item.listing` was
@@ -291,13 +306,15 @@ export class BundlesService {
         orders.push(order);
       }
 
-      await tx.bundle.update({
-        where: { id: bundleId },
-        data: { status: 'CHECKED_OUT' },
-      });
+      // Bundle was already claimed OPEN → CHECKED_OUT above.
 
       return orders;
-    });
+    },
+    // Matches orders.service.ts's single-listing checkout. The
+    // conditional claims above are the primary defence; Serializable
+    // closes the remaining read-skew window on the snapshot writes.
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     // All bundled listings transitioned ACTIVE → SOLD; drop them from search.
     for (const item of bundle.items) {

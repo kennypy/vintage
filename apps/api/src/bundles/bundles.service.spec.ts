@@ -317,9 +317,18 @@ describe('BundlesService', () => {
       mockPrisma.address.findUnique.mockResolvedValue({ id: 'addr-1', userId: 'buyer-1' });
 
       const mockTx = {
-        listing: { findMany: jest.fn(), update: jest.fn() },
+        listing: {
+          findMany: jest.fn(),
+          update: jest.fn(),
+          // Conditional claim ACTIVE → SOLD; count 1 = we won the race.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         order: { create: jest.fn() },
-        bundle: { update: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          // Conditional claim OPEN → CHECKED_OUT.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
       };
       mockTx.listing.findMany.mockResolvedValue([
@@ -340,13 +349,68 @@ describe('BundlesService', () => {
 
       expect(result.bundleId).toBe('bundle-1');
       expect(result.orders).toHaveLength(2);
-      expect(mockTx.listing.update).toHaveBeenCalledTimes(2);
-      expect(mockTx.listing.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'SOLD' } }),
+      // Listings and the bundle are now claimed with CONDITIONAL writes,
+      // so the status guard lives in the WHERE clause.
+      expect(mockTx.listing.updateMany).toHaveBeenCalledTimes(2);
+      expect(mockTx.listing.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'ACTIVE' }),
+          data: { status: 'SOLD' },
+        }),
       );
-      expect(mockTx.bundle.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { status: 'CHECKED_OUT' } }),
+      expect(mockTx.bundle.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'OPEN' }),
+          data: { status: 'CHECKED_OUT' },
+        }),
       );
+    });
+
+    it('aborts when another checkout already claimed a listing', async () => {
+      const mockTx: any = {
+        listing: {
+          findMany: jest.fn().mockResolvedValue([]),
+          update: jest.fn(),
+          // count 0 = a concurrent checkout already flipped it to SOLD.
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        order: { create: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await expect(
+        service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockTx.order.create).not.toHaveBeenCalled();
+    });
+
+    it('aborts when the bundle was already checked out concurrently', async () => {
+      const mockTx: any = {
+        listing: {
+          findMany: jest.fn().mockResolvedValue([]),
+          update: jest.fn(),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        order: { create: jest.fn() },
+        bundle: {
+          update: jest.fn(),
+          // count 0 = the bundle was no longer OPEN.
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        orderListingSnapshot: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrisma.$transaction.mockImplementation((cb: any) => cb(mockTx));
+
+      await expect(
+        service.checkoutBundle('bundle-1', 'buyer-1', 'addr-1', 'PIX'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockTx.listing.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.order.create).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException if bundle not found', async () => {
