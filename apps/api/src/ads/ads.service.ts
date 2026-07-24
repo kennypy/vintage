@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import { AdCampaignStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -161,6 +167,57 @@ export class AdsService {
   ) {
     const ipHash = crypto.createHash('sha256').update(ip).digest('hex');
 
+    // POST /ads/click is unauthenticated and CSRF-excluded, so every
+    // field below is attacker-chosen. Nothing used to be checked: any
+    // campaignId/creativeId pair was accepted, inflating the click/CTR
+    // figures partners are billed against and polluting the fraud
+    // dataset, and destinationUrl came back even for inactive creatives
+    // on DRAFT/PAUSED campaigns.
+    const creative = await this.prisma.adCreative.findUnique({
+      where: { id: dto.creativeId },
+      select: {
+        destinationUrl: true,
+        active: true,
+        campaignId: true,
+        campaign: { select: { status: true } },
+      },
+    });
+    if (!creative) throw new NotFoundException('Creative não encontrado.');
+    if (creative.campaignId !== dto.campaignId) {
+      throw new BadRequestException(
+        'Creative não pertence à campanha informada.',
+      );
+    }
+    if (!creative.active || creative.campaign.status !== AdCampaignStatus.ACTIVE) {
+      throw new BadRequestException('Anúncio não está ativo.');
+    }
+
+    // Bind the click to an impression WE actually served to THIS client.
+    const impression = await this.prisma.adImpression.findUnique({
+      where: { id: dto.impressionId },
+      select: { campaignId: true, creativeId: true, ipHash: true },
+    });
+    if (
+      !impression ||
+      impression.campaignId !== dto.campaignId ||
+      impression.creativeId !== dto.creativeId ||
+      impression.ipHash !== ipHash
+    ) {
+      throw new BadRequestException('Impressão inválida para este clique.');
+    }
+
+    // Consume the impression. BotDetectionService only COUNTs it, so one
+    // served impressionId could be replayed indefinitely and every replay
+    // scored as clean (all signals 0 except velocity at +0.4, under the
+    // 0.7 threshold).
+    const alreadyClicked = await this.prisma.adClick.findFirst({
+      where: { impressionId: dto.impressionId },
+      select: { id: true },
+    });
+    if (alreadyClicked) {
+      throw new ConflictException('Este clique já foi registrado.');
+    }
+
     const { score, isBot, signals } = await this.botDetection.score({
       ip,
       ipHash,
@@ -175,7 +232,7 @@ export class AdsService {
       data: {
         campaignId: dto.campaignId,
         creativeId: dto.creativeId,
-        impressionId: dto.impressionId ?? null,
+        impressionId: dto.impressionId,
         userId: userId ?? null,
         deviceId: dto.deviceId ?? null,
         ipHash,
@@ -195,13 +252,7 @@ export class AdsService {
       return { redirectUrl: null, flagged: true };
     }
 
-    const creative = await this.prisma.adCreative.findUnique({
-      where: { id: dto.creativeId },
-      select: { destinationUrl: true },
-    });
-
-    if (!creative) throw new NotFoundException('Creative não encontrado.');
-
+    // Creative was already loaded and validated above.
     return { redirectUrl: creative.destinationUrl, flagged: false };
   }
 

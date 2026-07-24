@@ -59,6 +59,7 @@ export class AdsController {
 
   // POST /api/v1/ads/click — record a click and return redirect URL
   @Post('click')
+  @Throttle({ default: { limit: 20, ttl: 60 * 1000 } })
   @HttpCode(HttpStatus.OK)
   recordClick(
     @Body() dto: RecordClickDto,

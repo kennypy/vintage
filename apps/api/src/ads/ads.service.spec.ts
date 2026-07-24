@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import * as crypto from 'crypto';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AdsService } from './ads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AudienceService } from '../audience/audience.service';
@@ -11,11 +13,29 @@ const mockPrisma = {
     count: jest.fn(),
     // Billing-window lookup; null = this serve is billable.
     findFirst: jest.fn().mockResolvedValue(null),
+    findUnique: jest.fn(),
   },
-  adClick: { create: jest.fn(), count: jest.fn() },
+  adClick: {
+    create: jest.fn(),
+    count: jest.fn(),
+    // Single-use check; null = this impression hasn't been clicked yet.
+    findFirst: jest.fn().mockResolvedValue(null),
+  },
   adCreative: { findUnique: jest.fn() },
   userAdProfile: { findUnique: jest.fn() },
   listing: { findMany: jest.fn() },
+};
+
+/** Mirrors the service's ipHash derivation. */
+const hashIp = (ip: string) =>
+  crypto.createHash('sha256').update(ip).digest('hex');
+
+/** A creative that passes every recordClick pairing check. */
+const validCreative = {
+  destinationUrl: 'https://parceiro.com.br/promo',
+  active: true,
+  campaignId: 'c1',
+  campaign: { status: 'ACTIVE' },
 };
 
 const mockAudienceService = { scoreRelevance: jest.fn() };
@@ -35,9 +55,10 @@ describe('AdsService', () => {
     }).compile();
     service = module.get<AdsService>(AdsService);
     jest.clearAllMocks();
-    // clearAllMocks drops the inline resolved value above; restore the
-    // "clean slate" default for the billing-window lookup.
+    // clearAllMocks drops the inline resolved values above; restore the
+    // "clean slate" defaults for the two new lookups.
     mockPrisma.adImpression.findFirst.mockResolvedValue(null);
+    mockPrisma.adClick.findFirst.mockResolvedValue(null);
   });
 
   describe('serveAd', () => {
@@ -133,6 +154,12 @@ describe('AdsService', () => {
         signals: { uaIsBot: true },
       });
       mockPrisma.adClick.create.mockResolvedValue({});
+      mockPrisma.adCreative.findUnique.mockResolvedValue(validCreative);
+      mockPrisma.adImpression.findUnique.mockResolvedValue({
+        campaignId: 'c1',
+        creativeId: 'cr1',
+        ipHash: hashIp('10.0.0.1'),
+      });
       const result = await service.recordClick(
         {
           impressionId: 'imp-1',
@@ -154,8 +181,11 @@ describe('AdsService', () => {
         signals: {},
       });
       mockPrisma.adClick.create.mockResolvedValue({});
-      mockPrisma.adCreative.findUnique.mockResolvedValue({
-        destinationUrl: 'https://parceiro.com.br/promo',
+      mockPrisma.adCreative.findUnique.mockResolvedValue(validCreative);
+      mockPrisma.adImpression.findUnique.mockResolvedValue({
+        campaignId: 'c1',
+        creativeId: 'cr1',
+        ipHash: hashIp('200.200.200.1'),
       });
       const result = await service.recordClick(
         {
@@ -170,6 +200,103 @@ describe('AdsService', () => {
       );
       expect(result.flagged).toBe(false);
       expect(result.redirectUrl).toBe('https://parceiro.com.br/promo');
+    });
+
+    // ── F26: every field below is attacker-chosen (unauthenticated,
+    // CSRF-excluded), so each pairing must be proven against the DB.
+    const legitClick = {
+      impressionId: 'imp-3',
+      creativeId: 'cr1',
+      campaignId: 'c1',
+    };
+    const clientIp = '200.200.200.2';
+
+    const setUpValidClick = () => {
+      mockBotDetection.score.mockResolvedValue({
+        score: 0.1,
+        isBot: false,
+        signals: {},
+      });
+      mockPrisma.adClick.create.mockResolvedValue({});
+      mockPrisma.adCreative.findUnique.mockResolvedValue(validCreative);
+      mockPrisma.adImpression.findUnique.mockResolvedValue({
+        campaignId: 'c1',
+        creativeId: 'cr1',
+        ipHash: hashIp(clientIp),
+      });
+    };
+
+    it('rejects a creative that belongs to a different campaign', async () => {
+      setUpValidClick();
+      mockPrisma.adCreative.findUnique.mockResolvedValue({
+        ...validCreative,
+        campaignId: 'someone-elses-campaign',
+      });
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a click on an inactive creative', async () => {
+      setUpValidClick();
+      mockPrisma.adCreative.findUnique.mockResolvedValue({
+        ...validCreative,
+        active: false,
+      });
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a click on a PAUSED campaign', async () => {
+      setUpValidClick();
+      mockPrisma.adCreative.findUnique.mockResolvedValue({
+        ...validCreative,
+        campaign: { status: 'PAUSED' },
+      });
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an impression that was served to a different client', async () => {
+      setUpValidClick();
+      mockPrisma.adImpression.findUnique.mockResolvedValue({
+        campaignId: 'c1',
+        creativeId: 'cr1',
+        ipHash: hashIp('9.9.9.9'),
+      });
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown impressionId', async () => {
+      setUpValidClick();
+      mockPrisma.adImpression.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses to replay an impression that was already clicked', async () => {
+      setUpValidClick();
+      mockPrisma.adClick.findFirst.mockResolvedValue({ id: 'click-1' });
+
+      await expect(
+        service.recordClick(legitClick, null, clientIp, 'Mozilla/5.0'),
+      ).rejects.toThrow(ConflictException);
+      expect(mockPrisma.adClick.create).not.toHaveBeenCalled();
     });
   });
 });
