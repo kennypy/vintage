@@ -1,0 +1,109 @@
+{
+  "$comment": [
+    "Allowlist for scripts/audit-gate.mjs — the reachability-based security gate.",
+    "",
+    "An entry here SILENCES a high/critical advisory. That is only ever",
+    "acceptable for one of exactly TWO reasons, recorded in `category`:",
+    "",
+    "  unreachable  — the package is dev/build tooling and does not execute in",
+    "                 the deployed API or web runtime.",
+    "  pin-locked   — the advisory IS reachable, but the published fix breaks a",
+    "                 deliberate version pin recorded in CLAUDE.md. `pin` names",
+    "                 which one.",
+    "",
+    "NEVER allowlist something that is both reachable and fixable — fix it.",
+    "",
+    "`paths` (optional) narrows an entry to specific node_modules locations.",
+    "Use it whenever only a nested copy is affected, so the gate still fails if",
+    "our own direct dependency regresses.",
+    "",
+    "`tracked` marks an entry we intend to remove; the gate prints these on",
+    "every run so they cannot quietly become permanent."
+  ],
+
+  "allow": [
+    {
+      "package": "tar",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web (expo > @expo/cli). In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+    {
+      "package": "websocket-driver",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web. Reached only via firebase-admin > @firebase/database-compat; push.service.ts uses messaging() only and never opens a Realtime Database socket. In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+    {
+      "package": "axios",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web in the exploitable sense — reached only via twilio, which builds its own requests; no attacker-controlled axios config or hostile multipart is ever parsed. In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+    {
+      "package": "brace-expansion",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web (glob/minimatch inside eslint, jest, metro, rimraf). In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+    {
+      "package": "fast-uri",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web (@nestjs/cli > @angular-devkit/core; @nestjs/cli is a devDependency). In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+    {
+      "package": "shell-quote",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web (react-native > react-devtools-core). In-range fix pending in the deps-hardening unit.",
+      "tracked": true
+    },
+
+    {
+      "package": "expo",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web. Fix is expo@57, which breaks the Expo SDK 54 pin in CLAUDE.md.",
+      "pin": "Expo SDK 54 (apps/mobile: expo ~54.0.0, react-native 0.81.x)"
+    },
+    {
+      "package": "@expo/cli",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web. Fix is expo@57, which breaks the Expo SDK 54 pin.",
+      "pin": "Expo SDK 54"
+    },
+    {
+      "package": "@expo/metro-config",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web. Fix is expo@57, which breaks the Expo SDK 54 pin.",
+      "pin": "Expo SDK 54"
+    },
+
+    {
+      "package": "js-yaml",
+      "category": "unreachable",
+      "reason": "unreachable: dev/build tooling, not in deployed API/web. The prod path is @nestjs/swagger, but main.ts only mounts SwaggerModule when NODE_ENV !== 'production'. Deliberately NOT bumped: the fix version 5.2.1 is itself high-severity (GHSA-pm4m-ph32-ghv5).",
+      "tracked": true
+    },
+
+    {
+      "package": "next",
+      "category": "pin-locked",
+      "reason": "fix breaks a deliberate pin: npm's remedy is next@14.2.35, a major downgrade. Already on the latest patch of the pinned line (15.5.21), which cleared the 8 Server-Action/cache-confusion advisories. The residual entry is next's transitive postcss + its own nested sharp.",
+      "pin": "next 15.5.x (CLAUDE.md pinned versions)"
+    },
+    {
+      "package": "sharp",
+      "category": "pin-locked",
+      "reason": "fix breaks a deliberate pin: this is next's PRIVATE nested copy (0.34.5), remediable only by downgrading to next@14. Our own direct dependency is sharp 0.35.3 and is NOT flagged. Path-scoped on purpose so the gate still fails if node_modules/sharp regresses.",
+      "pin": "next 15.5.x",
+      "paths": ["node_modules/next/node_modules/sharp"]
+    },
+    {
+      "package": "postcss",
+      "category": "pin-locked",
+      "reason": "fix breaks a deliberate pin: clearing GHSA-r28c-9q8g-f849 needs postcss >8.5.17, but next hard-pins an exact 8.4.31, so the highest we can hold via the overrides is 8.5.16 — still inside the advisory range. Build-time only (CSS processing over first-party stylesheets). WEAKEST justification in this file: revisit the moment next unpins 8.4.31.",
+      "pin": "next 15.5.x (next hard-pins postcss 8.4.31)",
+      "tracked": true
+    }
+  ]
+}

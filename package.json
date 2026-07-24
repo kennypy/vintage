@@ -17,6 +17,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "audit:gate": "node scripts/audit-gate.mjs",
     "ci:parity": "node scripts/ci-parity.mjs",
     "ci:parity:fast": "node scripts/ci-parity.mjs --fast"
   },

@@ -185,8 +185,8 @@ run_step "Build Web" \
   "npx turbo build --filter=@vintage/web --force"
 
 # ── security-audit job ────────────────────────────────────────────────
-run_step "Security audit (high gate, CI launch gate)" \
-  "npm audit --audit-level=high"
+run_step "Security audit (reachability gate, CI launch gate)" \
+  "npm run audit:gate"
 
 # ── optional: Web E2E smoke tests (Playwright) ─────────────────────────
 # Skipped by default because it needs the Chromium binary
