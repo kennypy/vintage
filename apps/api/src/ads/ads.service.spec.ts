@@ -6,7 +6,12 @@ import { BotDetectionService } from './bot-detection.service';
 
 const mockPrisma = {
   adCampaign: { findMany: jest.fn(), update: jest.fn() },
-  adImpression: { create: jest.fn(), count: jest.fn() },
+  adImpression: {
+    create: jest.fn(),
+    count: jest.fn(),
+    // Billing-window lookup; null = this serve is billable.
+    findFirst: jest.fn().mockResolvedValue(null),
+  },
   adClick: { create: jest.fn(), count: jest.fn() },
   adCreative: { findUnique: jest.fn() },
   userAdProfile: { findUnique: jest.fn() },
@@ -30,6 +35,9 @@ describe('AdsService', () => {
     }).compile();
     service = module.get<AdsService>(AdsService);
     jest.clearAllMocks();
+    // clearAllMocks drops the inline resolved value above; restore the
+    // "clean slate" default for the billing-window lookup.
+    mockPrisma.adImpression.findFirst.mockResolvedValue(null);
   });
 
   describe('serveAd', () => {
@@ -72,6 +80,48 @@ describe('AdsService', () => {
       );
       expect(result?.creative.id).toBe('cr1');
       expect(result?.impressionId).toBe('imp-1');
+      // First serve in the window is billable.
+      expect(mockPrisma.adCampaign.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { spentBrl: { increment: 5.0 / 1000 } },
+        }),
+      );
+    });
+
+    it('does NOT debit the advertiser again inside the billing window', async () => {
+      const fakeCampaign = {
+        id: 'c1',
+        budgetBrl: 100,
+        spentBrl: 0,
+        cpmBrl: 5.0,
+        targetAudience: {},
+        creatives: [
+          {
+            id: 'cr1',
+            title: 'Ad',
+            body: null,
+            imageUrl: null,
+            ctaText: null,
+            destinationUrl: 'https://example.com',
+            format: 'BANNER',
+          },
+        ],
+      };
+      mockPrisma.adCampaign.findMany.mockResolvedValue([fakeCampaign]);
+      mockPrisma.adImpression.create.mockResolvedValue({ id: 'imp-2' });
+      // Same client already had a billable impression for this campaign.
+      mockPrisma.adImpression.findFirst.mockResolvedValue({ id: 'imp-1' });
+
+      const result = await service.serveAd(
+        { placement: 'dashboard' as any, sessionId: 'sess-1' },
+        null,
+        '1.2.3.4',
+      );
+
+      // Ad is still served — it just isn't billed. Looping this endpoint
+      // used to burn the highest-CPM advertiser's budget to zero.
+      expect(result?.creative.id).toBe('cr1');
+      expect(mockPrisma.adCampaign.update).not.toHaveBeenCalled();
     });
   });
 

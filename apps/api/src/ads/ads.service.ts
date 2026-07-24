@@ -10,6 +10,25 @@ import { RecordClickDto } from './dto/record-click.dto';
 // CPM cost deducted per impression = budgetBrl * cpmBrl / 1000
 const IMPRESSION_DEBIT_DIVISOR = 1000;
 
+/**
+ * One BILLABLE impression per (campaign, client) inside this window.
+ *
+ * POST /ads/serve carries no guard and is CSRF-excluded, and its sole
+ * side effect is a monetary increment of a third party's `spentBrl`.
+ * Without this, anyone can loop the endpoint and burn an advertiser's
+ * budget down until `spentBrl >= budgetBrl` drops them from rotation —
+ * and because the anonymous branch sorts by DESCENDING cpmBrl, the
+ * highest-paying advertiser is drained first, automatically.
+ *
+ * NOTE: this bounds a single client's spend rate; it does NOT prove the
+ * creative was rendered. A distributed attacker rotating IPs still
+ * inflates spend. Closing that needs a short-lived server-signed,
+ * single-use placement token issued before the debit — a change to the
+ * ad-serving contract with the clients, so it is deliberately NOT done
+ * here. Tracked as the residual on finding F21.
+ */
+const IMPRESSION_DEDUPE_WINDOW_MS = 60 * 1000;
+
 @Injectable()
 export class AdsService {
   private readonly logger = new Logger(AdsService.name);
@@ -77,8 +96,20 @@ export class AdsService {
       bestCreative = sorted[0].creatives[0];
     }
 
-    // Record impression
-    const costBrl = Number(bestCampaign.cpmBrl) / IMPRESSION_DEBIT_DIVISOR;
+    // Debit at most once per (campaign, client) per window. Repeat serves
+    // inside the window still return an ad — they just aren't billable.
+    const recentImpression = await this.prisma.adImpression.findFirst({
+      where: {
+        campaignId: bestCampaign.id,
+        ipHash,
+        createdAt: { gt: new Date(now.getTime() - IMPRESSION_DEDUPE_WINDOW_MS) },
+      },
+      select: { id: true },
+    });
+    const billable = !recentImpression;
+    const costBrl = billable
+      ? Number(bestCampaign.cpmBrl) / IMPRESSION_DEBIT_DIVISOR
+      : 0;
 
     const impression = await this.prisma.adImpression.create({
       data: {
@@ -94,14 +125,16 @@ export class AdsService {
     });
 
     // Deduct cost from campaign budget (best-effort, non-blocking)
-    this.prisma.adCampaign
-      .update({
-        where: { id: bestCampaign.id },
-        data: { spentBrl: { increment: costBrl } },
-      })
-      .catch((err: unknown) =>
-        this.logger.error('Budget debit failed', String(err).slice(0, 200)),
-      );
+    if (billable) {
+      this.prisma.adCampaign
+        .update({
+          where: { id: bestCampaign.id },
+          data: { spentBrl: { increment: costBrl } },
+        })
+        .catch((err: unknown) =>
+          this.logger.error('Budget debit failed', String(err).slice(0, 200)),
+        );
+    }
 
     return {
       impressionId: impression.id,

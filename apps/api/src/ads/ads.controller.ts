@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -40,7 +41,13 @@ export class AdsController {
 
   // POST /api/v1/ads/serve — returns best creative for this user/placement
   // Auth is optional: anonymous users get non-personalised ads
+  //
+  // Tighter than the global 60/min: this endpoint spends an advertiser's
+  // money, and the tracker keys on IP here because req.user is null for
+  // the anonymous path. The per-(campaign, client) billing window in
+  // AdsService is the real control; this just narrows the funnel.
   @Post('serve')
+  @Throttle({ default: { limit: 20, ttl: 60 * 1000 } })
   @HttpCode(HttpStatus.OK)
   serveAd(
     @Body() dto: ServeAdDto,
