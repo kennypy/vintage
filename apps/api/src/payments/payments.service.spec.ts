@@ -16,6 +16,9 @@ const mockMercadoPago = {
   verifyWebhookSignature: jest.fn(),
   getPaymentStatus: jest.fn(),
   refundPayment: jest.fn(),
+  // Reconcile primitives: search = discovery, getPaymentDetail = authority.
+  searchPaymentsByExternalReference: jest.fn().mockResolvedValue([]),
+  getPaymentDetail: jest.fn(),
 };
 
 const mockConfigService = {
@@ -53,6 +56,7 @@ const mockPrisma: Record<string, any> = {
     count: jest.fn().mockResolvedValue(0),
     update: jest.fn(),
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    findFirst: jest.fn().mockResolvedValue(null),
   },
   listing: {
     update: jest.fn(),
@@ -361,6 +365,218 @@ describe('PaymentsService', () => {
       await service.refundPayment('pay-1');
 
       expect(mockMercadoPago.refundPayment).toHaveBeenCalledWith('pay-1', undefined);
+    });
+  });
+
+  // ── F17: at most ONE live instrument per order ────────────────────────
+  //
+  // These assert the INVARIANT, not the stall window or key equality.
+  // Safety comes from never speculatively minting: a stalled reservation
+  // triggers reconciliation against MP, and only a provably-dead result
+  // clears the way to create a new instrument.
+  describe('F17 — reconcile before mint', () => {
+    const ORDER = 'order-1';
+    const BUYER = 'buyer-1';
+
+    /** A stalled reservation exists; nothing else is in flight. */
+    const withStalledReservation = () => {
+      mockPrisma.payment.count.mockImplementation(({ where }: any) => {
+        // reconcileBeforeMint: PENDING with no providerPaymentId
+        if (where?.providerPaymentId === null) return Promise.resolve(1);
+        // reserveAttempt in-flight gate
+        if (where?.status === 'PENDING') return Promise.resolve(0);
+        // attemptNumber
+        return Promise.resolve(0);
+      });
+      mockPrisma.order.findUnique.mockResolvedValue({
+        id: ORDER,
+        buyerId: BUYER,
+        status: 'PENDING',
+        paymentId: null,
+        totalBrl: new Decimal(100),
+      });
+      mockPrisma.order.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.payment.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.payment.findFirst.mockResolvedValue({ id: 'payment-stalled' });
+      mockPrisma.payment.create.mockResolvedValue({ id: 'payment-new' });
+    };
+
+    const detail = (over: Record<string, unknown> = {}) => ({
+      id: 'mp-existing',
+      status: 'pending',
+      statusDetail: 'pending_waiting_transfer',
+      externalReference: ORDER,
+      amountBrl: 100,
+      qrCode: 'QR-CODE-STRING',
+      qrCodeBase64: 'BASE64',
+      expiresAt: '2026-07-24T20:00:00.000+00:00',
+      ...over,
+    });
+
+    it('a timed-out-then-reconciled attempt yields at most one live instrument', async () => {
+      withStalledReservation();
+      // The provider DID create an instrument before we stopped waiting.
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+        { id: 'mp-existing', status: 'pending', statusDetail: null },
+      ]);
+      mockMercadoPago.getPaymentDetail.mockResolvedValue(detail());
+
+      const result = await service.createPixPayment(ORDER, BUYER);
+
+      // The invariant: no second instrument was minted.
+      expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+      expect(result.id).toBe('mp-existing');
+      // Authority was consulted, not just the eventually-consistent index.
+      expect(mockMercadoPago.getPaymentDetail).toHaveBeenCalledWith('mp-existing');
+    });
+
+    it('live instrument found → zero new POSTs, existing one adopted', async () => {
+      withStalledReservation();
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+        { id: 'mp-existing', status: 'in_process', statusDetail: null },
+      ]);
+      mockMercadoPago.getPaymentDetail.mockResolvedValue(
+        detail({ status: 'in_process' }),
+      );
+
+      const result = await service.createPixPayment(ORDER, BUYER);
+
+      expect(mockMercadoPago.createPixPayment).toHaveBeenCalledTimes(0);
+      expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+      expect(result.qrCode).toBe('QR-CODE-STRING');
+    });
+
+    it('an approved instrument is adopted too — never minted over', async () => {
+      withStalledReservation();
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+        { id: 'mp-existing', status: 'approved', statusDetail: 'accredited' },
+      ]);
+      mockMercadoPago.getPaymentDetail.mockResolvedValue(
+        detail({ status: 'approved', statusDetail: 'accredited' }),
+      );
+
+      await service.createPixPayment(ORDER, BUYER);
+
+      expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+    });
+
+    it('all instruments failure-terminal → exactly one new POST (expiry re-pay)', async () => {
+      withStalledReservation();
+      // Expired PIX: status cancelled + status_detail expired.
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+        { id: 'mp-dead', status: 'cancelled', statusDetail: 'expired' },
+      ]);
+      mockMercadoPago.getPaymentDetail.mockResolvedValue(
+        detail({ id: 'mp-dead', status: 'cancelled', statusDetail: 'expired' }),
+      );
+      mockMercadoPago.createPixPayment.mockResolvedValue({
+        id: 'mp-fresh',
+        orderId: ORDER,
+        method: 'pix',
+        amountBrl: 100,
+        qrCode: 'NEW-QR',
+        qrCodeBase64: '',
+        pixCopiaECola: 'NEW-QR',
+        expiresAt: '2026-07-24T21:00:00.000+00:00',
+        status: 'pending',
+      });
+
+      const result = await service.createPixPayment(ORDER, BUYER);
+
+      expect(mockMercadoPago.createPixPayment).toHaveBeenCalledTimes(1);
+      expect(result.id).toBe('mp-fresh');
+    });
+
+    it('empty search is AMBIGUOUS → HOLD, never mint', async () => {
+      withStalledReservation();
+      // Eventually-consistent index: empty != no instrument.
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([]);
+
+      await expect(service.createPixPayment(ORDER, BUYER)).rejects.toThrow(
+        /não foi possível confirmar/i,
+      );
+      expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+    });
+
+    it('a status outside the known Payments-API sets → HOLD, never mint', async () => {
+      withStalledReservation();
+      mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+        { id: 'mp-weird', status: 'expired', statusDetail: null },
+      ]);
+      // `expired` is an ORDERS-API status; it must not classify as terminal.
+      mockMercadoPago.getPaymentDetail.mockResolvedValue(
+        detail({ id: 'mp-weird', status: 'expired' }),
+      );
+
+      await expect(service.createPixPayment(ORDER, BUYER)).rejects.toThrow(
+        /não foi possível confirmar/i,
+      );
+      expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+    });
+
+    it('no stalled reservation → reconcile is skipped entirely', async () => {
+      withStalledReservation();
+      mockPrisma.payment.count.mockImplementation(({ where }: any) => {
+        if (where?.providerPaymentId === null) return Promise.resolve(0);
+        if (where?.status === 'PENDING') return Promise.resolve(0);
+        return Promise.resolve(0);
+      });
+      mockMercadoPago.createPixPayment.mockResolvedValue({
+        id: 'mp-first', orderId: ORDER, method: 'pix', amountBrl: 100,
+        qrCode: 'Q', qrCodeBase64: '', pixCopiaECola: 'Q',
+        expiresAt: '', status: 'pending',
+      });
+
+      await service.createPixPayment(ORDER, BUYER);
+
+      expect(mockMercadoPago.searchPaymentsByExternalReference).not.toHaveBeenCalled();
+      expect(mockMercadoPago.createPixPayment).toHaveBeenCalledTimes(1);
+    });
+
+    describe('regenerate (expiry re-pay)', () => {
+      it('against a LIVE instrument → zero new POSTs, returns existing', async () => {
+        withStalledReservation();
+        mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+          { id: 'mp-existing', status: 'pending', statusDetail: null },
+        ]);
+        mockMercadoPago.getPaymentDetail.mockResolvedValue(detail());
+
+        const result = await service.regeneratePixPayment(ORDER, BUYER);
+
+        // A regenerate button that mints without reconciling IS the
+        // double-charge this whole unit exists to prevent.
+        expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+        expect(result.id).toBe('mp-existing');
+        expect(result.qrCode).toBe('QR-CODE-STRING');
+      });
+
+      it('against an EXPIRED instrument → exactly one new POST', async () => {
+        withStalledReservation();
+        mockMercadoPago.searchPaymentsByExternalReference.mockResolvedValue([
+          { id: 'mp-dead', status: 'cancelled', statusDetail: 'expired' },
+        ]);
+        mockMercadoPago.getPaymentDetail.mockResolvedValue(
+          detail({ id: 'mp-dead', status: 'cancelled', statusDetail: 'expired' }),
+        );
+        mockMercadoPago.createPixPayment.mockResolvedValue({
+          id: 'mp-fresh', orderId: ORDER, method: 'pix', amountBrl: 100,
+          qrCode: 'NEW-QR', qrCodeBase64: '', pixCopiaECola: 'NEW-QR',
+          expiresAt: '', status: 'pending',
+        });
+
+        const result = await service.regeneratePixPayment(ORDER, BUYER);
+
+        expect(mockMercadoPago.createPixPayment).toHaveBeenCalledTimes(1);
+        expect(result.id).toBe('mp-fresh');
+      });
+
+      it('refuses when another buyer asks', async () => {
+        withStalledReservation();
+        await expect(
+          service.regeneratePixPayment(ORDER, 'someone-else'),
+        ).rejects.toThrow(/acesso negado/i);
+        expect(mockMercadoPago.createPixPayment).not.toHaveBeenCalled();
+      });
     });
   });
 });
