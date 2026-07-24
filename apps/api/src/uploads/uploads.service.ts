@@ -13,6 +13,17 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+// sharp 0.35 ships DUAL type declarations and a package `exports` map:
+//   require -> dist/index.d.cts  (`export = sharp`, callable — what we load)
+//   import  -> dist/index.d.mts  (namespace + default, NOT callable)
+// Our tsconfig uses the default node10 module resolution, which ignores
+// `exports` and picks the `types` field — the .mts one — so `sharp(buf)`
+// failed to typecheck (TS2349) even though the CommonJS module we actually
+// require IS the callable function. Switching to moduleResolution node16
+// would force module:Node16 across the whole Nest build, so instead
+// apps/api/tsconfig.json maps "sharp" straight at the require-side
+// declaration. Keep `import * as` here: under esModuleInterop=false that
+// emits a plain require(), which is exactly what the .d.cts describes.
 import * as sharp from 'sharp';
 import {
   ImageAnalysisService,
