@@ -853,6 +853,16 @@ export class ListingsService {
     if (!listing) throw new NotFoundException('Anúncio não encontrado');
     if (listing.sellerId !== sellerId) throw new ForbiddenException('Acesso negado');
 
+    // Both URLs are client-supplied and are served verbatim to every
+    // viewer of the public GET /listings/:id. Without this they accepted
+    // any string — `javascript:`, `data:`, or an attacker-controlled host
+    // — while every other client-supplied media URL (listing imageUrls,
+    // authenticity proofs) already goes through the same allowlist.
+    validateImageUrl(videoUrl, this.allowedImageHosts);
+    if (thumbnailUrl) {
+      validateImageUrl(thumbnailUrl, this.allowedImageHosts);
+    }
+
     if (durationSeconds !== undefined && durationSeconds > 30) {
       throw new BadRequestException('O vídeo não pode ter mais de 30 segundos');
     }

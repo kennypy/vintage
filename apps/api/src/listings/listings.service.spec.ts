@@ -29,6 +29,7 @@ const mockPrisma = {
     count: jest.fn(),
   },
   listingImage: { deleteMany: jest.fn() },
+  listingVideo: { upsert: jest.fn(), deleteMany: jest.fn() },
   favorite: {
     findUnique: jest.fn(),
     create: jest.fn(),
@@ -566,6 +567,64 @@ describe('ListingsService', () => {
           status: { notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED'] },
         },
       });
+    });
+  });
+
+  describe('setListingVideo — URL allowlist', () => {
+    const ownListing = { id: 'listing-1', sellerId: 'seller-1', status: 'ACTIVE' };
+
+    beforeEach(() => {
+      mockPrisma.listing.findUnique.mockResolvedValue(ownListing);
+      mockPrisma.listingVideo.upsert.mockResolvedValue({ id: 'video-1' });
+    });
+
+    it('accepts a video URL on the configured allowlist', async () => {
+      await service.setListingVideo(
+        'listing-1',
+        'seller-1',
+        'https://img.example.com/videos/clip.mp4',
+      );
+      expect(mockPrisma.listingVideo.upsert).toHaveBeenCalled();
+    });
+
+    it('rejects a javascript: video URL', async () => {
+      await expect(
+        service.setListingVideo('listing-1', 'seller-1', 'javascript:alert(1)'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.listingVideo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects a video URL on an attacker-controlled host', async () => {
+      await expect(
+        service.setListingVideo(
+          'listing-1',
+          'seller-1',
+          'https://attacker.tld/beacon.mp4',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.listingVideo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rejects an off-allowlist thumbnailUrl even when the video URL is valid', async () => {
+      await expect(
+        service.setListingVideo(
+          'listing-1',
+          'seller-1',
+          'https://img.example.com/videos/clip.mp4',
+          'https://attacker.tld/beacon.gif',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.listingVideo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('still enforces ownership before validating the URL', async () => {
+      await expect(
+        service.setListingVideo(
+          'listing-1',
+          'someone-else',
+          'https://img.example.com/videos/clip.mp4',
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });
