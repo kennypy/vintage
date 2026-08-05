@@ -38,7 +38,7 @@
     "form-data": "^4.0.6",
     "multer": "^2.2.0",
     "nodemailer": "^9.0.3",
-    "undici": "^6.27.0",
+    "undici": "^6.28.0",
     "ws": "^8.21.0",
     "metro": { "ws": "^7.5.11" },
     "react-devtools-core": { "ws": "^7.5.11" },
